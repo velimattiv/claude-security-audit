@@ -1,0 +1,86 @@
+# /security-audit — container-isolated execution image
+#
+# Run the scanner bundle inside an ephemeral container so the tools
+# (and their CVE databases, cached rules, version pins) never land on
+# the user's host filesystem. The container mounts the target repo
+# read-only and writes artifacts to a bind-mounted .claude-audit/
+# directory.
+#
+# Wrapper: scripts/run-audit-in-container.sh
+#
+# Design principles:
+#   - No build-time secrets. Runtime secrets (ANTHROPIC_API_KEY) are
+#     passed as env, never baked in.
+#   - All binaries pinned by release version in scripts/install-scanners.sh;
+#     this image simply invokes that script at build time so container
+#     and host installs use the same checksum-verified binaries.
+#   - Non-root user for the scanner runs; the root layer only installs
+#     tools, then drops privileges.
+#   - Minimal surface: no SSH daemon, no cron, no shell network tools
+#     beyond what the scanner installer needs.
+#
+# Size target: ≤500 MB compressed. Base image is debian-slim plus the
+# six scanner binaries.
+
+FROM debian:bookworm-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Runtime dependencies: curl for scanner installer, git for the audit
+# target, python3 + pip for semgrep, jq for SARIF post-process, ca-certs
+# for TLS.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl \
+      wget \
+      git \
+      jq \
+      ca-certificates \
+      python3 \
+      python3-pip \
+      python3-venv \
+      tar \
+      gzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root audit user with a home dir for semgrep's pip --user install.
+RUN useradd --create-home --shell /bin/bash audit
+USER audit
+WORKDIR /home/audit
+
+# Ensure the user-level pip bin is on PATH for semgrep.
+ENV PATH="/home/audit/.local/bin:${PATH}"
+
+# Install the scanner bundle using the skill's own installer. Uses the
+# same checksum verification as a host install.
+USER root
+COPY scripts/install-scanners.sh /usr/local/bin/install-scanners.sh
+RUN chmod +x /usr/local/bin/install-scanners.sh
+USER audit
+
+RUN /usr/local/bin/install-scanners.sh
+
+# Copy the skill itself into the image so sub-agents can read its
+# procedure files. The skill is the authoritative spec; we bake a
+# specific version into the image and tag the image accordingly.
+USER root
+COPY skills/ /opt/security-audit/skills/
+COPY scripts/validate-findings.py /opt/security-audit/scripts/validate-findings.py
+COPY scripts/verify-unique-findings.py /opt/security-audit/scripts/verify-unique-findings.py
+RUN chmod +x /opt/security-audit/scripts/*.py
+USER audit
+
+# Mount points (declared for documentation; actual mounts come from the
+# wrapper script at run time):
+#
+#   /target         — target repo (read-only bind mount)
+#   /target/.claude-audit  — artifacts (read-write bind mount; host-owned)
+#
+VOLUME ["/target", "/target/.claude-audit"]
+
+WORKDIR /target
+
+# Default entrypoint: run the audit workflow using the skill copy baked
+# into the image. The wrapper script passes the mode / scope / categories
+# args through.
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["exec bash"]
