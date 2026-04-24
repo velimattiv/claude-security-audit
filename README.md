@@ -67,7 +67,10 @@ cp -r /tmp/csa/skills/security-audit .claude/skills/
 
 ## Scanner prerequisites
 
-Install the Phase 4 scanner bundle:
+Two install paths. Pick based on whether you want the six scanners on
+your host or isolated in a container.
+
+### Path A — host install (simple, default)
 
 ```bash
 scripts/install-scanners.sh            # install required set
@@ -82,9 +85,49 @@ Supported hosts:
 - **Fedora** (dnf)
 - **Arch** (pacman)
 
-Windows is **not** supported — run inside WSL or a container. A container
-image is an **optional** convenience, not a prerequisite — the skill runs on
-any host with Claude Code plus the scanner bundle.
+Windows is **not** supported — run inside WSL or Path B. The installer
+**verifies published checksums** for every downloaded binary (v2.0.1+);
+mismatches abort the install.
+
+### Path B — container-isolated execution (cleaner, recommended if you don't want scanner binaries on your host)
+
+The skill's six scanners are themselves non-trivial dependencies (Go binaries,
+Python packages, Rust tools) and carry their own CVE history. For hosts
+where globally installing them is undesirable — production servers,
+shared dev environments, audits of untrusted code — run the audit
+inside an ephemeral OCI container:
+
+```bash
+# One-time: build the audit image (≈500 MB; pinned scanner versions)
+scripts/run-audit-in-container.sh --build
+
+# Subsequent runs: read-only mount of the target, writable overlay for
+# artifacts; host filesystem untouched
+scripts/run-audit-in-container.sh "mode: delta"
+```
+
+The wrapper uses Podman (preferred, rootless) or Docker — whichever
+you have. `Dockerfile.audit` enforces `--cap-drop=ALL`,
+`--security-opt=no-new-privileges`, `--read-only` root filesystem, and
+runs as a non-root `audit` user. The target repo is bind-mounted
+read-only; only `.claude-audit/` is writable.
+
+### Required scanner bundle (both paths)
+
+- **semgrep** — polyglot SAST, community ruleset.
+- **osv-scanner** — SCA across all manifest ecosystems.
+- **gitleaks** — secrets in working tree + git history.
+- **trufflehog** — verified-secret sweep.
+- **trivy** — IaC + Dockerfile + vulns + SBOM.
+- **hadolint** — Dockerfile lint.
+
+Conditional adds (installed on demand by context): brakeman (Rails), checkov
+(Terraform-heavy), kube-linter (Kubernetes), govulncheck (Go reachability),
+psalm (PHP taint), zizmor (GitHub Actions).
+
+If any scanner is missing, the skill prints a degraded-mode warning and
+continues with whatever is installed. **Never hard-fails** for a missing
+scanner.
 
 Required scanner bundle (six, all SARIF-emitting, free / open-source):
 

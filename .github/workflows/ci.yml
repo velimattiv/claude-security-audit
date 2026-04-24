@@ -1,0 +1,64 @@
+# CI for the /security-audit skill itself — not for projects that use it.
+# Runs the repo-wide validation suite on push + PR. Catches schema drift,
+# broken cross-references, stale version pins, and script syntax errors
+# before they ship.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install validator dependencies
+        run: |
+          pip install jsonschema==4.22.0
+
+      - name: Install jq
+        run: |
+          # jq is pre-installed on ubuntu-latest, but be explicit
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
+
+      - name: Run validation suite
+        run: |
+          scripts/validate-schemas.sh
+
+      - name: Validate findings fixtures
+        run: |
+          for fixture in tests/fixtures/*.jsonl; do
+            [ -f "$fixture" ] || continue
+            python3 scripts/validate-findings.py \
+              --schema skills/security-audit/lib/finding-schema.json \
+              "$fixture"
+          done
+
+      - name: Lint shell scripts
+        run: |
+          for f in scripts/*.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "::notice::Validation suite complete."
+          echo "This CI runs repo-level validation only. To audit your PROJECT"
+          echo "with /security-audit, see docs/ci-examples/github-actions/security-audit.yml"
