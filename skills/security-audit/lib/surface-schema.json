@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/velimattiv/claude-security-audit/lib/surface-schema.json",
+  "title": "Phase-02 Attack Surface Inventory",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "skill_version",
+    "audit_id",
+    "generated_at",
+    "by_category",
+    "flags_summary",
+    "surfaces"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "skill_version": { "type": "string" },
+    "audit_id": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "by_category": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "flags_summary": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "partition",
+          "category",
+          "path",
+          "file",
+          "line_range",
+          "handler_hash",
+          "auth_required",
+          "auth_middleware",
+          "roles_required",
+          "params",
+          "trust_zone",
+          "data_ops",
+          "framework"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "partition": { "type": "string" },
+          "category": {
+            "enum": [
+              "http",
+              "grpc",
+              "graphql",
+              "websocket",
+              "sse",
+              "trpc",
+              "queue_consumer",
+              "scheduler",
+              "webhook",
+              "file_upload",
+              "serverless",
+              "mobile_ipc",
+              "desktop_ipc",
+              "admin_debug",
+              "cli_admin",
+              "outbound_tls"
+            ]
+          },
+          "method": { "type": ["string", "null"] },
+          "path": { "type": "string" },
+          "file": { "type": "string" },
+          "line_range": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 1 },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "handler_hash": { "type": ["string", "null"] },
+          "auth_required": { "enum": [true, false, "unknown"] },
+          "auth_middleware": { "type": "array", "items": { "type": "string" } },
+          "roles_required": { "type": "array", "items": { "type": "string" } },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "source", "sensitive"],
+              "properties": {
+                "name": { "type": "string" },
+                "source": { "enum": ["path", "query", "body", "header", "cookie", "env", "message"] },
+                "sensitive": { "type": "boolean" }
+              }
+            }
+          },
+          "trust_zone": { "enum": ["public", "internal", "admin", "dev", "unknown"] },
+          "data_ops": {
+            "type": "array",
+            "items": { "enum": ["read", "write", "delete", "exec", "none"] }
+          },
+          "framework": { "type": "string" },
+          "flags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "notes": { "type": "string", "maxLength": 200 }
+        }
+      }
+    }
+  }
+}
