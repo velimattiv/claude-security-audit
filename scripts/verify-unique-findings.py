@@ -31,7 +31,6 @@ import argparse
 import glob
 import json
 import sys
-from pathlib import Path
 
 
 def load_phase5(pattern: str) -> list[dict]:

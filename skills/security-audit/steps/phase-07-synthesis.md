@@ -245,3 +245,18 @@ Echo the path to the user.
   report. Keep executive summary + top risks in the main file.
 - **SARIF validation failure.** Log the JSON error, keep the raw output,
   write a `.json` version instead of `.sarif`; note in the report.
+
+---
+
+## Verify before exit (MANDATORY)
+
+Before declaring this phase complete and proceeding, run:
+
+```bash
+test -f .claude-audit/current/findings.sarif # (plus phase-07-report.md, findings.cyclonedx.json) \
+  && test -f .claude-audit/current/phase-07.done \
+  && echo "phase-07 verified" \
+  || { echo "phase-07 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+```
+
+Do not advance to the next phase until this check prints "phase-07 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.

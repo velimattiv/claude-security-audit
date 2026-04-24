@@ -182,3 +182,18 @@ Report to the user:
 - **Overlapping globs** — if two partitions' `paths_included` overlap, the
   earlier (higher-risk) partition wins for downstream phase 5; record the
   overlap in `notes[]` on both partitions.
+
+---
+
+## Verify before exit (MANDATORY)
+
+Before declaring this phase complete and proceeding, run:
+
+```bash
+test -f .claude-audit/current/partitions.json  \
+  && test -f .claude-audit/current/phase-01.done \
+  && echo "phase-01 verified" \
+  || { echo "phase-01 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+```
+
+Do not advance to the next phase until this check prints "phase-01 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.

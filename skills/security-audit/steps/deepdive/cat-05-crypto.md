@@ -44,9 +44,13 @@ MessageDigest\.getInstance\s*\(\s*"(MD5|SHA-?1)"
 Digest::MD5|Digest::SHA1
 ```
 
-Context: look at the call site. If the hash value is used for
-authentication, password comparison, or signature → **HIGH** / CWE-327 /
-CWE-328.
+Context: look at the call site.
+- If the hash value is used for **password storage / comparison** →
+  **HIGH** / **CWE-916** (Use of Password Hash With Insufficient
+  Computational Effort — more precise than the generic weak-hash codes).
+- If used for other security-sensitive operations (signatures, token
+  authentication) → **HIGH** / CWE-327 (broken algorithm) + CWE-328
+  (weak hash).
 
 Non-security uses (e.g., ETag generation, cache key derivation) → INFO
 only.
