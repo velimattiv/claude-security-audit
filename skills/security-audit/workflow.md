@@ -23,12 +23,62 @@ The user may pass arguments after `/security-audit`:
 | `/security-audit` | Full audit, default mode. |
 | `/security-audit mode: delta` | Delta mode — requires `docs/security-audit-baseline.json`. |
 | `/security-audit scope: "services/api"` | Scope all phases to the path prefix. |
-| `/security-audit categories: "crypto,mitm,secrets"` | Run only the named deep-dive categories. |
+| `/security-audit categories: "crypto,mitm,secret_sprawl"` | Run only the named deep-dive categories. |
 | `/security-audit mode: report` | Re-emit the report from existing `.claude-audit/current/` artifacts. |
-| `/security-audit top_n: 12` | Override the top-N partitions that get full-depth deep dives. |
+| `/security-audit top_n: 12` | Override the top-N partitions that get full-depth deep dives (default: 8). |
 
 Canonical form is `key: value` separated by spaces. If the user's phrasing is
 ambiguous, ask once for clarification before starting — do not guess.
+
+### Argument parsing
+
+At preflight, parse each `key: value` pair into an invocation dict:
+
+```python
+invocation = {
+  "mode":      "full",     # full|delta|scoped|focused|report
+  "scope":     None,       # string | None
+  "categories": None,      # list[str] | None
+  "top_n":     8,          # int; override for partition deep-dive cap
+}
+```
+
+Unknown keys → warn and stop (do not silently ignore). The parsed
+`top_n` is passed to `steps/phase-01-partition.md §1.4`. The parsed
+`categories` list is passed to `steps/phase-05-deepdives.md §5.2` to
+gate the fan-out.
+
+### Category-name aliases
+
+The following short aliases are accepted as equivalents to the internal
+category names (applied during `categories:` parsing):
+
+| Alias | Canonical |
+|---|---|
+| `auth` | `auth` |
+| `authz` | `auth` |
+| `idor` | `idor` |
+| `bola` | `idor` |
+| `token` | `token_scope` |
+| `tokens` | `token_scope` |
+| `scope` | `token_scope` |
+| `mitm` | `mitm` |
+| `transport` | `mitm` |
+| `tls` | `mitm` |
+| `crypto` | `crypto` |
+| `cryptography` | `crypto` |
+| `secrets` | `secret_sprawl` |
+| `secret` | `secret_sprawl` |
+| `secret_sprawl` | `secret_sprawl` |
+| `deploy` | `deployment` |
+| `deployment` | `deployment` |
+| `injection` | `injection` |
+| `ssrf` | `injection` |
+| `deserialize` | `injection` |
+| `llm` | `llm` |
+| `ai` | `llm` |
+
+Aliases are case-insensitive. Unknown tokens → warn and stop.
 
 ## 1. Preflight
 
@@ -90,12 +140,54 @@ sufficient to skip the phase.
 Run phases 0→8 in order. Fan-out Phase 5 per §5 below.
 
 ### delta
-1. Require `docs/security-audit-baseline.json`. If missing or staler than 90
-   days, print a clear message and fall back to `full` after user confirmation.
-2. Compute `ChangedFiles = git diff --name-only <baseline.git_head> HEAD`.
-3. Apply invalidation rules from `docs/V2-SCOPE.md §5`.
-4. Re-run Phases 2-7 only for touched partitions.
-5. Carry forward non-touched findings with `source: baseline`.
+
+Delta mode prerequisites, enforced as a preflight gate (before Phase 0 runs):
+
+1. **Baseline presence.** `docs/security-audit-baseline.json` AND
+   `.claude-audit/baseline.json` must both exist. If either is missing,
+   abort with: *"Delta mode requires a baseline. Run `/security-audit`
+   in full mode first, then retry."*
+
+2. **Baseline age — MUST enforce in code, not prose.** Compute:
+   ```bash
+   created=$(jq -r .created_at .claude-audit/baseline.json)
+   age_days=$(python3 -c "
+   from datetime import datetime, timezone
+   d = datetime.fromisoformat('$created'.replace('Z','+00:00'))
+   print((datetime.now(timezone.utc) - d).days)
+   ")
+   if [ "$age_days" -gt 90 ]; then
+     # Warn; require explicit --force-stale-baseline to proceed.
+     # Without the flag, abort with a message citing created_at + age.
+     exit 1
+   fi
+   ```
+   The 90-day floor is a hard gate, not advisory. Ecosystem
+   vulnerability databases (OSV, semgrep rules, trivy DB) update
+   continuously; a baseline older than 90 days risks skipping newly-
+   published CVEs that a delta-mode run would silently carry over.
+
+3. **Baseline reachability.** Run `git merge-base --is-ancestor
+   <baseline.git_head> HEAD`. If non-zero, abort: the baseline's commit
+   is no longer in local history.
+
+4. **Changed-files enumeration.** `ChangedFiles = git diff --name-only
+   <baseline.git_head> HEAD`, filtered through `baseline.ignored`.
+
+5. Apply the invalidation algorithm in `lib/delta-mode.md` §2-3.
+
+6. Re-run Phases 2-7 only for touched partitions.
+
+7. Carry forward non-touched findings with `source: baseline`.
+
+8. Emit a **Delta Summary** preamble in the Phase 7 report showing:
+   baseline date, baseline commit SHA, current HEAD, changed-file count,
+   touched-partition count, carryover count, new-finding count,
+   fixed-since-baseline count.
+
+The user may override the staleness gate with `--force-stale-baseline`,
+in which case the skill records the override in `audit.log` and in the
+report's provenance section.
 
 ### scoped
 Narrow every phase's glob / Grep to the path prefix.
@@ -111,8 +203,16 @@ Skip Phases 0-6. Re-emit from existing `.claude-audit/current/` artifacts.
 
 For each top-N partition × each deep-dive category:
 - Spawn **one sub-agent** using the template at `templates/subagent-prompt.md`.
-- Model: `opus` (resolves to Claude Opus 4.7 in this distribution). **Never
-  downgrade** to Sonnet/Haiku.
+- Model: `opus`. **Never downgrade** to Sonnet/Haiku.
+- **Runtime-resolved model ID.** Claude Code routes `model: opus` to the
+  harness-appropriate variant. As of Claude Code v0.6.x, this resolves to
+  `claude-opus-4-7[1m]` (Opus 4.7 with the 1M-context window) — verified
+  by a self-report test in `docs/test-runs/1m-context-check-*.md`. Other
+  harnesses (Claude API direct, older Claude Code) may route differently;
+  the skill depends on Opus-tier model quality but does **not** hard-
+  require the 1M variant to function. Phases that would exceed a 200K
+  context (e.g., a partition over the 500K soft-ceiling) return
+  `needs_recursion` regardless of harness.
 - Concurrency cap: **8 sub-agents in flight** (configurable; raise only if
   the runtime handles it).
 - Per-subagent token budget: 500K soft / 800K hard raw code. A partition over

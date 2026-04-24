@@ -68,7 +68,24 @@ populate:
 - `sources[]` — at least one source (grep, scanner, manual, or subagent)
 
 Strongly encouraged: `suggested_fix`, `attack_scenario`, `surface_id`,
-`remediation_effort`.
+`remediation_effort`, `fingerprint` (stable across title drift; see
+`phase-07-synthesis.md §7.2`).
+
+**Enforcement (v2.0.1).** Every sub-agent MUST run the schema validator
+before emitting its RETURN SHAPE:
+
+```bash
+python3 scripts/validate-findings.py \
+    --schema skills/security-audit/lib/finding-schema.json \
+    .claude-audit/current/phase-05-<cat>-<partition>.jsonl
+```
+
+Exit 0 is required to proceed. On non-zero exit, the sub-agent fixes
+every reported issue and re-validates. The orchestrator's first
+post-sub-agent step is a second invocation of the validator — if the
+sub-agent skipped it or lied about passing, the orchestrator catches
+it and retries the sub-agent once. Second failure records a placeholder
+INFO-level finding and moves on.
 
 ## 5.4 — OWASP tagging
 

@@ -41,15 +41,22 @@ stale_partitions = set()  # partition.id that needs full re-run (not just touche
 
 ```
 for surface in baseline_full.surface:
-  if surface.file in changed_files:
+  # Check BOTH the registration site and the handler body file — a
+  # change to either can invalidate the surface. Without this, modular-
+  # routing frameworks (Express with `app.use('/x', require('./x'))`)
+  # silently escape the file-level rule.
+  if (surface.handler_file in changed_files
+      or surface.registration_file in changed_files
+      or surface.file in changed_files):            # v2.0.0 legacy alias
     stale_surfaces.add(surface.id)
-  elif surface.handler_hash != current_hash(surface.file, surface.line_range):
+  elif surface.handler_hash != current_hash(surface.handler_file, surface.line_range):
     stale_surfaces.add(surface.id)
 ```
 
 The `current_hash` re-parse uses the same procedure as Phase 2 /
-`lib/handler-hash.md` — normalize, hash, compare. If the body can't be
-re-located (file deleted / heavily renamed), treat as stale.
+`lib/handler-hash.md` — normalize, hash, compare, **against the handler
+body file**. If the body can't be re-located (file deleted / heavily
+renamed), treat as stale.
 
 #### 2b — Partition-level staleness (manifest / LOC threshold)
 

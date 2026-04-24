@@ -30,7 +30,14 @@ METHOD:
   3. Write findings as newline-delimited JSON (JSONL) to:
        .claude-audit/current/phase-{{NN}}-{{category}}-{{partition_id}}.jsonl
      Schema per finding: see lib/finding-schema.json.
-  4. Write the completion marker on success:
+  4. **Validate your JSONL output before exit:**
+       python3 scripts/validate-findings.py \
+         --schema skills/security-audit/lib/finding-schema.json \
+         .claude-audit/current/phase-{{NN}}-{{category}}-{{partition_id}}.jsonl
+     If exit code is non-zero, you MUST fix the invalid rows (missing
+     required fields, bad CWE format, etc.) and re-validate until clean.
+     Do not emit the RETURN SHAPE with an un-validated artifact.
+  5. Write the completion marker on success:
        .claude-audit/current/phase-{{NN}}-{{category}}-{{partition_id}}.done
 
 RETURN SHAPE (stdout, strictly one JSON object, no prose):

@@ -4,6 +4,10 @@
   "attribution": "CWE IDs and names are © MITRE Corporation (CC-BY); see https://cwe.mitre.org/about/termsofuse.html. This file reproduces names for the subset of CWEs most relevant to app-sec audits.",
   "mappings": {
     "CWE-20":   { "name": "Improper Input Validation",                 "category": "injection" },
+    "CWE-208":  { "name": "Observable Timing Discrepancy",             "category": "crypto" },
+    "CWE-215":  { "name": "Insertion of Sensitive Information Into Debugging Code", "category": "config" },
+    "CWE-598":  { "name": "Use of GET Request Method With Sensitive Query Strings","category": "token_scope" },
+    "CWE-1004": { "name": "Sensitive Cookie Without 'HttpOnly' Flag",  "category": "config" },
     "CWE-22":   { "name": "Path Traversal",                            "category": "injection" },
     "CWE-77":   { "name": "Command Injection",                         "category": "injection" },
     "CWE-78":   { "name": "OS Command Injection",                      "category": "injection" },

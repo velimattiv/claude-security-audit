@@ -42,13 +42,30 @@ Load every JSONL / JSON artifact into in-memory lists:
 ## 7.2 — Deduplicate
 
 Deduplication key: `(file, line, category, fingerprint)` where
-`fingerprint` is the first 12 chars of `sha1(title + file + line)`.
+`fingerprint` is the first 12 chars of
+`sha1(handler_file:line:cwe:category)`.
+
+**Why keyed on CWE + category, not title** (v2.0.1 correction): the
+sub-agent's finding `title` can drift between runs — a re-run that
+rephrases "Hard-coded JWT secret" to "Hard-coded RSA private key in
+lib/insecurity.ts" produces a different sha1 and the baseline's
+carryover misses it. Keying on the CWE + category class makes
+fingerprints stable across title drift while keeping file+line
+specificity. Two findings at the same file:line with the same CWE are
+semantically the same finding regardless of wording.
 
 Two findings with the same key:
-- Merge — keep the first, union their `sources[]`, set `confidence`
-  according to §7.3.
+- Merge — keep the one with the longest description (most detailed),
+  union their `sources[]`, set `confidence` according to §7.3.
 - Keep the higher severity.
 - Union their `owasp_ids[]`.
+
+**Stability guarantee.** A finding's fingerprint is reproducible given
+`(handler_file, line, cwe, category)`. Baseline carryover (Phase 8) and
+delta-mode invalidation (M6) both use this fingerprint. If the sub-
+agent emits a `fingerprint` field on the JSONL row, Phase 7 uses it
+verbatim; otherwise Phase 7 computes it. Either way the canonical
+formula is the one above.
 
 ## 7.3 — Cross-reference confidence
 
@@ -66,17 +83,29 @@ demote.
 
 ## 7.4 — Severity rubric (final)
 
-Severity was assigned per finding, but Phase 7 may adjust based on
-context signals:
+Severity was assigned per finding; Phase 7 may adjust based on context
+signals. **Cap promotions at one rung total**, not one rung per
+triggered rule — the v2.0.0 additive behavior over-promoted MEDIUM
+findings to CRITICAL under triple-triggering (public + CONFIRMED +
+write) with no human review.
 
-- **Surface trust zone** — a finding on a `public` partition surface
-  rises one severity level if not already CRITICAL. A finding on a `dev`
-  surface drops one level.
-- **Confirmation** — CONFIRMED findings rise one level if borderline.
-- **Surface `data_ops`** — findings on write/delete/exec surfaces rise
-  one level.
+**Rule (v2.0.1):**
 
-Do not let promotions exceed CRITICAL.
+1. Compute the promotion *triggers* for the finding:
+   - `public_zone`: surface trust_zone == "public"
+   - `confirmed`: confidence == "CONFIRMED"
+   - `write_data_op`: surface data_ops ∩ {write, delete, exec} ≠ ∅
+2. If **two or more** triggers fire, promote severity by exactly **one**
+   rung (LOW → MEDIUM → HIGH → CRITICAL). Never more than one.
+3. Symmetrically, a `dev` trust zone demotes by one rung (floor: INFO).
+4. Promotion and demotion cancel — if the finding is on a `dev` surface
+   with CONFIRMED + write triggers, the net is zero (no change).
+5. Never exceed CRITICAL.
+
+Rationale: the multi-trigger case is not evidence of *more* severity,
+it's evidence that the same underlying fact has cross-confirming
+context. A single promotion rung captures that without inflating the
+severity distribution.
 
 ## 7.5 — Unique-to-skill identification
 

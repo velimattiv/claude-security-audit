@@ -131,13 +131,19 @@ drivers.
 
 ## 1.4 — Deep-Dive Budget
 
-Sort partitions by `risk.score` descending. Apply the budget:
+Sort partitions by `risk.score` descending. Read the `top_n` value from
+the invocation dict (parsed per `workflow.md §0`). Default when
+unspecified: **8**.
 
-- Top `top_n` partitions (default 8; user may override via
-  `/security-audit top_n: N`) receive `depth: "full"`.
+- Top `top_n` partitions receive `depth: "full"`.
 - Remaining partitions receive `depth: "inventory-only"` — they still get
   Phase 2 surface enumeration, but Phase 5 deep-dive sub-agents do not spawn
   for them.
+
+If `top_n >= partitions.length`, every partition is at full depth; there
+is no inventory-only tail. Record the effective value in the emitted
+manifest's `deep_dive_budget.top_n` for downstream traceability — this
+field is the *effective* cap applied, not just the user's request.
 
 Emit:
 ```json

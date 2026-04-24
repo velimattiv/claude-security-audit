@@ -23,6 +23,11 @@
       "type": "string",
       "description": "Unique across the audit. Format: <partition>:<category>:<seq> (e.g., juice-shop:auth:0012)."
     },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{12}$",
+      "description": "Optional but strongly encouraged. Stable identifier for baseline carryover / delta-mode. Formula: first 12 chars of sha1(handler_file:line:cwe:category). If omitted, Phase 7 synthesis computes it. Replaces the title-based fingerprint from v2.0.0 which was unstable under title drift."
+    },
     "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
     "confidence": { "enum": ["CONFIRMED", "LIKELY", "POSSIBLE"] },
     "category": {
