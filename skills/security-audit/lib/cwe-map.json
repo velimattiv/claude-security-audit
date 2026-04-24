@@ -43,6 +43,7 @@
     "CWE-338":  { "name": "Use of Cryptographically Weak PRNG",        "category": "crypto" },
     "CWE-345":  { "name": "Insufficient Verification of Data Authenticity", "category": "auth" },
     "CWE-346":  { "name": "Origin Validation Error",                   "category": "auth" },
+    "CWE-347":  { "name": "Improper Verification of Cryptographic Signature", "category": "auth" },
     "CWE-352":  { "name": "Cross-Site Request Forgery (CSRF)",         "category": "auth" },
     "CWE-377":  { "name": "Insecure Temporary File",                   "category": "deployment" },
     "CWE-384":  { "name": "Session Fixation",                          "category": "auth" },

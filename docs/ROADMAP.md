@@ -7,6 +7,8 @@ underlying problem (highest impact first).
 ## ✅ Delivered in v2.0.1
 
 The following were on the v2.0.0 roadmap and have landed:
+- Local E2E test (`scripts/run-e2e-test.sh` + `tests/e2e/`) with pinned
+  Juice Shop @ v19.2.1 + 12-fixture capability gate.
 
 - Phase 2 handler-file vs registration-file tracking.
 - Fingerprint-off-CWE for baseline stability.
@@ -16,6 +18,33 @@ The following were on the v2.0.0 roadmap and have landed:
   run-audit-in-container.sh).
 - Installer checksum verification + stale-version warning.
 - JSON-schema enforcement on every sub-agent (scripts/validate-findings.py).
+
+## E2E coverage (net-new v2.1 candidates)
+
+### GHA-hosted E2E run
+
+**Problem.** Local-only E2E requires a developer on their host. Can't
+block a PR's CI on an E2E that only runs locally.
+
+**Blockers.** (1) Claude Max auth is OAuth-based; fresh CI runners have
+no claude.ai session. (2) Pay-per-token API key for CI means a dedicated
+key, separately billed. (3) Headless OAuth-for-CI via Claude Code is
+not documented / verified.
+
+**Fix.** Either: (a) provision a dedicated API key + wire
+`ANTHROPIC_API_KEY_E2E` as a GHA secret, or (b) verify Claude Code
+supports OAuth for headless use. Decide + implement.
+
+### Second E2E target — polyglot coverage
+
+**Problem.** Juice Shop is JS/TS/Express only. The current fixture list
+doesn't exercise `deployment` (v19.2.1's Dockerfile is hardened),
+`mitm`, or `token_scope` categories — no ground truth in this target.
+
+**Fix.** Add a second E2E fixture against DVWA (PHP) or a small Go repo
+with known TLS / secret / deployment misconfigs. One fixture per target
+in `tests/e2e/<target>-fixture.json`. The current script accepts a
+`--target` flag to select which fixture to use.
 
 ## Correctness refinements
 

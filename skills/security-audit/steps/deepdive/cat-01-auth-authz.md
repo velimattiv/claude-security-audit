@@ -75,10 +75,12 @@ algorithms\s*=\s*\["?HS256\"?\]
 ```
 
 Flag any call to `jwt.verify`/`jwt.decode` **without** an `algorithms:
-[...]` whitelist → **HIGH** / CWE-327.
+[...]` whitelist → **HIGH** / **CWE-347** (Improper Verification of
+Cryptographic Signature — the more precise code for missing-algorithm-
+whitelist than the generic CWE-327).
 
 Flag any string containing `alg.*none`/`\"alg\":\"none\"` → **CRITICAL** /
-CWE-287.
+**CWE-347**.
 
 ### Mass assignment
 
