@@ -10,31 +10,41 @@ Deployment, Injection/SSRF, LLM-specific).
 
 **Supported runtime:** Claude Code only. Other harnesses are not supported.
 
-**Status.** v2 is in active development. The milestone sequence (M1-M7) is
-tracked in [`docs/V2-SCOPE.md`](docs/V2-SCOPE.md). Each milestone is a
-self-contained increment: after M1 you can already run Phase 0 (Discovery)
-and Phase 1 (Partition & Risk Rank); full audits unlock at M5.
+## Version
 
-## What it does (v2 target)
+- **v2.0.0** (current) — full polyglot audit, 9 deep-dive categories, 6
+  required + 6 conditional scanners, SARIF + SBOM + delta-mode baseline.
+  See `docs/V2-SCOPE.md` for the design spec. Dogfooded against OWASP
+  Juice Shop; test-run evidence in `docs/test-runs/`.
+- **v2.1 candidates** — listed in `docs/ROADMAP.md`.
+
+## What it does
 
 1. **Discover** — builds a Project Map: languages, frameworks, monorepo
-   topology, ORM schemas, PII columns, LLM SDK usage, trust zones.
+   topology, ORM schemas, PII columns, LLM SDK usage, trust zones
+   (Phase 0).
 2. **Partition** — splits the repo into audit partitions and risk-ranks
-   them so deep-dive budget goes where it matters.
+   them so deep-dive budget goes where it matters (Phase 1).
 3. **Inventory the attack surface** — not just HTTP routes: queues,
    schedulers, webhooks, file uploads, serverless, mobile/desktop IPC,
-   admin/debug endpoints.
-4. **Run the scanner bundle in parallel** — semgrep, osv-scanner, gitleaks,
-   trufflehog, trivy, hadolint; optional brakeman, checkov, kube-linter,
-   govulncheck, psalm, zizmor by detected context. All SARIF.
-5. **Deep-dive 9 categories** — each as a separate Claude Opus 4.7 sub-agent,
-   fanned out per partition × category.
-6. **Synthesize** — dedupe, cross-reference, rank, tag with OWASP ASVS /
-   API / LLM / LINDDUN / STRIDE / CWE methodology IDs.
-7. **Emit** — human Markdown report, SARIF 2.1.0, CycloneDX SBOM, baseline
-   JSON for delta mode.
+   admin/debug endpoints (Phase 2).
+4. **Keystone index** — the files whose change cascades invalidation
+   (Phase 3).
+5. **Run the scanner bundle in parallel** — semgrep, osv-scanner,
+   gitleaks, trufflehog, trivy, hadolint; optional brakeman, checkov,
+   kube-linter, govulncheck, psalm, zizmor by detected context. All
+   SARIF (Phase 4).
+6. **Deep-dive 9 categories** — each as a Claude Opus 4.7 sub-agent,
+   fanned out per partition × category (Phase 5).
+7. **Config audit + methodology spine** — CORS/CSP/cookies/headers plus
+   ASVS L2 / API Top 10 / LLM Top 10 / LINDDUN / STRIDE (Phase 6).
+8. **Synthesize** — dedupe, cross-reference, rank, tag with OWASP /
+   CWE methodology IDs. Emit human Markdown report, SARIF 2.1.0, and
+   CycloneDX SBOM (Phase 7).
+9. **Baseline** — persist for sub-minute delta-mode re-audits on PRs
+   (Phase 8).
 
-Typical run: 15–60 minutes (full mode) or 2-5 minutes (delta mode after
+Typical run: 15–60 minutes (full mode) or 2–5 minutes (delta mode after
 baseline exists).
 
 ## Install
@@ -57,12 +67,11 @@ cp -r /tmp/csa/skills/security-audit .claude/skills/
 
 ## Scanner prerequisites
 
-From M3 onwards the skill's Phase 4 runs an external scanner bundle. Install
-with:
+Install the Phase 4 scanner bundle:
 
 ```bash
-scripts/install-scanners.sh            # required set
-scripts/install-scanners.sh --check    # show current state
+scripts/install-scanners.sh            # install required set
+scripts/install-scanners.sh --check    # report current state
 scripts/install-scanners.sh --help
 ```
 
@@ -111,6 +120,13 @@ Reports land in `docs/security-audit-report.md` (or
 `_bmad-output/implementation-artifacts/security-audit-report.md` if a
 BMAD output directory is already present in the project).
 
+## CI integration
+
+See `docs/ci-examples/github-actions/security-audit.yml` for a working
+example: runs on push / PR / nightly, uploads SARIF to the Security tab,
+and fails the PR on CRITICAL findings. Adaptations to GitLab / Buildkite /
+CircleCI are mechanically similar; PRs welcome.
+
 ## Runtime state
 
 The skill writes its working state under `.claude-audit/` at the project
@@ -119,13 +135,25 @@ offer to do this on first run). The baseline for delta mode is stored in
 two places: the pruned `docs/security-audit-baseline.json` (checked in)
 and the full `.claude-audit/baseline.json` (gitignored).
 
+## Troubleshooting
+
+See `docs/TROUBLESHOOTING.md` for common issues (scanner install,
+network-blocked vuln DB, semgrep auto-vs-explicit rulesets, delta-mode
+staleness, SARIF upload rejection).
+
 ## Licensing & attribution
 
 - This skill: MIT (see `LICENSE`).
-- The adversarial review prompt under `skills/security-audit/vendored/adversarial-review/`
-  is vendored unmodified from [bmad-method](https://github.com/bmad-code-org/BMAD-METHOD)
-  by BMad Code, LLC, under MIT. See `NOTICE.md` and the vendored folder's
-  `LICENSE` and `README.md` for full details.
+- The adversarial review prompt under
+  `skills/security-audit/vendored/adversarial-review/` is vendored
+  unmodified from [bmad-method](https://github.com/bmad-code-org/BMAD-METHOD)
+  by BMad Code, LLC, under MIT.
+- `skills/security-audit/lib/cwe-map.json` reproduces CWE IDs and names
+  from MITRE's Common Weakness Enumeration under CC BY 4.0.
+- `skills/security-audit/lib/asvs-l2.md` references OWASP ASVS 5.0
+  category topics (canonical text at https://github.com/OWASP/ASVS).
+- See `NOTICE.md` for full per-file attribution and scanner bundle
+  license transparency.
 - CodeQL is **excluded by default** because its CLI is license-restricted to
   OSI-approved OSS repositories. Users on eligible repos can enable it
-  manually; see M7 documentation.
+  manually; see `NOTICE.md` and the conditional-scanner docs.
