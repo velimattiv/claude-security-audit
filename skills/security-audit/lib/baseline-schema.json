@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/velimattiv/claude-security-audit/lib/baseline-schema.json",
+  "title": "Phase-08 Baseline",
+  "description": "The audit baseline — emitted by Phase 8 of a full run, consumed by Phase 0 of a delta-mode run.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "audit_id",
+    "skill_version",
+    "git_head",
+    "created_at",
+    "repo_topology",
+    "partition_manifest",
+    "surface",
+    "keystone_files",
+    "config",
+    "findings_carryover",
+    "scanner_versions",
+    "methodology_coverage",
+    "ignored"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "audit_id": { "type": "string" },
+    "skill_version": { "type": "string" },
+    "git_head": { "type": "string" },
+    "git_branch": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+
+    "repo_topology": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" },
+        "tool": { "type": ["string", "null"] },
+        "partitions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "partition_manifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "risk_score", "depth"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "path": { "type": "string" },
+          "risk_score": { "type": "integer", "minimum": 0, "maximum": 9 },
+          "depth": { "enum": ["full", "inventory-only"] }
+        }
+      }
+    },
+
+    "surface": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "file", "handler_hash"],
+        "properties": {
+          "id": { "type": "string" },
+          "file": { "type": "string" },
+          "handler_hash": { "type": ["string", "null"] },
+          "auth_required": { "enum": [true, false, "unknown"] },
+          "trust_zone": { "type": "string" }
+        }
+      }
+    },
+
+    "keystone_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason_count"],
+        "properties": {
+          "path": { "type": "string" },
+          "reason_count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+
+    "auth_matrix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "surface_id": { "type": "string" },
+          "role": { "type": "string" },
+          "allowed": { "enum": ["allow", "deny", "self", "owner"] }
+        }
+      }
+    },
+
+    "idor_candidates": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "config": {
+      "type": "object",
+      "properties": {
+        "cors_origins": { "type": "array", "items": { "type": "string" } },
+        "csp": { "type": ["string", "null"] },
+        "cookie_flags": { "type": "object" },
+        "security_headers": { "type": "object" }
+      }
+    },
+
+    "findings_carryover": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fingerprint", "title", "severity", "file"],
+        "properties": {
+          "fingerprint": { "type": "string", "minLength": 12 },
+          "title": { "type": "string" },
+          "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
+          "confidence": { "enum": ["CONFIRMED", "LIKELY", "POSSIBLE"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "cwe": { "type": "string" },
+          "owasp_ids": { "type": "array", "items": { "type": "string" } },
+          "partition": { "type": "string" }
+        }
+      }
+    },
+
+    "scanner_versions": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+
+    "methodology_coverage": {
+      "type": "object",
+      "properties": {
+        "asvs_pct": { "type": "number" },
+        "api_top10_counts": { "type": "object" },
+        "llm_top10_counts": { "type": "object" },
+        "linddun_counts": { "type": "object" },
+        "unique_cwes": { "type": "integer" }
+      }
+    },
+
+    "ignored": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
