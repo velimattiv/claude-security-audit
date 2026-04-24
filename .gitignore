@@ -1,1 +1,18 @@
 .DS_Store
+
+# Orchestration scratch — never commit
+.dev-bootstrap.md
+TODO.md
+
+# Skill runtime state (materializes in skill-user's project; also ignored here
+# so dogfooding runs against this repo don't leave artifacts behind)
+.claude-audit/
+
+# Dogfood targets (cloned into /tmp, not this workspace — listed here for
+# completeness in case an operator clones into /workspace by accident)
+/tmp/audit-targets/
+
+# Container-local tooling state (not part of the skill source)
+.claude/
+_bmad/
+_bmad-output/
