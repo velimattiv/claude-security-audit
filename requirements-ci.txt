@@ -1,0 +1,9 @@
+# Python dependencies used by the skill's own CI validation suite
+# (scripts/validate-findings.py + scripts/validate-patterns.py).
+#
+# These are NOT runtime dependencies of the skill itself — the skill
+# runs in Claude Code, which ships its own Python-free runtime. This
+# file exists so Dependabot can bump jsonschema when upstream releases,
+# keeping the CI pin in sync.
+
+jsonschema==4.22.0

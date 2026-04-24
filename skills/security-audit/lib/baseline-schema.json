@@ -56,10 +56,11 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "file", "handler_hash"],
+        "required": ["id", "registration_file", "handler_file", "handler_hash"],
         "properties": {
           "id": { "type": "string" },
-          "file": { "type": "string" },
+          "registration_file": { "type": "string" },
+          "handler_file": { "type": "string" },
           "handler_hash": { "type": ["string", "null"] },
           "auth_required": { "enum": [true, false, "unknown"] },
           "trust_zone": { "type": "string" }

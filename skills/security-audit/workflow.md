@@ -204,6 +204,36 @@ Skip Phases 0-6. Re-emit from existing `.claude-audit/current/` artifacts.
 For each top-N partition × each deep-dive category:
 - Spawn **one sub-agent** using the template at `templates/subagent-prompt.md`.
 - Model: `opus`. **Never downgrade** to Sonnet/Haiku.
+- **Orchestrator-side enforcement of schema validation.** After the
+  sub-agent returns, the orchestrator re-runs
+  `scripts/validate-findings.py --schema lib/finding-schema.json
+  --cwe-map lib/cwe-map.json <artifact>` against the emitted JSONL.
+  The sub-agent is *told* to validate before returning, but treating
+  that as load-bearing would trust the sub-agent's self-report. The
+  orchestrator's post-hoc re-run is the actual enforcement. A
+  validation failure triggers one retry with the errors quoted back
+  at the sub-agent; a second failure records a placeholder INFO
+  finding and proceeds.
+
+### Needs-recursion split procedure
+
+If a sub-agent returns `{"status": "needs_recursion", "suggested_split": [...]}`:
+
+1. The orchestrator marks the original partition `deferred`.
+2. For each entry in `suggested_split`, create a new sub-partition:
+   - `id` = suggested id (prefix-disambiguate if collides with an
+     existing partition).
+   - `path` = longest common prefix of `paths_included`.
+   - `paths_included` = as suggested.
+   - Risk score: inherit from the parent partition.
+   - `depth` = parent's depth.
+3. Re-fan-out for each sub-partition × category.
+4. Merge findings from sub-partitions back under the parent partition
+   id at Phase 7 synthesis — so final reports reference the *original*
+   partition, not the sub-split internal detail.
+5. **Recursion floor.** Do not recurse more than 2 levels deep.
+   A sub-sub-partition that still needs_recursion gets a placeholder
+   INFO finding noting the scope was unreachable.
 - **Runtime-resolved model ID.** Claude Code routes `model: opus` to the
   harness-appropriate variant. As of Claude Code v0.6.x, this resolves to
   `claude-opus-4-7[1m]` (Opus 4.7 with the 1M-context window) — verified

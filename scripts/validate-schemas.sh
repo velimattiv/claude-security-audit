@@ -168,6 +168,38 @@ if [ -d tests/fixtures ]; then
       fail "fixture $jsonl failed schema+cwe-map validation"
     fi
   done
+
+  # Validate *.json fixtures against their schemas too.
+  for jf in tests/fixtures/*.json; do
+    [ -f "$jf" ] || continue
+    case "$(basename "$jf")" in
+      surface*) sch="skills/security-audit/lib/surface-schema.json" ;;
+      partition*) sch="skills/security-audit/lib/partitions-schema.json" ;;
+      profile*) sch="skills/security-audit/lib/profile-schema.json" ;;
+      keystone*) sch="skills/security-audit/lib/keystone-schema.json" ;;
+      baseline*) sch="skills/security-audit/lib/baseline-schema.json" ;;
+      *) sch="" ;;
+    esac
+    if [ -z "$sch" ]; then
+      note "no schema mapping for $(basename "$jf") — skipped"
+      continue
+    fi
+    # Use a tiny inline jsonschema check via python.
+    if python3 -c "
+import json, sys
+try:
+    import jsonschema
+except ImportError:
+    sys.exit(0)  # skip silently if unavailable
+with open('$jf') as f: doc = json.load(f)
+with open('$sch') as f: schema = json.load(f)
+jsonschema.Draft202012Validator(schema).validate(doc)
+" 2>/dev/null; then
+      pass
+    else
+      fail "fixture $jf failed schema validation against $sch"
+    fi
+  done
 else
   note "tests/fixtures/ absent — skipping fixture check (not fatal)"
 fi

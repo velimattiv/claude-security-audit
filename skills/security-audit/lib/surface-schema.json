@@ -84,7 +84,8 @@
             "type": "array",
             "items": { "type": "integer", "minimum": 1 },
             "minItems": 2,
-            "maxItems": 2
+            "maxItems": 2,
+            "description": "[start_line, end_line] within `handler_file` (not `registration_file`). The handler body's line span, used as input to handler_hash."
           },
           "handler_hash": { "type": ["string", "null"] },
           "auth_required": { "enum": [true, false, "unknown"] },

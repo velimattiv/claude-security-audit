@@ -27,7 +27,11 @@
 #   - --cap-drop=ALL, --read-only rootfs, --security-opt=no-new-privileges
 #     applied by the wrapper.
 
-FROM debian:bookworm-slim
+# Base image pinned to a specific digest — the skill's own cat-07
+# flags unpinned bases as CWE-829. Update the digest via:
+#   docker pull debian:bookworm-slim && docker inspect ...
+# or from registry auth token + manifest HEAD (see scripts/README).
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
 
 ARG DEBIAN_FRONTEND=noninteractive
 

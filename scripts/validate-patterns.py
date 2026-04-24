@@ -19,6 +19,18 @@ file+line of each broken pattern.
 Not a behavioral test — doesn't verify patterns match anything real.
 `docs/test-runs/polyglot-*.md` dogfoods handle behavior. This is a
 syntax guard against typos.
+
+KNOWN LIMITATIONS of the heuristic:
+  - A short "simple" regex with no escapes / anchors / classes /
+    quantifiers (e.g., `mysqli_query.*GET`) looks like prose to the
+    REGEX_INDICATOR and is skipped. The trade-off is to avoid false
+    positives on code examples; accept some false negatives.
+  - Patterns mentioned inline in prose (outside fenced code blocks)
+    are not extracted. The validator looks at fenced blocks only.
+  - Cross-language regex dialect differences (ripgrep vs. Python re)
+    can cause false FAILs on edge-case constructs. If that happens,
+    re-test with `python3 -c "import re; re.compile(r'...')"` to
+    confirm whether it's the pattern or the environment.
 """
 import argparse
 import re

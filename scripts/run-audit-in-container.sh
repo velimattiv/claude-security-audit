@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# scripts/run-audit-in-container.sh — run the SCANNER phase of
+# scripts/run-audit-in-container.sh — isolate the SCANNER PHASE of
 # /security-audit inside an ephemeral OCI container.
 #
-# IMPORTANT SCOPE: this wrapper isolates the scanner bundle (semgrep,
-# osv-scanner, gitleaks, trufflehog, trivy, hadolint) and the SARIF
-# post-processing tooling. Claude Code and the deep-dive sub-agents
-# still run on the host — this is NOT a full-audit sandbox.
+# SCOPE (read this before trusting the container):
+#   - INSIDE the container: the six scanner binaries (semgrep,
+#     osv-scanner, gitleaks, trufflehog, trivy, hadolint), Python
+#     jsonschema for validators, and the skill's instruction files
+#     (read-only copy for reference).
+#   - OUTSIDE the container (on the host): Claude Code, the skill's
+#     orchestrator LLM, and every deep-dive sub-agent. This wrapper
+#     is NOT a full-audit sandbox.
+#
+# If you want full isolation of the LLM + orchestrator as well, that's
+# a different architecture (e.g., Claude Code itself running in a
+# container). This wrapper doesn't do that.
 #
 # Rationale: users can accept the scanner binaries' attack surface on
 # an ephemeral container but prefer not to install them globally. The

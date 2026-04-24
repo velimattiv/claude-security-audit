@@ -1,0 +1,22 @@
+version: 2
+# Keeps GitHub Actions SHAs and Python deps current. Actions are pinned
+# to SHAs for supply-chain integrity; Dependabot generates PRs when new
+# minor/patch releases ship so the pins don't decay silently.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"

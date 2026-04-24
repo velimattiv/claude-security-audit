@@ -90,21 +90,55 @@ Every surface row in `surfaces[]` MUST include:
 
 ## 2.5 — Handler body extraction & hashing
 
-Refer to `lib/handler-hash.md` for the normalization rules. Summary:
+**Step 1 — Resolve `handler_file`.**
 
-1. **Identify the handler body.** For brace-delimited languages (JS/TS/Go/
-   Java/Kotlin/Rust/C#/PHP), start at the opening `{` of the handler
-   function and end at the matching `}` (track nested braces).
-   For indent-delimited (Python), start at the handler `def` line and
-   include all lines with strictly greater indentation.
-   For decorator-based (annotations like `@GetMapping`), the handler body is
-   the function the annotation is attached to.
-2. **Normalize.** Strip `//`, `#`, `/* */`, `<!-- -->` comments; trim all
-   whitespace (including newlines); lowercase.
-3. **Hash.** `sha1(normalized_body)`.
+For each detected route registration (which gives you `registration_file`),
+resolve the actual handler function's location:
 
-If the body cannot be extracted (e.g., metaprogrammed registration), emit
-`handler_hash: null` and add a note. Never guess.
+- **Inline handler** — handler is an anonymous function / arrow function /
+  lambda at the registration site. `handler_file == registration_file`.
+- **Named local handler** — registration references a function defined in
+  the same file (`app.post('/x', createX)` where `createX` is later in
+  the file). `handler_file == registration_file`; line_range points at
+  the function definition, not the registration.
+- **Imported handler** — registration references an imported symbol
+  (`app.post('/x', require('./routes/x').handler)` or
+  `app.post('/x', handlers.createX)`). Follow the import:
+  - Node `require('./routes/x')` → `routes/x.{js,ts,mjs,cjs}` — find
+    the exported symbol or the module's default export's `.handler`
+    property.
+  - ES modules `import { createX } from './routes/x'` → same resolution.
+  - Python `from .routes.x import handler` → `routes/x.py`, function
+    `handler`.
+  - Go `Mount("/x", routes.New())` — follow the struct method.
+- **Class-based handler** — `@Controller`/`@RestController` class; the
+  `handler_file` is the file containing the class method matching the
+  route's HTTP verb.
+- **File-based routing** (Nuxt `server/api/`, Next.js `app/`) —
+  `handler_file == registration_file == <the file itself>`.
+
+If the registration can't be resolved (e.g., dynamic dispatch via a
+registry lookup, macro-expanded routes), set
+`handler_file = registration_file`, emit `handler_hash: null`, and add
+a `notes[]` entry explaining. **Never fabricate a path.**
+
+**Step 2 — Extract the handler body from `handler_file`.**
+
+- For brace-delimited languages (JS/TS/Go/Java/Kotlin/Rust/C#/PHP),
+  start at the opening `{` of the handler function and end at the
+  matching `}` (track nested braces).
+- For indent-delimited (Python), start at the handler `def` line and
+  include all lines with strictly greater indentation.
+- For decorator-based (annotations like `@GetMapping`), the handler
+  body is the function the annotation is attached to.
+
+`line_range` records the start/end lines **within `handler_file`**.
+
+**Step 3 — Normalize + hash.** Refer to `lib/handler-hash.md` — strip
+comments, collapse whitespace, lowercase, sha1.
+
+If the body cannot be extracted (e.g., metaprogrammed registration),
+emit `handler_hash: null` and add a note. Never guess.
 
 ## 2.6 — Auth inference
 

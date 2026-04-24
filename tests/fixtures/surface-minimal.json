@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "skill_version": "2.0.1",
+  "audit_id": "fixture-surface-audit",
+  "generated_at": "2026-04-24T00:00:00Z",
+  "by_category": { "http": 2, "file_upload": 1 },
+  "flags_summary": { "NO_AUTH_WRITE": 1 },
+  "surfaces": [
+    {
+      "id": "fixture:http:0001",
+      "partition": "fixture-partition",
+      "category": "http",
+      "method": "POST",
+      "path": "/api/users",
+      "registration_file": "server.ts",
+      "handler_file": "routes/users.ts",
+      "line_range": [12, 48],
+      "handler_hash": "0123456789abcdef0123456789abcdef01234567",
+      "auth_required": true,
+      "auth_middleware": ["requireAuth"],
+      "roles_required": ["admin"],
+      "params": [
+        { "name": "email", "source": "body", "sensitive": true },
+        { "name": "name",  "source": "body", "sensitive": false }
+      ],
+      "trust_zone": "public",
+      "data_ops": ["write"],
+      "framework": "Express",
+      "flags": []
+    },
+    {
+      "id": "fixture:http:0002",
+      "partition": "fixture-partition",
+      "category": "http",
+      "method": "GET",
+      "path": "/api/health",
+      "registration_file": "server.ts",
+      "handler_file": "server.ts",
+      "line_range": [205, 208],
+      "handler_hash": "abcdef0123456789abcdef0123456789abcdef01",
+      "auth_required": false,
+      "auth_middleware": [],
+      "roles_required": [],
+      "params": [],
+      "trust_zone": "public",
+      "data_ops": ["read"],
+      "framework": "Express",
+      "flags": []
+    },
+    {
+      "id": "fixture:file_upload:0001",
+      "partition": "fixture-partition",
+      "category": "file_upload",
+      "method": "POST",
+      "path": "/api/uploads",
+      "registration_file": "server.ts",
+      "handler_file": "routes/uploads.ts",
+      "line_range": [15, 62],
+      "handler_hash": "fedcba9876543210fedcba9876543210fedcba98",
+      "auth_required": true,
+      "auth_middleware": ["requireAuth"],
+      "roles_required": [],
+      "params": [
+        { "name": "file", "source": "body", "sensitive": false }
+      ],
+      "trust_zone": "public",
+      "data_ops": ["write"],
+      "framework": "Express",
+      "flags": ["NO_AUTH_WRITE"],
+      "notes": "Fixture-only; real surfaces won't have contradictory auth_required=true + NO_AUTH_WRITE flag."
+    }
+  ]
+}
