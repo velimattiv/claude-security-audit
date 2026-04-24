@@ -46,8 +46,7 @@ for surface in baseline_full.surface:
   # routing frameworks (Express with `app.use('/x', require('./x'))`)
   # silently escape the file-level rule.
   if (surface.handler_file in changed_files
-      or surface.registration_file in changed_files
-      or surface.file in changed_files):            # v2.0.0 legacy alias
+      or surface.registration_file in changed_files):
     stale_surfaces.add(surface.id)
   elif surface.handler_hash != current_hash(surface.handler_file, surface.line_range):
     stale_surfaces.add(surface.id)

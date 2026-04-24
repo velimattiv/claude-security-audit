@@ -35,7 +35,6 @@
           "partition",
           "category",
           "path",
-          "file",
           "registration_file",
           "handler_file",
           "line_range",
@@ -73,17 +72,13 @@
           },
           "method": { "type": ["string", "null"] },
           "path": { "type": "string" },
-          "file": {
-            "type": "string",
-            "description": "DEPRECATED since v2.0.1. Alias for registration_file. Retained for v2.0.0 baseline backwards-compatibility."
-          },
           "registration_file": {
             "type": "string",
             "description": "File where the route / handler is *registered* (e.g., server.ts for app.post(...)). For file-based routing (Nuxt, Next), this equals handler_file."
           },
           "handler_file": {
             "type": "string",
-            "description": "File containing the handler function body. For modular routing (e.g., Express app.post('/x', require('./routes/x'))), handler_file is routes/x.ts while registration_file is server.ts. Delta-mode invalidation keys off handler_file."
+            "description": "File containing the handler function body. For modular routing (e.g., Express app.post('/x', require('./routes/x'))), handler_file is routes/x.ts while registration_file is server.ts. Delta-mode invalidation keys off handler_file primarily."
           },
           "line_range": {
             "type": "array",

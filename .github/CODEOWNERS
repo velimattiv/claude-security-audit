@@ -1,0 +1,18 @@
+# CODEOWNERS — routes PR reviews to the default maintainer.
+# Syntax: <pattern> <owner> [<owner> ...]
+# See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+#
+# The skill is currently maintained by a single person. As contributors
+# join, add their GitHub handle to the file paths they own. For now, all
+# paths route to @velimattiv.
+
+*                                        @velimattiv
+
+# Security-sensitive paths get explicit review requirement even if the
+# CODEOWNERS default changes later:
+scripts/install-scanners.sh              @velimattiv
+scripts/Dockerfile.audit                 @velimattiv
+scripts/run-audit-in-container.sh        @velimattiv
+skills/security-audit/templates/         @velimattiv
+.github/workflows/                       @velimattiv
+SECURITY.md                              @velimattiv

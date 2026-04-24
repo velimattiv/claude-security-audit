@@ -83,29 +83,45 @@ demote.
 
 ## 7.4 — Severity rubric (final)
 
-Severity was assigned per finding; Phase 7 may adjust based on context
-signals. **Cap promotions at one rung total**, not one rung per
-triggered rule — the v2.0.0 additive behavior over-promoted MEDIUM
-findings to CRITICAL under triple-triggering (public + CONFIRMED +
-write) with no human review.
+Severity was assigned per finding; Phase 7 may adjust by exactly one
+rung based on context signals. **Cap at ±1 rung total regardless of
+how many triggers fire** — the promotion is a calibration adjustment,
+not a stacking modifier.
 
-**Rule (v2.0.1):**
+**Rule:**
 
-1. Compute the promotion *triggers* for the finding:
-   - `public_zone`: surface trust_zone == "public"
-   - `confirmed`: confidence == "CONFIRMED"
-   - `write_data_op`: surface data_ops ∩ {write, delete, exec} ≠ ∅
-2. If **two or more** triggers fire, promote severity by exactly **one**
-   rung (LOW → MEDIUM → HIGH → CRITICAL). Never more than one.
-3. Symmetrically, a `dev` trust zone demotes by one rung (floor: INFO).
-4. Promotion and demotion cancel — if the finding is on a `dev` surface
-   with CONFIRMED + write triggers, the net is zero (no change).
-5. Never exceed CRITICAL.
+1. Compute the signed signal:
 
-Rationale: the multi-trigger case is not evidence of *more* severity,
-it's evidence that the same underlying fact has cross-confirming
-context. A single promotion rung captures that without inflating the
-severity distribution.
+   | Signal | Contribution |
+   |---|---|
+   | `trust_zone == "public"` | **+1** (promotion) |
+   | `confidence == "CONFIRMED"` | **+1** (promotion) |
+   | `data_ops ∩ {write, delete, exec} ≠ ∅` | **+1** (promotion) |
+   | `trust_zone == "dev"` | **−1** (demotion) |
+
+2. Sum the signals. If net > 0, promote by exactly one rung. If net
+   < 0, demote by one rung. If net == 0, no change. **Regardless of
+   magnitude, the adjustment is at most one rung in either direction.**
+
+3. Bounds: never exceed CRITICAL at the high end; never fall below
+   INFO at the low end.
+
+**Examples:**
+- MEDIUM finding, CONFIRMED, public, write → net = +3 → promote one
+  rung → HIGH. (Not CRITICAL — cap holds.)
+- HIGH finding, grep-only, internal zone, read-only → net = 0 → stays
+  HIGH.
+- LOW finding, CONFIRMED, dev zone → net = 0 → stays LOW.
+- MEDIUM finding, CONFIRMED, internal, read → net = +1 → promote →
+  HIGH.
+- LOW finding, grep-only, dev zone, read → net = −1 → demote → INFO.
+
+Rationale: any single strengthening signal merits a one-rung
+adjustment (a CONFIRMED finding on a read-only internal endpoint
+*is* more actionable than a grep-only finding on the same), but
+multiple strengthening signals don't deserve compounding — they're
+corroborating evidence of the same fact, not independent severity
+multipliers.
 
 ## 7.5 — Unique-to-skill identification
 

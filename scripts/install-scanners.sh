@@ -97,11 +97,15 @@ Required:  semgrep osv-scanner gitleaks trufflehog trivy hadolint
 Optional:  brakeman checkov kube-linter grype govulncheck psalm zizmor
 
 Environment:
-  PREFIX   Install location (default /usr/local/bin or ~/.local/bin).
-  SUDO     Prefix for package-manager commands (default: sudo if non-root).
+  PREFIX        Install location (default /usr/local/bin or ~/.local/bin).
+  SUDO          Prefix for package-manager commands (default: sudo if non-root).
+  GITHUB_TOKEN  Optional. Lifts the 60-request/hr GitHub API rate
+                limit for --check's stale-version probe. Needs no
+                scopes — only reads public release tags.
 
 Supported OS: macOS (Homebrew), Debian/Ubuntu (apt), Fedora (dnf), Arch (pacman).
-Windows: not supported; run inside WSL or scripts/run-audit-in-container.sh.
+Requires Python 3.8+ (for semgrep). Windows: not supported; run
+inside WSL or scripts/run-audit-in-container.sh.
 
 See docs/V2-SCOPE.md and SECURITY.md for details. Every binary download
 is verified against vendor-published sha256 checksums before install.
@@ -208,10 +212,17 @@ check_stale_versions() {
   _check_one() {
     local name="$1" repo="$2" pinned="$3"
     local api="https://api.github.com/repos/$repo/releases/latest"
+    # Authenticated requests raise the rate limit from 60/hr to
+    # 5000/hr. Respect GITHUB_TOKEN when set; fall back silently.
+    local auth_args=""
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      auth_args="-H Authorization:Bearer ${GITHUB_TOKEN}"
+    fi
     local latest
-    latest="$(curl -sSf --max-time 5 "$api" 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"v?[^"]+"' | head -1 | awk -F'"' '{print $4}' | sed 's/^v//')"
+    # shellcheck disable=SC2086
+    latest="$(curl -sSf --max-time 5 $auth_args "$api" 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"v?[^"]+"' | head -1 | awk -F'"' '{print $4}' | sed 's/^v//')"
     if [ -z "$latest" ]; then
-      printf "  %-14s pinned=%s  (upstream check skipped — network / rate-limit)\n" "$name" "$pinned"
+      printf "  %-14s pinned=%s  (upstream check skipped — network / rate-limit; set GITHUB_TOKEN to lift)\n" "$name" "$pinned"
       return
     fi
     if [ "$latest" != "$pinned" ]; then

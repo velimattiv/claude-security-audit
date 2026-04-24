@@ -89,28 +89,46 @@ Windows is **not** supported — run inside WSL or Path B. The installer
 **verifies published checksums** for every downloaded binary (v2.0.1+);
 mismatches abort the install.
 
-### Path B — container-isolated execution (cleaner, recommended if you don't want scanner binaries on your host)
+### Path B — container-isolated scanner execution
 
-The skill's six scanners are themselves non-trivial dependencies (Go binaries,
-Python packages, Rust tools) and carry their own CVE history. For hosts
-where globally installing them is undesirable — production servers,
-shared dev environments, audits of untrusted code — run the audit
-inside an ephemeral OCI container:
+**Scope clarification.** This path isolates the *scanner bundle*
+(semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint) — not the
+full skill orchestration. Claude Code and its deep-dive sub-agents still
+run on the host (or wherever Claude Code is installed); only the
+scanner phase's binaries live in an ephemeral container. For many
+users that's the point: scanners are the new dependency the skill
+introduces; Claude Code was already installed.
 
 ```bash
-# One-time: build the audit image (≈500 MB; pinned scanner versions)
+# One-time: build the scanner-isolation image (≈500 MB)
 scripts/run-audit-in-container.sh --build
 
-# Subsequent runs: read-only mount of the target, writable overlay for
-# artifacts; host filesystem untouched
-scripts/run-audit-in-container.sh "mode: delta"
+# Run preflight (scanner presence check) in the container
+scripts/run-audit-in-container.sh preflight
+
+# Run a specific scanner against the target repo from inside the container
+scripts/run-audit-in-container.sh scan semgrep
+scripts/run-audit-in-container.sh scan osv-scanner
+scripts/run-audit-in-container.sh scan gitleaks
+scripts/run-audit-in-container.sh scan trufflehog
+scripts/run-audit-in-container.sh scan trivy
+scripts/run-audit-in-container.sh scan hadolint
+
+# Drop into a container shell for ad-hoc runs
+scripts/run-audit-in-container.sh shell
 ```
 
 The wrapper uses Podman (preferred, rootless) or Docker — whichever
-you have. `Dockerfile.audit` enforces `--cap-drop=ALL`,
-`--security-opt=no-new-privileges`, `--read-only` root filesystem, and
-runs as a non-root `audit` user. The target repo is bind-mounted
-read-only; only `.claude-audit/` is writable.
+you have. Container hardening: `--cap-drop=ALL`,
+`--security-opt=no-new-privileges`, `--read-only` rootfs, non-root
+`audit` user. The target repo is bind-mounted read-only; only
+`.claude-audit/` is writable.
+
+**What Path B does NOT isolate.** The skill's orchestrator
+(`workflow.md`), deep-dive sub-agents (Phase 5), built-in-review
+sub-agents (Phase 4's `/security-review`, adversarial-review), and
+synthesis (Phase 7) all run in whatever runtime Claude Code uses.
+Treat Path B as "sandboxed scanners," not "sandboxed audit."
 
 ### Required scanner bundle (both paths)
 

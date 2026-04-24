@@ -1,25 +1,23 @@
 # v2.1 Roadmap Candidates
 
-Surfaced during M1-M7 dogfooding and development. Not committed work —
-these are items to consider for a future v2.1 release. Ordered by
-severity of the underlying problem (highest impact first).
+Forward-looking candidates for the next minor release. Items delivered
+in v2.0.1 have been removed from this list. Ordered by severity of the
+underlying problem (highest impact first).
+
+## ✅ Delivered in v2.0.1
+
+The following were on the v2.0.0 roadmap and have landed:
+
+- Phase 2 handler-file vs registration-file tracking.
+- Fingerprint-off-CWE for baseline stability.
+- OSV-scanner lockfile-dependence warning (now in `--check` + CHANGELOG).
+- Missing-CWE entries (208, 215, 598, 1004) backfilled.
+- Container-isolated scanner execution (scripts/Dockerfile.audit +
+  run-audit-in-container.sh).
+- Installer checksum verification + stale-version warning.
+- JSON-schema enforcement on every sub-agent (scripts/validate-findings.py).
 
 ## Correctness refinements
-
-### Phase 2 handler-file tracking (M2 follow-up)
-
-**Problem.** The Phase 2 sub-agent records `file: <registration-site>`
-(e.g., `server.ts` for Express routes) rather than
-`<handler-body-file>` (e.g., `routes/login.ts`). When a handler body
-file changes, the delta-mode `file ∈ changed_files` rule doesn't fire.
-
-**Fix.** Add `handler_file` alongside `registration_file` in the
-Phase 2 surface row, compute `handler_hash` against the handler body
-file, and have the delta algorithm check both.
-
-**Impact.** Tightens delta-mode invalidation from "relies on keystone
-cascade" to "direct file-match" for modular-routing repos (Express,
-Django, FastAPI with imported routers).
 
 ### AST-based handler hashing (supersedes content hashing)
 
@@ -35,30 +33,7 @@ handler-rolled).
 **Impact.** Reduces spurious delta-mode re-audits on refactor-heavy
 PRs. Locked as v2.1 per Q10 at bootstrap.
 
-### Fingerprint-off-CWE (baseline stability)
-
-**Problem.** Finding fingerprints are `sha1(file:line:title)`. Title
-drift between runs — e.g., sub-agent rephrases the same finding —
-produces a "new" finding instead of a stable reference.
-
-**Fix.** Compute fingerprint off
-`file:line:cwe:rule_short_or_category`. Title drift no longer
-changes the hash.
-
-**Impact.** Cleaner baseline-diff noise-to-signal.
-
 ## Install / install-path ergonomics
-
-### OSV-scanner lockfile warning
-
-**Problem.** OSV-scanner on repos without a lockfile silently returns
-0 findings — a dangerous false negative.
-
-**Fix.** Phase 4 preflight detects manifest-without-lockfile (e.g.,
-`package.json` without any of `package-lock.json`, `pnpm-lock.yaml`,
-`yarn.lock`) and either:
-  1. Runs `npm/pnpm/yarn install --frozen-lockfile` first (opt-in), or
-  2. Emits a clear warning in the report's coverage section.
 
 ### Pre-commit hook recipe
 

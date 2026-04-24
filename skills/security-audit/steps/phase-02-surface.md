@@ -77,7 +77,6 @@ Every surface row in `surfaces[]` MUST include:
 | `path` | the external identifier (URL path, queue name, gRPC service/method, cron cadence, topic name) |
 | `registration_file` | file where the route is *registered* (e.g., `server.ts` for `app.post('/x', ...)`) |
 | `handler_file` | file containing the handler function *body* (e.g., `routes/x.ts` for a modular Express route). For file-based routing, equals `registration_file`. |
-| `file` | alias for `registration_file` (retained for v2.0.0 baseline compatibility; new code should write `registration_file` + `handler_file` and leave `file = registration_file`) |
 | `line_range` | `[start_line, end_line]` of the handler body **in `handler_file`** |
 | `handler_hash` | sha1 of the normalized handler body content **from `handler_file`** (see `lib/handler-hash.md`) |
 | `auth_required` | `true` / `false` / `unknown` |

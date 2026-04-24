@@ -40,14 +40,19 @@ jobs:
         run: |
           scripts/validate-schemas.sh
 
-      - name: Validate findings fixtures
+      - name: Validate findings fixtures (with CWE-in-map check)
         run: |
           for fixture in tests/fixtures/*.jsonl; do
             [ -f "$fixture" ] || continue
             python3 scripts/validate-findings.py \
               --schema skills/security-audit/lib/finding-schema.json \
+              --cwe-map skills/security-audit/lib/cwe-map.json \
               "$fixture"
           done
+
+      - name: Compile-check cat-*.md regex patterns (polyglot regression guard)
+        run: |
+          python3 scripts/validate-patterns.py
 
       - name: Lint shell scripts
         run: |

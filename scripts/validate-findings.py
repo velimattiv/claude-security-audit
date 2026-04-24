@@ -42,7 +42,18 @@ def iter_findings(jsonl_path: Path):
                 yield lineno, {"__parse_error__": str(e), "__raw__": line[:200]}
 
 
-def validate_with_jsonschema(schema: dict, findings):
+def load_cwe_map(cwe_map_path: Path | None) -> set[str] | None:
+    """Load the set of CWE IDs from cwe-map.json. Returns None if path
+    is None (meaning: skip the semantic CWE-in-map check)."""
+    if cwe_map_path is None:
+        return None
+    with open(cwe_map_path) as f:
+        doc = json.load(f)
+    mappings = doc.get("mappings", {})
+    return set(mappings.keys())
+
+
+def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None):
     import jsonschema  # type: ignore
     validator = jsonschema.Draft202012Validator(schema)
     errors = []
@@ -53,13 +64,20 @@ def validate_with_jsonschema(schema: dict, findings):
         for err in sorted(validator.iter_errors(finding), key=lambda e: e.path):
             path = ".".join(str(p) for p in err.path) or "<root>"
             errors.append(f"line {lineno}: {path}: {err.message}")
+        if cwe_ids is not None:
+            cwe = finding.get("cwe")
+            if cwe and cwe not in cwe_ids:
+                errors.append(
+                    f"line {lineno}: cwe `{cwe}` not in cwe-map.json "
+                    f"(schema pattern allows any CWE-\\d+; semantic check requires map entry)"
+                )
     return errors
 
 
-def validate_manual(schema: dict, findings):
+def validate_manual(schema: dict, findings, cwe_ids: set[str] | None):
     """Minimal manual validator used when jsonschema is unavailable.
-    Checks only the top-level `required` list. Not a substitute for
-    jsonschema — CI must install it."""
+    Checks only the top-level `required` list + CWE-in-map when
+    provided. Not a substitute for jsonschema — CI must install it."""
     required = schema.get("required", [])
     errors = []
     for lineno, finding in findings:
@@ -69,12 +87,22 @@ def validate_manual(schema: dict, findings):
         for field in required:
             if field not in finding:
                 errors.append(f"line {lineno}: missing required field `{field}`")
+        if cwe_ids is not None:
+            cwe = finding.get("cwe")
+            if cwe and cwe not in cwe_ids:
+                errors.append(f"line {lineno}: cwe `{cwe}` not in cwe-map.json")
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--schema", required=True, type=Path)
+    parser.add_argument(
+        "--cwe-map",
+        type=Path,
+        default=None,
+        help="Optional path to cwe-map.json. If provided, every finding's `cwe` must exist in the map (semantic check beyond the schema's regex).",
+    )
     parser.add_argument("jsonl", type=Path, help="Path to a findings JSONL file")
     parser.add_argument("--quiet", action="store_true", help="Only emit non-zero exit; no stderr")
     args = parser.parse_args()
@@ -85,15 +113,19 @@ def main():
     if not args.jsonl.exists():
         print(f"ERROR: findings file not found: {args.jsonl}", file=sys.stderr)
         sys.exit(2)
+    if args.cwe_map is not None and not args.cwe_map.exists():
+        print(f"ERROR: cwe-map not found: {args.cwe_map}", file=sys.stderr)
+        sys.exit(2)
 
     schema = load_schema(args.schema)
     findings = list(iter_findings(args.jsonl))
+    cwe_ids = load_cwe_map(args.cwe_map)
 
     try:
-        errors = validate_with_jsonschema(schema, findings)
+        errors = validate_with_jsonschema(schema, findings, cwe_ids)
         backend = "jsonschema"
     except ImportError:
-        errors = validate_manual(schema, findings)
+        errors = validate_manual(schema, findings, cwe_ids)
         backend = "manual-fallback"
         if not args.quiet:
             print(

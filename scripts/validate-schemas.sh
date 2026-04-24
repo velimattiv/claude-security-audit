@@ -29,6 +29,10 @@ pass() { checks=$((checks + 1)); }
 echo "=== /security-audit validation suite ==="
 echo "Repo: $REPO_ROOT"
 echo
+echo "NOTE: markdown-ref check in §5 covers [text](path) syntax only."
+echo "Reference-style links ([text][id]) and HTML <a href=...> are NOT"
+echo "checked; pair with markdown-link-check for full coverage."
+echo
 
 # --- 1. JSON parse ----------------------------------------------------------
 echo "[1/7] JSON parse..."
@@ -132,9 +136,20 @@ else
   fail "VERSION file missing"
 fi
 
+# --- 7a. Regex pattern compile --------------------------------------------
+echo
+echo "[7a/8] Deepdive cat-*.md regex patterns..."
+if python3 scripts/validate-patterns.py >/dev/null 2>&1; then
+  pass
+  note "all regex patterns in cat-*.md compile"
+else
+  fail "one or more regex patterns in cat-*.md failed to compile"
+  python3 scripts/validate-patterns.py 2>&1 | head -20 >&2
+fi
+
 # --- 7. Fixture validation --------------------------------------------------
 echo
-echo "[7/7] Test fixtures..."
+echo "[7b/8] Test fixtures..."
 if [ -d tests/fixtures ]; then
   for jsonl in tests/fixtures/*.jsonl; do
     [ -f "$jsonl" ] || continue
@@ -147,10 +162,10 @@ if [ -d tests/fixtures ]; then
       note "no schema mapping for $(basename "$jsonl") — skipped"
       continue
     fi
-    if python3 scripts/validate-findings.py --schema "$schema" "$jsonl" --quiet 2>&1; then
+    if python3 scripts/validate-findings.py --schema "$schema" --cwe-map skills/security-audit/lib/cwe-map.json "$jsonl" --quiet 2>&1; then
       pass
     else
-      fail "fixture $jsonl failed schema validation"
+      fail "fixture $jsonl failed schema+cwe-map validation"
     fi
   done
 else

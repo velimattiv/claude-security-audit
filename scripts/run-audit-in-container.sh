@@ -1,30 +1,24 @@
 #!/usr/bin/env bash
-# scripts/run-audit-in-container.sh — run /security-audit inside an
-# ephemeral OCI container so scanners don't pollute the host.
+# scripts/run-audit-in-container.sh — run the SCANNER phase of
+# /security-audit inside an ephemeral OCI container.
 #
-# Why: the v2 scanner bundle installs six binaries that are themselves
-# non-trivial attack surface on the host. For users who want a clean
-# separation, this wrapper builds (or pulls) a pinned container image
-# and runs the audit inside it, mounting only the target repo.
+# IMPORTANT SCOPE: this wrapper isolates the scanner bundle (semgrep,
+# osv-scanner, gitleaks, trufflehog, trivy, hadolint) and the SARIF
+# post-processing tooling. Claude Code and the deep-dive sub-agents
+# still run on the host — this is NOT a full-audit sandbox.
+#
+# Rationale: users can accept the scanner binaries' attack surface on
+# an ephemeral container but prefer not to install them globally. The
+# Claude Code harness is itself already installed for normal use; the
+# scanners are the additional dependency the skill introduces.
 #
 # Usage:
-#   run-audit-in-container.sh [--build] [--image <tag>] [args...]
+#   run-audit-in-container.sh [--build] [--image TAG]
+#   run-audit-in-container.sh scan semgrep           # run one scanner
+#   run-audit-in-container.sh preflight              # just run --check
+#   run-audit-in-container.sh shell                  # drop into container shell
 #
-#   --build        force a local image build from scripts/Dockerfile.audit
-#   --image TAG    image tag (default: localhost/claude-security-audit:2.0.1)
-#   [args...]      passed through to /security-audit in the container
-#                  (e.g., "mode: delta", "scope: services/api")
-#
-# Container runtime:
-#   - Docker and Podman both supported. Detects whichever is on PATH.
-#   - Rootless podman is the recommended mode; works on Linux + macOS.
-#
-# Example:
-#   # First run — build the image (~500 MB)
-#   scripts/run-audit-in-container.sh --build
-#
-#   # Subsequent runs — reuse the image
-#   scripts/run-audit-in-container.sh "mode: delta"
+# Runtime: Docker or Podman. Prefers rootless Podman.
 
 set -eu
 
@@ -36,12 +30,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --build)  BUILD=1; shift ;;
     --image)  IMAGE="$2"; shift 2 ;;
-    --help|-h)
-      sed -n '2,30p' "$0"
-      exit 0 ;;
+    --help|-h) sed -n '2,25p' "$0"; exit 0 ;;
     *) break ;;
   esac
 done
+
+# Subcommand (scan / preflight / shell). Default: preflight.
+CMD="${1:-preflight}"
+shift || true
 
 # Detect container runtime.
 if command -v podman >/dev/null 2>&1; then
@@ -50,8 +46,9 @@ elif command -v docker >/dev/null 2>&1; then
   RUNTIME=docker
 else
   echo "ERROR: no container runtime found (tried podman, docker)." >&2
-  echo "Install podman (recommended) or docker and retry. Or run the" >&2
-  echo "audit directly on the host with scripts/install-scanners.sh."  >&2
+  echo "Install podman (recommended, rootless) or docker and retry."  >&2
+  echo "Alternatively, run scanners directly on the host with"        >&2
+  echo "scripts/install-scanners.sh."                                  >&2
   exit 1
 fi
 
@@ -66,28 +63,56 @@ if [ "$BUILD" -eq 1 ] || ! "$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1; th
   (cd "$SKILL_REPO" && "$RUNTIME" build -t "$IMAGE" -f scripts/Dockerfile.audit .)
 fi
 
-echo "Running /security-audit inside $RUNTIME container $IMAGE"
+# Compose the inner command based on the subcommand.
+case "$CMD" in
+  preflight)
+    INNER="install-scanners.sh --check"
+    ;;
+  shell)
+    INNER="bash"
+    ;;
+  scan)
+    # Usage: scan <scanner> [args...]
+    SCANNER="${1:-}"
+    shift || true
+    case "$SCANNER" in
+      semgrep)    INNER="semgrep scan --config p/security-audit --config p/owasp-top-ten --sarif -o /target/.claude-audit/current/phase-04-scanners/semgrep.sarif --metrics=off --timeout 600 /target" ;;
+      osv-scanner) INNER="osv-scanner scan --recursive --format sarif --output /target/.claude-audit/current/phase-04-scanners/osv.sarif /target" ;;
+      gitleaks)   INNER="gitleaks detect --no-git --source /target --report-format sarif --report-path /target/.claude-audit/current/phase-04-scanners/gitleaks.sarif" ;;
+      trufflehog) INNER="trufflehog git file:///target --json --only-verified > /target/.claude-audit/current/phase-04-scanners/trufflehog.jsonl" ;;
+      trivy)      INNER="trivy fs --scanners vuln,secret,misconfig --format sarif --output /target/.claude-audit/current/phase-04-scanners/trivy.sarif /target" ;;
+      hadolint)   INNER="find /target -name Dockerfile -not -path '*/node_modules/*' | xargs -I {} hadolint --format sarif {}" ;;
+      "")
+        echo "ERROR: 'scan' needs a scanner name: semgrep | osv-scanner | gitleaks | trufflehog | trivy | hadolint" >&2
+        exit 1 ;;
+      *)
+        echo "ERROR: unknown scanner '$SCANNER'" >&2
+        exit 1 ;;
+    esac
+    ;;
+  *)
+    echo "ERROR: unknown subcommand '$CMD'. Valid: preflight | scan | shell." >&2
+    exit 1 ;;
+esac
+
+echo "Running: $RUNTIME / $IMAGE / $CMD ${SCANNER:-}"
 echo "Target:     $REPO_ROOT (read-only)"
 echo "Artifacts:  $ARTIFACT_DIR (read-write)"
+echo
 
-# Mount strategy:
-#   - /target                : target repo as read-only
-#   - /target/.claude-audit  : writable overlay for artifacts
-#
-# Env: ANTHROPIC_API_KEY only. No other host env leaks in.
+mkdir -p "$ARTIFACT_DIR/current/phase-04-scanners"
+
 "$RUNTIME" run \
   --rm \
   --security-opt=no-new-privileges \
   --cap-drop=ALL \
   --read-only \
   --tmpfs /tmp:rw,size=512m,mode=1777 \
-  --tmpfs /home/audit/.cache:rw,size=256m,mode=0700 \
+  --tmpfs /home/audit/.cache:rw,size=512m,mode=0700 \
   -v "$REPO_ROOT":/target:ro,Z \
   -v "$ARTIFACT_DIR":/target/.claude-audit:rw,Z \
-  -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
-  -e "SKILL_INVOCATION=${*:-/security-audit}" \
   "$IMAGE" \
-  "echo '=== Scanner preflight ===' && /usr/local/bin/install-scanners.sh --check && echo && echo '=== Audit invocation ===' && echo \"Claude Code should now run: \$SKILL_INVOCATION\" && echo 'Note: the full skill orchestration currently requires Claude Code on the host to invoke sub-agents. The container runs preflight + scanners; sub-agents run wherever Claude Code is.' "
+  /bin/bash -lc "$INNER"
 
 echo
-echo "Container exited. Artifacts under: $ARTIFACT_DIR"
+echo "Exit OK. Artifacts: $ARTIFACT_DIR/current/phase-04-scanners/"

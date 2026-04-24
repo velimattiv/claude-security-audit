@@ -1,34 +1,37 @@
-# /security-audit — container-isolated execution image
+# /security-audit — scanner-isolation image
 #
-# Run the scanner bundle inside an ephemeral container so the tools
-# (and their CVE databases, cached rules, version pins) never land on
-# the user's host filesystem. The container mounts the target repo
-# read-only and writes artifacts to a bind-mounted .claude-audit/
-# directory.
+# IMPORTANT SCOPE CLARIFICATION: this container isolates the **scanner
+# bundle** (semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint)
+# and the SARIF post-processing tooling. It does NOT run the full skill
+# orchestration — Claude Code runs on the host (or wherever you invoke
+# it), and sub-agents for deep-dive categories run in whatever runtime
+# Claude Code uses.
 #
-# Wrapper: scripts/run-audit-in-container.sh
+# What this container is good for:
+#   - You don't want six scanner binaries (plus their update channels,
+#     CVE databases, cached rules) installed globally on your host.
+#   - You want reproducible scanner versions: the image pins a known
+#     set and the wrapper builds from a checked-in Dockerfile.
 #
-# Design principles:
-#   - No build-time secrets. Runtime secrets (ANTHROPIC_API_KEY) are
-#     passed as env, never baked in.
-#   - All binaries pinned by release version in scripts/install-scanners.sh;
-#     this image simply invokes that script at build time so container
-#     and host installs use the same checksum-verified binaries.
-#   - Non-root user for the scanner runs; the root layer only installs
-#     tools, then drops privileges.
-#   - Minimal surface: no SSH daemon, no cron, no shell network tools
-#     beyond what the scanner installer needs.
+# What this container is NOT:
+#   - A full audit sandbox. Claude Code + sub-agent runtime still sit
+#     outside it. Treat it as "sandboxed scanner runtime," not
+#     "sandboxed audit."
 #
-# Size target: ≤500 MB compressed. Base image is debian-slim plus the
-# six scanner binaries.
+# Usage: scripts/run-audit-in-container.sh
+#
+# Design:
+#   - Install everything as root up front; drop to non-root `audit`
+#     for the runtime default.
+#   - Target repo bind-mounted read-only; only .claude-audit/ is RW.
+#   - --cap-drop=ALL, --read-only rootfs, --security-opt=no-new-privileges
+#     applied by the wrapper.
 
 FROM debian:bookworm-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Runtime dependencies: curl for scanner installer, git for the audit
-# target, python3 + pip for semgrep, jq for SARIF post-process, ca-certs
-# for TLS.
+# All root-only setup happens in this first block.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
       wget \
@@ -40,47 +43,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-venv \
       tar \
       gzip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash audit
 
-# Create non-root audit user with a home dir for semgrep's pip --user install.
-RUN useradd --create-home --shell /bin/bash audit
+# Copy skill + scripts in before switching user. The audit user only
+# reads these paths at runtime.
+COPY scripts/install-scanners.sh /usr/local/bin/install-scanners.sh
+COPY scripts/validate-findings.py /opt/security-audit/scripts/validate-findings.py
+COPY scripts/verify-unique-findings.py /opt/security-audit/scripts/verify-unique-findings.py
+COPY skills/ /opt/security-audit/skills/
+RUN chmod +x /usr/local/bin/install-scanners.sh /opt/security-audit/scripts/*.py
+
+# Switch to audit user. All subsequent commands run as non-root.
 USER audit
 WORKDIR /home/audit
 
-# Ensure the user-level pip bin is on PATH for semgrep.
-ENV PATH="/home/audit/.local/bin:${PATH}"
+# pip --user installs (semgrep) land in /home/audit/.local/bin.
+ENV PATH="/home/audit/.local/bin:/usr/local/bin:${PATH}" \
+    PREFIX="/home/audit/.local/bin"
 
-# Install the scanner bundle using the skill's own installer. Uses the
-# same checksum verification as a host install.
-USER root
-COPY scripts/install-scanners.sh /usr/local/bin/install-scanners.sh
-RUN chmod +x /usr/local/bin/install-scanners.sh
-USER audit
+# Install scanners as the audit user. install-scanners.sh resolves
+# $PREFIX per call, so writes land in /home/audit/.local/bin (not
+# /usr/local/bin — the audit user can't write there).
+RUN mkdir -p /home/audit/.local/bin && /usr/local/bin/install-scanners.sh
 
-RUN /usr/local/bin/install-scanners.sh
+# Install jsonschema so validate-findings.py runs with the full backend.
+RUN pip3 install --user jsonschema==4.22.0
 
-# Copy the skill itself into the image so sub-agents can read its
-# procedure files. The skill is the authoritative spec; we bake a
-# specific version into the image and tag the image accordingly.
-USER root
-COPY skills/ /opt/security-audit/skills/
-COPY scripts/validate-findings.py /opt/security-audit/scripts/validate-findings.py
-COPY scripts/verify-unique-findings.py /opt/security-audit/scripts/verify-unique-findings.py
-RUN chmod +x /opt/security-audit/scripts/*.py
-USER audit
-
-# Mount points (declared for documentation; actual mounts come from the
-# wrapper script at run time):
+# Mount points — actual mounts come from the wrapper at run time.
 #
-#   /target         — target repo (read-only bind mount)
-#   /target/.claude-audit  — artifacts (read-write bind mount; host-owned)
+#   /target                 — target repo (read-only bind mount)
+#   /target/.claude-audit   — artifacts (read-write bind mount; host-owned)
 #
 VOLUME ["/target", "/target/.claude-audit"]
 
 WORKDIR /target
 
-# Default entrypoint: run the audit workflow using the skill copy baked
-# into the image. The wrapper script passes the mode / scope / categories
-# args through.
-ENTRYPOINT ["/bin/bash", "-lc"]
-CMD ["exec bash"]
+# Default: print preflight, then drop into a shell. The wrapper script
+# overrides CMD to invoke specific scanner runs.
+CMD ["/bin/bash", "-lc", "echo '=== Scanner isolation container ===' && install-scanners.sh --check && echo && echo 'Container shell — run scanner commands directly (semgrep, osv-scanner, etc.) against /target. Claude Code orchestration runs on the host.'"]
