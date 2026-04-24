@@ -1,0 +1,116 @@
+# Example GitHub Actions workflow: run /security-audit on every push +
+# PR + nightly, upload SARIF to the Security tab, fail the PR on CRITICAL
+# findings.
+#
+# Place this at .github/workflows/security-audit.yml in your repo.
+#
+# Prerequisites:
+#   - Claude Code CLI available in the runner (see claude.ai/code).
+#   - ANTHROPIC_API_KEY secret configured in the repo.
+#   - `security-events: write` permission on the GITHUB_TOKEN so the
+#     workflow can upload SARIF to the Security tab.
+
+name: /security-audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * *'   # nightly 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write    # Required for SARIF upload
+  pull-requests: write      # Optional: for PR-comment summaries
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout (full history for gitleaks)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Install scanner bundle
+        run: |
+          git clone https://github.com/velimattiv/claude-security-audit.git /tmp/csa
+          /tmp/csa/scripts/install-scanners.sh
+
+      - name: Install skill into runner
+        run: |
+          mkdir -p .claude/skills
+          cp -r /tmp/csa/skills/security-audit .claude/skills/
+
+      - name: Install Claude Code CLI
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run security audit
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # On PRs, use delta mode if baseline exists; else full.
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ -f docs/security-audit-baseline.json ]; then
+            MODE="delta"
+          else
+            MODE="full"
+          fi
+          claude --skill security-audit "/security-audit mode: $MODE"
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && hashFiles('.claude-audit/current/findings.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2c779ab0d087cd7fe7b826087247c2c81f27bfa6  # v3.26.5
+        with:
+          sarif_file: .claude-audit/current/findings.sarif
+          category: security-audit
+
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874  # v4.4.0
+        with:
+          name: security-audit-${{ github.run_id }}
+          path: |
+            .claude-audit/current/phase-07-report.md
+            .claude-audit/current/findings.sarif
+            .claude-audit/current/findings.cyclonedx.json
+            docs/security-audit-report.md
+            docs/security-audit-baseline.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Fail PR on CRITICAL findings
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ ! -f .claude-audit/current/findings.sarif ]; then
+            echo "No SARIF — nothing to evaluate."
+            exit 0
+          fi
+          crit=$(jq '[.runs[].results[] | select(.properties."security-severity" == "9.0")] | length' \
+                 .claude-audit/current/findings.sarif)
+          echo "CRITICAL findings: $crit"
+          if [ "$crit" -gt 0 ]; then
+            echo "::error::$crit CRITICAL finding(s) — failing PR."
+            exit 1
+          fi
+
+      - name: Commit updated baseline (push only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if [ -f docs/security-audit-baseline.json ]; then
+            git config user.name "security-audit-bot"
+            git config user.email "security-audit-bot@users.noreply.github.com"
+            git add docs/security-audit-baseline.json
+            if ! git diff --cached --quiet; then
+              git commit -m "chore(security-audit): refresh baseline
+
+[skip ci]"
+              git push
+            fi
+          fi
