@@ -126,26 +126,46 @@ CURRENT_TAG="$(git -C "$TARGET_DIR" describe --tags --always 2>/dev/null || echo
 echo "  checked out: $CURRENT_TAG"
 
 # --- 3. Ensure skill is installed for Claude Code ---------------------------
+#
+# PRECEDENCE NOTE (discovered during v2.0.1 E2E self-dogfood):
+#   Claude Code's skill resolution prefers ~/.claude/skills/ over the
+#   project-local .claude/skills/. If the user has an older security-audit
+#   at user-level, a project-local install does NOT override it.
+#   To guarantee we test the skill under review, we install at user-level
+#   (backing up any pre-existing install) and restore after the run via
+#   a trap handler.
 echo
-echo "[3/5] Installing skill into target's .claude/skills/ (project-local)..."
-# Defensive: Juice Shop (and possibly future targets) ship their own .claude/
-# directory with contributor-facing instructions. We only manage the
-# security-audit subtree under skills/, never anything else under .claude/.
-if [ -d "$TARGET_DIR/.claude" ] && [ ! -d "$TARGET_DIR/.claude/skills" ]; then
-  echo "  target's .claude/ exists but has no skills/ — leaving other .claude/ contents untouched."
+echo "[3/5] Installing skill at user-level (~/.claude/skills/security-audit/)..."
+echo "  Rationale: Claude Code prefers ~/.claude/skills/ over project-local."
+USER_SKILLS="$HOME/.claude/skills"
+USER_SKILL_DIR="$USER_SKILLS/security-audit"
+BACKUP_DIR=""
+mkdir -p "$USER_SKILLS"
+if [ -d "$USER_SKILL_DIR" ]; then
+  BACKUP_DIR="$USER_SKILLS/.e2e-backup-$(date -u +%Y%m%dT%H%M%SZ)-security-audit"
+  mv "$USER_SKILL_DIR" "$BACKUP_DIR"
+  echo "  backed up pre-existing user-level skill → $BACKUP_DIR"
 fi
+cp -R "$REPO_ROOT/skills/security-audit" "$USER_SKILL_DIR"
+echo "  installed: $USER_SKILL_DIR ($(cat "$USER_SKILL_DIR/VERSION"))"
+
+# Belt-and-braces: also install project-local in case Claude Code's
+# resolution order changes in a future version.
 mkdir -p "$TARGET_DIR/.claude/skills"
-if [ -d "$TARGET_DIR/.claude/skills/security-audit" ] && \
-   [ ! -f "$TARGET_DIR/.claude/skills/security-audit/VERSION" ]; then
-  # Target shipped a directory named security-audit that's NOT our skill.
-  # Refuse to overwrite silently.
-  echo "ERROR: $TARGET_DIR/.claude/skills/security-audit exists but has no VERSION — not our skill." >&2
-  echo "       Refusing to overwrite. Remove the directory manually and retry." >&2
-  exit 4
-fi
 rm -rf "$TARGET_DIR/.claude/skills/security-audit"
 cp -R "$REPO_ROOT/skills/security-audit" "$TARGET_DIR/.claude/skills/"
-echo "  installed: $TARGET_DIR/.claude/skills/security-audit ($(cat "$TARGET_DIR/.claude/skills/security-audit/VERSION"))"
+echo "  also installed (project-local): $TARGET_DIR/.claude/skills/security-audit"
+
+# Restore on exit so an interrupted run doesn't leave the user's pre-
+# existing skill displaced.
+# shellcheck disable=SC2064
+trap "
+if [ -n '$BACKUP_DIR' ] && [ -d '$BACKUP_DIR' ]; then
+  rm -rf '$USER_SKILL_DIR'
+  mv '$BACKUP_DIR' '$USER_SKILL_DIR'
+  echo '  [cleanup] restored original user-level skill' >&2
+fi
+" EXIT
 
 # --- 4. Run the skill --------------------------------------------------------
 echo

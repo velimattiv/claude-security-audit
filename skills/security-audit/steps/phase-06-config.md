@@ -202,3 +202,18 @@ Write `phase-06.done`.
 > Phase 6 complete — ASVS coverage: <X%> passed, <Y%> failed, <Z%> N/A.
 > API Top 10 mapping: <count> findings across <N> categories. <LLM/LINDDUN
 > status>. STRIDE tables written for <K> partitions. Proceeding to Phase 7.
+
+---
+
+## Verify before exit (MANDATORY)
+
+Before declaring this phase complete and proceeding, run:
+
+```bash
+test -f .claude-audit/current/phase-06-config.json  \
+  && test -f .claude-audit/current/phase-06.done \
+  && echo "phase-06 verified" \
+  || { echo "phase-06 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+```
+
+Do not advance to the next phase until this check prints "phase-06 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.

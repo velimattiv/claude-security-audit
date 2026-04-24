@@ -14,6 +14,40 @@ every commit). This workflow implements it.
 
 ---
 
+## ⚠ MANDATORY ARTIFACT CONTRACT — READ FIRST
+
+A `/security-audit` run is **only valid** when it produces, on disk, all of:
+
+- `.claude-audit/current/phase-00-profile.json` … `phase-08-baseline.json` (at minimum the phases your mode runs)
+- `.claude-audit/current/phase-NN.done` markers for every completed phase
+- `.claude-audit/current/findings.sarif` (SARIF 2.1.0)
+- `.claude-audit/current/findings.cyclonedx.json`
+- `docs/security-audit-report.md` (the human report — but NEVER as the only output)
+
+**Producing only the human report is INVALID.** You will be tempted to
+short-circuit when you see Juice Shop / a small repo / a tight time
+budget — *do not*. The blackboard artifacts are how delta mode, SARIF
+upload, baseline diffing, and PR-gating CI integrations actually work.
+A report with no artifacts is a regression to v1.
+
+**Verification rule for every phase:** before you say "Phase N done"
+and move on, run `ls .claude-audit/current/phase-NN-*.json
+.claude-audit/current/phase-NN.done` and confirm both files exist.
+If either is missing, you have NOT completed the phase — go back and
+write them.
+
+**First action — execute literally as your first Bash tool call:**
+
+```bash
+mkdir -p .claude-audit/current/phase-04-scanners .claude-audit/cache .claude-audit/history && touch .claude-audit/.skill-acknowledged && cat skills/security-audit/VERSION 2>/dev/null || cat .claude/skills/security-audit/VERSION 2>/dev/null || echo "VERSION not found"
+```
+
+This creates the blackboard, marks the skill as acknowledged, and
+prints the skill version you're running. After this command succeeds,
+you may proceed to the rest of this file.
+
+---
+
 ## 0. Invocation
 
 The user may pass arguments after `/security-audit`:
@@ -127,12 +161,27 @@ milestone lands. When you reach an unimplemented phase in a development build,
 emit a `phase-NN.pending` marker into `.claude-audit/current/` and report
 graceful degradation to the user.
 
-## 3. Saga Checkpointing
+## 3. Saga Checkpointing — MANDATORY per phase
 
 After each phase produces its artifact, write a `phase-NN.done` marker into
 `.claude-audit/current/`. On resume, scan markers to determine the restart
 point. Delta mode treats a `phase-NN.done` marker plus a matching baseline as
 sufficient to skip the phase.
+
+**At every phase boundary, run this verification block:**
+
+```bash
+# Replace NN with the just-completed phase number.
+test -f .claude-audit/current/phase-NN-*.json && \
+test -f .claude-audit/current/phase-NN.done && \
+echo "phase-NN: artifact + marker present" || \
+{ echo "phase-NN: MISSING artifact or marker — phase incomplete, do not advance"; exit 1; }
+```
+
+Treat any failure of this check as a hard stop. **Do not advance to
+phase N+1 without proof on disk that phase N produced what it owes.**
+This is the single most common way previous runs degraded into
+"report-only" output that broke delta mode.
 
 ## 4. Mode-Specific Orchestration
 

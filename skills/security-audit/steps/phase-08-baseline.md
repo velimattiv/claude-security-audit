@@ -177,3 +177,18 @@ updates land continuously; 90 days is the conservative outer bound.
 - **Shallow clone** — baseline records the shallow state; delta-mode
   warns if `git rev-parse --is-shallow-repository` returns true AND
   the baseline's git_head isn't in the local history.
+
+---
+
+## Verify before exit (MANDATORY)
+
+Before declaring this phase complete and proceeding, run:
+
+```bash
+test -f .claude-audit/current/../baseline.json # (plus pruned docs/security-audit-baseline.json) \
+  && test -f .claude-audit/current/phase-08.done \
+  && echo "phase-08 verified" \
+  || { echo "phase-08 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+```
+
+Do not advance to the next phase until this check prints "phase-08 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.

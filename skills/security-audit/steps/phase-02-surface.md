@@ -211,3 +211,18 @@ Write `phase-02.done` marker.
   Phase 5 will deduplicate by hash where relevant.
 - **Vendor code.** Any path matching an `ignore.txt` pattern is skipped —
   no surface emitted regardless of apparent route-like structure.
+
+---
+
+## Verify before exit (MANDATORY)
+
+Before declaring this phase complete and proceeding, run:
+
+```bash
+test -f .claude-audit/current/phase-02-surface.json  \
+  && test -f .claude-audit/current/phase-02.done \
+  && echo "phase-02 verified" \
+  || { echo "phase-02 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+```
+
+Do not advance to the next phase until this check prints "phase-02 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.
