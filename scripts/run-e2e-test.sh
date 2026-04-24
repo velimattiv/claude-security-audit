@@ -177,18 +177,24 @@ else
   echo "  Working dir: $TARGET_DIR"
   echo
   START_TS=$(date +%s)
-  # Actually enforce the timeout via the coreutils `timeout` command.
-  # Exit codes:
-  #   124 = killed by timeout
-  #   other non-zero = claude-propagated failure
+  # Append a runtime system-prompt mandate. SKILL.md + workflow.md prose
+  # alone proved insufficient (3 prior runs all produced report-only) —
+  # the orchestrator LLM treats skill content as guidance. A system-prompt
+  # appendage applies on every model turn and is harder to skim past.
+  SYS_MANDATE="MANDATORY E2E CONTRACT: this run is being validated by an automated assertion suite that checks for specific files on disk after you exit. You MUST: (1) Make .claude-audit/current/ your FIRST tool action via mkdir -p. (2) For each phase 0 through 7 (8 if mode=full), write the documented artifact JSON file AND a phase-NN.done marker file to .claude-audit/current/ BEFORE moving to the next phase. (3) Write findings.sarif (SARIF 2.1.0) to .claude-audit/current/. EVERY SARIF result row MUST include in its .properties: 'security-severity' (e.g. '9.8'), 'cwe' (e.g. 'CWE-798' — the CWE id is REQUIRED for fixture matching; finding the CWE in lib/cwe-map.json is encouraged), AND optionally 'category' (one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, config). The .ruleId can be your own short identifier — but the CWE goes in properties.cwe regardless of what the ruleId says. (4) Write the human report LAST, not first. Producing only docs/security-audit-report.md without the .claude-audit/current/ blackboard files is an INVALID run — the assertion suite will fail the test. If you find yourself reasoning 'the user just wants a summary' — STOP and write the artifacts first. The artifacts ARE the deliverable; the report is the cover page."
+
   TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
   if [ -z "$TIMEOUT_BIN" ]; then
     echo "WARN: no timeout/gtimeout on PATH — wall-time cap not enforced. Install coreutils." >&2
-    ( cd "$TARGET_DIR" && claude -p "$AUDIT_INVOCATION" --dangerously-skip-permissions ) \
+    ( cd "$TARGET_DIR" && claude -p "$AUDIT_INVOCATION" \
+        --dangerously-skip-permissions \
+        --append-system-prompt "$SYS_MANDATE" ) \
       || echo "WARN: claude -p exited non-zero. Continuing to assertions." >&2
   else
     ( cd "$TARGET_DIR" && "$TIMEOUT_BIN" -k 30s "${E2E_TIMEOUT_MIN}m" \
-        claude -p "$AUDIT_INVOCATION" --dangerously-skip-permissions ) \
+        claude -p "$AUDIT_INVOCATION" \
+        --dangerously-skip-permissions \
+        --append-system-prompt "$SYS_MANDATE" ) \
       || {
         rc=$?
         if [ "$rc" -eq 124 ]; then

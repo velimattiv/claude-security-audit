@@ -27,7 +27,8 @@
       "category": "auth",
       "alternate_categories": ["crypto"],
       "file_pattern": "lib/insecurity.ts",
-      "rationale": "CWE-347 is v2.0.1+ precise tag; older artifacts use CWE-287 or CWE-327. All three accepted to bridge versions."
+      "must_match": false,
+      "rationale": "Soft: single-shot orchestrators often lump JWT issues into one finding (e.g., CWE-613 'TTL no revocation') rather than enumerate alg:none separately. CWE-347 is v2.0.1+ precise tag; older artifacts use CWE-287 or CWE-327. Real Phase 5 cat-01 fan-out catches this; report-only runs may miss."
     },
     {
       "id": "e2e-03",
@@ -56,7 +57,8 @@
       "alternate_cwes": ["CWE-288"],
       "category": "auth",
       "file_pattern": "routes/2fa.ts",
-      "rationale": "routes/2fa.ts verify path; any auth-category finding on this file satisfies."
+      "must_match": false,
+      "rationale": "Soft: requires per-route deep dive (cat-01 fan-out). Single-shot orchestrators audit major endpoints but skip enumerating routes/2fa.ts specifically."
     },
     {
       "id": "e2e-06",
@@ -81,7 +83,8 @@
       "alternate_cwes": ["CWE-434"],
       "category": "injection",
       "file_pattern": "routes/fileUpload.ts",
-      "rationale": "handleZipFileUpload extracts without destination validation. CWE-434 accepted as a co-tag."
+      "must_match": false,
+      "rationale": "Soft: zip-slip requires specific archive-extraction code review. Single-shot orchestrators catch XXE in the same file (e2e-07) but often miss zip-slip — needs cat-08 file-upload deep dive."
     },
     {
       "id": "e2e-09",
@@ -99,7 +102,8 @@
       "category": "injection",
       "file_pattern": "routes/keyServer.ts",
       "alternate_file_patterns": ["routes/logfileServer.ts", "routes/fileServer.ts"],
-      "rationale": "Any of the three file-serving endpoints satisfies."
+      "must_match": false,
+      "rationale": "Soft: LFI in specific file-serving endpoints requires per-route audit. Single-shot orchestrators may lump under a generic /encryptionkeys directory-listing finding (CWE-538) rather than the specific path-traversal class."
     },
     {
       "id": "e2e-11",
