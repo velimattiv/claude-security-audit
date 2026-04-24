@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/velimattiv/claude-security-audit/lib/finding-schema.json",
+  "title": "Phase-05 Finding (JSONL entry)",
+  "description": "A single finding row as emitted by any deep-dive sub-agent. Each sub-agent writes newline-delimited JSON; each line conforms to this schema.",
+  "type": "object",
+  "required": [
+    "id",
+    "severity",
+    "confidence",
+    "category",
+    "partition",
+    "file",
+    "line",
+    "cwe",
+    "owasp_ids",
+    "title",
+    "description",
+    "sources"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique across the audit. Format: <partition>:<category>:<seq> (e.g., juice-shop:auth:0012)."
+    },
+    "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
+    "confidence": { "enum": ["CONFIRMED", "LIKELY", "POSSIBLE"] },
+    "category": {
+      "enum": [
+        "auth", "idor", "token_scope", "mitm", "crypto",
+        "secret_sprawl", "deployment", "injection", "llm",
+        "config", "scanner", "methodology"
+      ]
+    },
+    "partition": { "type": "string" },
+    "file": { "type": "string" },
+    "line": { "type": "integer", "minimum": 1 },
+    "line_end": { "type": "integer", "minimum": 1 },
+    "surface_id": {
+      "type": ["string", "null"],
+      "description": "Phase 2 surface row this finding belongs to, if applicable."
+    },
+    "cwe": {
+      "type": "string",
+      "pattern": "^CWE-\\d+$",
+      "description": "Required. Use CWE-1007 as a last-resort generic fallback."
+    },
+    "owasp_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(ASVS-V\\d+\\.\\d+(\\.\\d+)?|API\\d+:\\d{4}|LLM\\d+:\\d{4})$"
+      },
+      "description": "e.g., ASVS-V6.2.1, API1:2023, LLM02:2025"
+    },
+    "title": { "type": "string", "maxLength": 120 },
+    "description": { "type": "string", "maxLength": 800 },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": { "enum": ["grep", "scanner", "manual", "subagent"] },
+          "detail": { "type": "string", "description": "grep pattern name or scanner rule id" }
+        }
+      },
+      "minItems": 1
+    },
+    "suggested_fix": { "type": ["string", "null"] },
+    "code_owner": { "type": ["string", "null"], "description": "From CODEOWNERS if present; else null." },
+    "attack_scenario": { "type": ["string", "null"] },
+    "remediation_effort": {
+      "type": ["string", "null"],
+      "enum": ["trivial", "small", "medium", "large", null]
+    },
+    "related_partitions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Cross-partition finding spans (monorepo ingress/handler split)."
+    },
+    "notes": { "type": "string", "maxLength": 400 }
+  }
+}
