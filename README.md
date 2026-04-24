@@ -57,21 +57,42 @@ cp -r /tmp/csa/skills/security-audit .claude/skills/
 
 ## Scanner prerequisites
 
-The v2 scanner bundle (Phase 4) lands in milestone **M3**. Until then, only
-Phases 0-1 are active; no external scanners are needed. From M3 onwards, the
-installer script lives at `scripts/install-scanners.sh` and supports:
+From M3 onwards the skill's Phase 4 runs an external scanner bundle. Install
+with:
 
-- macOS (Homebrew)
-- Debian / Ubuntu (apt)
-- Fedora (dnf)
-- Arch (pacman)
+```bash
+scripts/install-scanners.sh            # required set
+scripts/install-scanners.sh --check    # show current state
+scripts/install-scanners.sh --help
+```
 
-Windows is **not** supported; run inside WSL or a container. A container
-image is an **optional** convenience, not a prerequisite — the skill runs
-on any host with Claude Code plus the scanner bundle.
+Supported hosts:
 
-Run `scripts/install-scanners.sh --check` at any time to see which scanners
-are present on your host.
+- **macOS** (Homebrew)
+- **Debian / Ubuntu** (apt)
+- **Fedora** (dnf)
+- **Arch** (pacman)
+
+Windows is **not** supported — run inside WSL or a container. A container
+image is an **optional** convenience, not a prerequisite — the skill runs on
+any host with Claude Code plus the scanner bundle.
+
+Required scanner bundle (six, all SARIF-emitting, free / open-source):
+
+- **semgrep** — polyglot SAST, community ruleset.
+- **osv-scanner** — SCA across all manifest ecosystems.
+- **gitleaks** — secrets in working tree + git history.
+- **trufflehog** — verified-secret sweep.
+- **trivy** — IaC + Dockerfile + vulns + SBOM.
+- **hadolint** — Dockerfile lint.
+
+Conditional adds (installed on demand by context): brakeman (Rails), checkov
+(Terraform-heavy), kube-linter (Kubernetes), govulncheck (Go reachability),
+psalm (PHP taint), zizmor (GitHub Actions).
+
+If any scanner is missing, the skill prints a degraded-mode warning and
+continues with whatever is installed. **Never hard-fails** for a missing
+scanner.
 
 ## Use
 
