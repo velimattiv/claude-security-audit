@@ -100,7 +100,7 @@ users that's the point: scanners are the new dependency the skill
 introduces; Claude Code was already installed.
 
 ```bash
-# One-time: build the scanner-isolation image (≈500 MB)
+# One-time: build the scanner-isolation image (size depends on your base — expect a few hundred MB of scanners + dependencies on top of debian:bookworm-slim)
 scripts/run-audit-in-container.sh --build
 
 # Run preflight (scanner presence check) in the container

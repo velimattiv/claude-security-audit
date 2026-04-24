@@ -96,6 +96,11 @@ def main():
         type=Path,
         default=Path("skills/security-audit/steps/deepdive"),
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print each line considered with a tag: [regex] compiled / [skip] not regex / [fail] broken. Useful for debugging false negatives.",
+    )
     args = parser.parse_args()
 
     if not args.root.exists():
@@ -116,12 +121,18 @@ def main():
             line = raw.strip()
             if not is_likely_regex(line):
                 skipped += 1
+                if args.verbose:
+                    print(f"[skip] {md}:{lineno}: {line[:80]}")
                 continue
             checked += 1
             try:
                 re.compile(line)
+                if args.verbose:
+                    print(f"[regex] {md}:{lineno}: {line[:80]}")
             except re.error as e:
                 broken.append(f"{md}:{lineno}: {e} — {line[:120]}")
+                if args.verbose:
+                    print(f"[fail] {md}:{lineno}: {e}: {line[:80]}")
 
     if broken:
         print(f"FAIL: {len(broken)} regex(es) failed to compile:", file=sys.stderr)

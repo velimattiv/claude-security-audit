@@ -59,6 +59,14 @@ After the primary axes, rebalance:
 - **Merge** adjacent partitions with `loc < 3000` that share a CODEOWNER or
   language, to avoid noisy micro-partitions.
 
+**Proactive deep-dive splitting (for Phase 5).** Phase 1 should also
+pre-split any partition whose `loc > 125000` (the ≈500K-token soft
+ceiling for Phase 5 sub-agents) **before** Phase 5 runs — rather than
+reactively letting the first sub-agent hit the ceiling and return
+`needs_recursion`. The pre-split partitions carry the parent's
+`risk.score` and `depth`. This avoids burning a sub-agent invocation
+to discover something the partitioner could have known from LOC alone.
+
 ### Axis 7 — Git-log heat (PRIORITIZATION ONLY, not partitioning)
 
 Compute `git log --since="6 months ago" --name-only --pretty=format: | sort |

@@ -4,7 +4,7 @@
   "audit_id": "fixture-surface-audit",
   "generated_at": "2026-04-24T00:00:00Z",
   "by_category": { "http": 2, "file_upload": 1 },
-  "flags_summary": { "NO_AUTH_WRITE": 1 },
+  "flags_summary": { "NO_AUTH_WRITE": 1, "AUTH_UNKNOWN": 0 },
   "surfaces": [
     {
       "id": "fixture:http:0001",
@@ -57,8 +57,8 @@
       "handler_file": "routes/uploads.ts",
       "line_range": [15, 62],
       "handler_hash": "fedcba9876543210fedcba9876543210fedcba98",
-      "auth_required": true,
-      "auth_middleware": ["requireAuth"],
+      "auth_required": false,
+      "auth_middleware": [],
       "roles_required": [],
       "params": [
         { "name": "file", "source": "body", "sensitive": false }
@@ -66,8 +66,7 @@
       "trust_zone": "public",
       "data_ops": ["write"],
       "framework": "Express",
-      "flags": ["NO_AUTH_WRITE"],
-      "notes": "Fixture-only; real surfaces won't have contradictory auth_required=true + NO_AUTH_WRITE flag."
+      "flags": ["NO_AUTH_WRITE"]
     }
   ]
 }

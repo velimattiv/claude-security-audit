@@ -20,3 +20,16 @@ updates:
     labels:
       - "dependencies"
       - "python"
+
+  - package-ecosystem: "docker"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    # The scripts/Dockerfile.audit base image (debian:bookworm-slim)
+    # is pinned to a specific sha256 digest. Without this watcher,
+    # the digest would decay as Debian rebuilds the image for CVE
+    # patches. Dependabot generates PRs on each rebuild.

@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/velimattiv/claude-security-audit/lib/cwe-map.json",
   "schema_version": 2,
   "description": "Curated CWE-to-common-vulnerability mapping for /security-audit findings. Every Phase 5 sub-agent SHOULD map its finding to the most specific CWE in this file; fall back to CWE-1007 only as a last resort.",
   "attribution": "CWE IDs and names are © MITRE Corporation (CC-BY); see https://cwe.mitre.org/about/termsofuse.html. This file reproduces names for the subset of CWEs most relevant to app-sec audits.",

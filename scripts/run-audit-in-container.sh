@@ -72,24 +72,41 @@ if [ "$BUILD" -eq 1 ] || ! "$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1; th
 fi
 
 # Compose the inner command based on the subcommand.
+# Extra args after the subcommand are passed through to the inner
+# scanner command. Example:
+#   run-audit-in-container.sh scan semgrep --config p/python
+EXTRA_ARGS=("$@")
+
+# Shell-quote each extra arg for safe passthrough into the inner
+# /bin/bash -lc "<string>" invocation.
+EXTRA_JOINED=""
+for a in "${EXTRA_ARGS[@]}"; do
+  # printf %q isn't POSIX-portable but bash is our floor.
+  EXTRA_JOINED+=" $(printf '%q' "$a")"
+done
+
 case "$CMD" in
   preflight)
-    INNER="install-scanners.sh --check"
+    INNER="install-scanners.sh --check$EXTRA_JOINED"
     ;;
   shell)
-    INNER="bash"
+    INNER="bash$EXTRA_JOINED"
     ;;
   scan)
-    # Usage: scan <scanner> [args...]
-    SCANNER="${1:-}"
-    shift || true
+    # Usage: scan <scanner> [extra scanner args...]
+    SCANNER="${EXTRA_ARGS[0]:-}"
+    # Shift out scanner name; join remaining args.
+    EXTRA_JOINED=""
+    for a in "${EXTRA_ARGS[@]:1}"; do
+      EXTRA_JOINED+=" $(printf '%q' "$a")"
+    done
     case "$SCANNER" in
-      semgrep)    INNER="semgrep scan --config p/security-audit --config p/owasp-top-ten --sarif -o /target/.claude-audit/current/phase-04-scanners/semgrep.sarif --metrics=off --timeout 600 /target" ;;
-      osv-scanner) INNER="osv-scanner scan --recursive --format sarif --output /target/.claude-audit/current/phase-04-scanners/osv.sarif /target" ;;
-      gitleaks)   INNER="gitleaks detect --no-git --source /target --report-format sarif --report-path /target/.claude-audit/current/phase-04-scanners/gitleaks.sarif" ;;
-      trufflehog) INNER="trufflehog git file:///target --json --only-verified > /target/.claude-audit/current/phase-04-scanners/trufflehog.jsonl" ;;
-      trivy)      INNER="trivy fs --scanners vuln,secret,misconfig --format sarif --output /target/.claude-audit/current/phase-04-scanners/trivy.sarif /target" ;;
-      hadolint)   INNER="find /target -name Dockerfile -not -path '*/node_modules/*' | xargs -I {} hadolint --format sarif {}" ;;
+      semgrep)    INNER="semgrep scan --config p/security-audit --config p/owasp-top-ten --sarif -o /target/.claude-audit/current/phase-04-scanners/semgrep.sarif --metrics=off --timeout 600$EXTRA_JOINED /target" ;;
+      osv-scanner) INNER="osv-scanner scan --recursive --format sarif --output /target/.claude-audit/current/phase-04-scanners/osv.sarif$EXTRA_JOINED /target" ;;
+      gitleaks)   INNER="gitleaks detect --no-git --source /target --report-format sarif --report-path /target/.claude-audit/current/phase-04-scanners/gitleaks.sarif$EXTRA_JOINED" ;;
+      trufflehog) INNER="trufflehog git file:///target --json --only-verified$EXTRA_JOINED > /target/.claude-audit/current/phase-04-scanners/trufflehog.jsonl" ;;
+      trivy)      INNER="trivy fs --scanners vuln,secret,misconfig --format sarif --output /target/.claude-audit/current/phase-04-scanners/trivy.sarif$EXTRA_JOINED /target" ;;
+      hadolint)   INNER="find /target -name Dockerfile -not -path '*/node_modules/*' | xargs -I {} hadolint --format sarif$EXTRA_JOINED {}" ;;
       "")
         echo "ERROR: 'scan' needs a scanner name: semgrep | osv-scanner | gitleaks | trufflehog | trivy | hadolint" >&2
         exit 1 ;;

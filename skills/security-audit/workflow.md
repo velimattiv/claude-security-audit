@@ -204,16 +204,37 @@ Skip Phases 0-6. Re-emit from existing `.claude-audit/current/` artifacts.
 For each top-N partition × each deep-dive category:
 - Spawn **one sub-agent** using the template at `templates/subagent-prompt.md`.
 - Model: `opus`. **Never downgrade** to Sonnet/Haiku.
-- **Orchestrator-side enforcement of schema validation.** After the
+- **Orchestrator-side re-validation (defense in depth).** After the
   sub-agent returns, the orchestrator re-runs
   `scripts/validate-findings.py --schema lib/finding-schema.json
   --cwe-map lib/cwe-map.json <artifact>` against the emitted JSONL.
-  The sub-agent is *told* to validate before returning, but treating
-  that as load-bearing would trust the sub-agent's self-report. The
-  orchestrator's post-hoc re-run is the actual enforcement. A
-  validation failure triggers one retry with the errors quoted back
-  at the sub-agent; a second failure records a placeholder INFO
-  finding and proceeds.
+  The sub-agent is *told* to validate before returning; the
+  orchestrator's re-run catches cases where the sub-agent skipped
+  the self-check. Validation failure triggers one retry with the
+  errors quoted back at the sub-agent; second failure records a
+  placeholder INFO finding and proceeds.
+
+  **Honest caveat.** The orchestrator is itself an LLM following
+  `workflow.md`. Nothing *forces* the orchestrator to run the
+  validator either — an uncooperative or distracted orchestrator
+  could skip the step and return success. This is a fundamental
+  property of prompt-driven systems, not a bug fixable with more
+  text. The CI workflow (`.github/workflows/ci.yml`) is the only
+  runtime-enforced validation; it runs against `tests/fixtures/`, not
+  against live-audit artifacts. Users who need cryptographic
+  enforcement should wrap sub-agent invocations in a harness that
+  runs the validator as a hard post-condition.
+
+### File-locking / concurrent writes
+
+Phase 5's artifact-path convention
+(`phase-05-<category>-<partition>.jsonl`) makes collisions unlikely
+by naming. The orchestrator does not rely on file locking: the
+concurrency cap (8 sub-agents) combined with unique per-(category,
+partition) paths keeps writes disjoint. If a future change raises
+the concurrency cap or permits multiple sub-agents on the same
+(category, partition) pair, file-locking needs to be added
+explicitly — *do not* assume the convention protects it.
 
 ### Needs-recursion split procedure
 

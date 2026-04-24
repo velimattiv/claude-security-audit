@@ -116,12 +116,14 @@ not a stacking modifier.
   HIGH.
 - LOW finding, grep-only, dev zone, read → net = −1 → demote → INFO.
 
-Rationale: any single strengthening signal merits a one-rung
-adjustment (a CONFIRMED finding on a read-only internal endpoint
-*is* more actionable than a grep-only finding on the same), but
-multiple strengthening signals don't deserve compounding — they're
-corroborating evidence of the same fact, not independent severity
-multipliers.
+Rationale: the severity **is already set** by the rubric on the
+finding itself; this rule is a calibration adjustment based on
+*context*. Context is corroborating evidence, not cumulative
+severity. One context positive nudges the severity up by one rung;
+more positives don't nudge further (they'd be double-counting the
+same underlying signal). The symmetric dev-zone demotion captures
+the inverse — test fixtures rarely warrant the same severity as
+production code with the same finding body.
 
 ## 7.5 — Unique-to-skill identification
 

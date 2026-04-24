@@ -108,6 +108,16 @@ Emit `frameworks[]`:
 If a language has unknown framework, emit one entry with `framework: null`
 and set `evidence` to the manifest file you checked.
 
+**Conflict resolution.** If multiple manifests for the same language
+declare different frameworks (e.g., a Python project with both
+`pyproject.toml` declaring `fastapi` and a legacy `requirements.txt`
+declaring `flask`), emit **one entry per detected framework** with
+distinct `evidence` paths. Downstream phases (Phase 2 surface
+inventory) will then exercise each framework's detection patterns —
+correct behavior for a migration-in-progress codebase. Do NOT pick
+one and discard the other; that would silently skip surfaces from the
+second framework.
+
 ## 0.6 — Non-HTTP surfaces (hint only — Phase 2 does inventory)
 
 Probe for presence signals. Do **not** enumerate surfaces here — that is

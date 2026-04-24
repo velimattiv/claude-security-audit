@@ -8,6 +8,39 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Nothing queued. The skill is pre-release; open a Discussion issue to
 propose v2.1 work.
 
+Round 4 of adversarial review — additional fixes integrated into the
+[2.0.1] entry below:
+- `cwe-map.json` gains a `$schema` declaration for consistency with
+  other lib/*.json files.
+- `validate-findings.py` load_cwe_map hard-fails on missing /empty
+  `mappings` instead of silently passing every CWE.
+- `tests/fixtures/surface-minimal.json` contradictory row replaced
+  with a consistent `NO_AUTH_WRITE` surface (auth_required=false).
+- `.github/dependabot.yml` adds a `docker` ecosystem watcher so the
+  Dockerfile.audit base-image digest pin doesn't decay.
+- `run-audit-in-container.sh scan <tool>` now passes extra args
+  through to the inner scanner command (e.g., `--config p/python`).
+- Phase 0 §0.5 documents the multi-framework conflict rule: emit one
+  entry per detected framework, don't silently pick one.
+- Phase 1 §Axis-6 documents proactive partition pre-splitting at
+  125K LOC instead of reactive-only needs_recursion.
+- `.github/PULL_REQUEST_TEMPLATE.md` + `.github/ISSUE_TEMPLATE/*.md`
+  make contribution expectations visible at submission time.
+- Severity rule rationale in `phase-07-synthesis.md §7.4` rewritten
+  to be internally consistent — no more contradictory framings.
+- `workflow.md §5` adds an honest caveat: orchestrator-side
+  re-validation is defense-in-depth, not cryptographic enforcement.
+- `workflow.md §5` explicitly documents the file-lock convention
+  (disjoint per-(cat,partition) paths; concurrency cap enforces
+  non-overlap).
+- `docs/test-runs/README.md` annotates superseded content (M5
+  fingerprint formula + M6 surface.file lookup) so readers know
+  which writeups reflect v2.0.1 state.
+- `validate-patterns.py` gains a `--verbose` flag for debugging
+  false negatives.
+- `CODEOWNERS` notes the single-maintainer risk explicitly.
+- README dropped the unmeasured "~500 MB image size" claim.
+
 ## [2.0.1] — 2026-04-24
 
 ### Changed

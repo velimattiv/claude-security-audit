@@ -8,6 +8,16 @@ These are **evidence, not specification.** If behavior changes, the
 historical runs still read correctly even if the skill evolves — they
 document what was true at a point in time.
 
+**Superseded content — read with care.** The M6 writeup references a
+Phase 2 `surface.file` lookup that no longer exists (v2.0.1 replaced
+it with `registration_file` + `handler_file`). The M5 dogfood
+used the old `sha1(file:line:title)` fingerprint formula (v2.0.1 uses
+`sha1(handler_file:line:cwe:category)`). These runs still demonstrate
+the phase *behavior* validly, but if you re-run the same target with
+v2.0.1 the numeric fingerprints and the surface field names will
+differ. No historical file has been silently edited — the superseded
+sections are left as-written for provenance integrity.
+
 ## Milestone dogfoods (v2.0.0 → v2.0.0 release)
 
 | File | Scope |

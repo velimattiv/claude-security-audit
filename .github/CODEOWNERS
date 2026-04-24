@@ -2,9 +2,11 @@
 # Syntax: <pattern> <owner> [<owner> ...]
 # See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
 #
-# The skill is currently maintained by a single person. As contributors
-# join, add their GitHub handle to the file paths they own. For now, all
-# paths route to @velimattiv.
+# The skill is currently maintained by a single person. Known single-
+# point-of-failure risk for security reports: if @velimattiv is
+# unreachable, routing needs a fallback. Adding a second maintainer is
+# tracked on docs/ROADMAP.md as a release-blocker for wider distribution.
+# For now, all paths route to @velimattiv.
 
 *                                        @velimattiv
 

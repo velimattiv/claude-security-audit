@@ -44,12 +44,28 @@ def iter_findings(jsonl_path: Path):
 
 def load_cwe_map(cwe_map_path: Path | None) -> set[str] | None:
     """Load the set of CWE IDs from cwe-map.json. Returns None if path
-    is None (meaning: skip the semantic CWE-in-map check)."""
+    is None (meaning: skip the semantic CWE-in-map check).
+
+    Fails loudly if the file lacks a `mappings` object or the object
+    is empty — this defends against a silent no-op semantic check
+    caused by a schema refactor that renames the top-level key."""
     if cwe_map_path is None:
         return None
     with open(cwe_map_path) as f:
         doc = json.load(f)
-    mappings = doc.get("mappings", {})
+    if "mappings" not in doc:
+        raise ValueError(
+            f"{cwe_map_path}: missing top-level `mappings` object. "
+            "If you refactored the schema, update validate-findings.py "
+            "too — the silent empty-set fallback has been removed."
+        )
+    mappings = doc["mappings"]
+    if not isinstance(mappings, dict) or not mappings:
+        raise ValueError(
+            f"{cwe_map_path}: `mappings` must be a non-empty object. "
+            "An empty map would pass every finding through the semantic "
+            "check trivially — failing loudly instead."
+        )
     return set(mappings.keys())
 
 
