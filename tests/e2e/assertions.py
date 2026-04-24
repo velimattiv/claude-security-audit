@@ -280,6 +280,10 @@ def collect_all_findings(artifact_dir: Path) -> list[dict]:
                 elif isinstance(doc.get("results"), list):
                     findings.extend(doc["results"])
         except (json.JSONDecodeError, OSError):
+            # Phase-05 is one of several finding sources; a malformed or
+            # unreadable per-category JSON shouldn't abort ingestion of
+            # the rest. Missing-artifact + structural checks elsewhere
+            # surface the underlying skill failure.
             pass
 
     config_path = current / "phase-06-config.json"
@@ -291,6 +295,8 @@ def collect_all_findings(artifact_dir: Path) -> list[dict]:
             elif isinstance(doc, dict) and isinstance(doc.get("findings"), list):
                 findings.extend(doc["findings"])
         except (json.JSONDecodeError, OSError):
+            # Same rationale as phase-05: best-effort ingestion across
+            # multiple optional sources.
             pass
 
     for extra in ["phase-06-api-top10.jsonl", "phase-06-asvs.jsonl", "phase-06-linddun.jsonl"]:
@@ -299,6 +305,8 @@ def collect_all_findings(artifact_dir: Path) -> list[dict]:
             try:
                 findings.extend(load_jsonl(p))
             except (json.JSONDecodeError, OSError):
+                # Optional methodology JSONLs — skip silently when malformed
+                # so one bad file doesn't mask the others.
                 pass
 
     syn_path = current / "phase-07-synthesis.json"
@@ -308,6 +316,9 @@ def collect_all_findings(artifact_dir: Path) -> list[dict]:
             if isinstance(doc, dict) and isinstance(doc.get("findings"), list):
                 findings.extend(doc["findings"])
         except (json.JSONDecodeError, OSError):
+            # phase-07-synthesis.json is optional alongside the canonical
+            # phase-07-report.md + findings.sarif; absence here doesn't
+            # affect the SARIF-driven matching path below.
             pass
 
     # SARIF — the canonical machine-readable export. Always include.
@@ -319,6 +330,9 @@ def collect_all_findings(artifact_dir: Path) -> list[dict]:
                 for r in run.get("results", []):
                     findings.append(_sarif_result_to_finding(r))
         except (json.JSONDecodeError, OSError):
+            # SARIF parse failure is a separately-asserted condition
+            # (see check_sarif_validity); here we just skip ingestion so
+            # JSONL-derived findings still flow through.
             pass
 
     return findings
