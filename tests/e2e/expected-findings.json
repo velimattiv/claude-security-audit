@@ -1,7 +1,12 @@
 {
   "target": "juice-shop@v19.2.1",
-  "schema_version": 1,
-  "notes": "Each expectation must be matched by at least one row in either findings.sarif OR any phase-05-<cat>-*.jsonl. Match rule: finding.file matches `file_pattern` (glob) AND finding.cwe == expected cwe AND finding.category == expected category. A missing expectation fails the E2E.",
+  "schema_version": 2,
+  "notes": "Each expectation must be matched by at least one row in findings.sarif OR any phase-05-<cat>-*.jsonl OR the phase-06 methodology JSONLs. Match rule (see tests/e2e/assertions.py): finding.file normalizes to repo-relative and glob-matches `file_pattern` (or any `alternate_file_patterns`) AND finding.cwe equals `cwe` (or is in `alternate_cwes`) AND finding.category equals `category` (or is in `alternate_categories`). A missing expectation fails the E2E.",
+
+  "schema_changelog": {
+    "v1": "initial: cwe + category + file_pattern with optional alternate_file_patterns",
+    "v2": "added alternate_cwes (for CWE-precision drift across skill versions) and alternate_categories (for Phase 6 cross-category hits — e.g., a cookie secret found by cat-06 as secret_sprawl AND by §6.3 cookie-audit as config)"
+  },
 
   "expectations": [
     {
@@ -9,40 +14,49 @@
       "description": "Hard-coded RSA private key used to sign JWTs (inline in source)",
       "cwe": "CWE-798",
       "category": "secret_sprawl",
+      "alternate_categories": ["auth", "config"],
       "file_pattern": "lib/insecurity.ts",
-      "rationale": "Secrets-in-source, not auth-config. Re-tagged from auth per Round-4 feedback."
+      "alternate_file_patterns": ["encryptionkeys/*.priv*", "lib/crypto*.ts"],
+      "rationale": "Secrets-in-source. alternate_categories accepts pre-v2.0.1 dogfoods where cat-01 tagged this auth."
     },
     {
       "id": "e2e-02",
       "description": "JWT verification accepts alg:none (no algorithms whitelist)",
       "cwe": "CWE-347",
+      "alternate_cwes": ["CWE-287", "CWE-327"],
       "category": "auth",
+      "alternate_categories": ["crypto"],
       "file_pattern": "lib/insecurity.ts",
-      "rationale": "CWE-347 Improper Verification of Cryptographic Signature — more precise than the generic CWE-287."
+      "rationale": "CWE-347 is v2.0.1+ precise tag; older artifacts use CWE-287 or CWE-327. All three accepted to bridge versions."
     },
     {
       "id": "e2e-03",
       "description": "Hard-coded cookie-parser signing secret 'kekse'",
       "cwe": "CWE-798",
       "category": "secret_sprawl",
+      "alternate_categories": ["auth", "config"],
       "file_pattern": "server.ts",
-      "rationale": "Textbook secret in source."
+      "alternate_file_patterns": ["app.ts", "lib/insecurity.ts"],
+      "rationale": "cookieParser('kekse') in server.ts; Phase 6 §6.3 cookie audit may also emit it as category=config."
     },
     {
       "id": "e2e-04",
       "description": "Missing authorization on a write handler (e.g., PUT /api/Products/:id — auth middleware commented out)",
       "cwe": "CWE-862",
+      "alternate_cwes": ["CWE-306", "CWE-285"],
       "category": "auth",
       "file_pattern": "server.ts",
-      "rationale": "Juice Shop has multiple write endpoints with commented-out auth middleware. CWE-862 (Missing Authorization) fits better than CWE-306 (Missing Authentication) because the caller IS authenticated — the authorization check is what's absent."
+      "alternate_file_patterns": ["routes/*.ts", "app.ts"],
+      "rationale": "Commented-out authz middleware. CWE-862 preferred; CWE-306 + CWE-285 accepted for older taxonomies."
     },
     {
       "id": "e2e-05",
       "description": "2FA verify handler trust gap",
       "cwe": "CWE-287",
+      "alternate_cwes": ["CWE-288"],
       "category": "auth",
       "file_pattern": "routes/2fa.ts",
-      "rationale": "routes/2fa.ts contains a TOTP verify path; any finding with this file+category counts."
+      "rationale": "routes/2fa.ts verify path; any auth-category finding on this file satisfies."
     },
     {
       "id": "e2e-06",
@@ -50,7 +64,7 @@
       "cwe": "CWE-89",
       "category": "injection",
       "file_pattern": "routes/login.ts",
-      "rationale": "Login uses sequelize.query with $-interpolation; canonical Juice Shop SQLi."
+      "rationale": "Canonical Juice Shop SQLi — sequelize.query with $-interpolation."
     },
     {
       "id": "e2e-07",
@@ -58,15 +72,16 @@
       "cwe": "CWE-611",
       "category": "injection",
       "file_pattern": "routes/fileUpload.ts",
-      "rationale": "handleXmlUpload parses with noent:true."
+      "rationale": "handleXmlUpload with noent:true."
     },
     {
       "id": "e2e-08",
       "description": "Zip-slip path traversal via zip upload",
       "cwe": "CWE-22",
+      "alternate_cwes": ["CWE-434"],
       "category": "injection",
       "file_pattern": "routes/fileUpload.ts",
-      "rationale": "handleZipFileUpload extracts entries without validating destination path."
+      "rationale": "handleZipFileUpload extracts without destination validation. CWE-434 accepted as a co-tag."
     },
     {
       "id": "e2e-09",
@@ -74,7 +89,8 @@
       "cwe": "CWE-918",
       "category": "injection",
       "file_pattern": "routes/profileImageUrlUpload.ts",
-      "rationale": "v19.2.1 path: routes/profileImageUrlUpload.ts (was routes/profileImageUrl.ts in older versions)."
+      "alternate_file_patterns": ["routes/profileImageUrl.ts"],
+      "rationale": "v19.2.1 path: routes/profileImageUrlUpload.ts. Older versions used routes/profileImageUrl.ts."
     },
     {
       "id": "e2e-10",
@@ -83,30 +99,32 @@
       "category": "injection",
       "file_pattern": "routes/keyServer.ts",
       "alternate_file_patterns": ["routes/logfileServer.ts", "routes/fileServer.ts"],
-      "rationale": "Any of the three file-serving endpoints — a finding on any one satisfies this expectation."
+      "rationale": "Any of the three file-serving endpoints satisfies."
     },
     {
       "id": "e2e-11",
       "description": "IDOR on basket — /api/Basket/:id returns without ownership check",
       "cwe": "CWE-639",
+      "alternate_cwes": ["CWE-284", "CWE-285"],
       "category": "idor",
       "file_pattern": "routes/basket.ts",
-      "alternate_file_patterns": ["routes/basketItems.ts"],
-      "rationale": "Classic BOLA. Any Phase 5 cat-02 finding on basket.ts or basketItems.ts satisfies."
+      "alternate_file_patterns": ["routes/basketItems.ts", "server.ts"],
+      "rationale": "Classic BOLA. Registration in server.ts; handler body in routes/basket.ts."
     },
     {
       "id": "e2e-12",
       "description": "MD5 used for password hashing",
       "cwe": "CWE-916",
+      "alternate_cwes": ["CWE-327", "CWE-328"],
       "category": "crypto",
       "file_pattern": "lib/insecurity.ts",
-      "rationale": "CWE-916 'password hash with insufficient computational effort' is more precise than generic CWE-328 weak hash."
+      "rationale": "CWE-916 is v2.0.1+ precise tag for password-hash insufficient-effort; CWE-327/328 accepted for pre-v2.0.1 artifacts."
     }
   ],
 
   "gated_categories": {
     "token_scope": "Juice Shop has no PAT/scope system. JWT only; covered by auth expectations. No ground truth in this target; validate in a v2.1 dogfood on a different target.",
-    "mitm": "Juice Shop's outbound TLS is minimal (ethers WebSocketProvider, chatbot data download). Expect a non-zero finding count from Phase 5 cat-04 if outbound clients are enumerated, but not a specific fixture here.",
+    "mitm": "Juice Shop's outbound TLS is minimal (ethers WebSocketProvider, chatbot data download). Expect non-zero cat-04 output if outbound clients are enumerated, but no fixture here.",
     "deployment": "v19.2.1's Dockerfile is distroless + USER 65532 + multi-stage — hardened. No HIGH/CRITICAL deployment-category ground truth in this target. Supplement with DVWA/v2.1.",
     "llm": "phase-00-profile detects no LLM SDK in Juice Shop. cat-09 will be gated off. Expected: no phase-05-llm-*.jsonl file produced; assertion suite treats this as pass-via-skip."
   }

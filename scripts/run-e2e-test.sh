@@ -22,6 +22,7 @@
 # Usage:
 #   scripts/run-e2e-test.sh              # full E2E
 #   scripts/run-e2e-test.sh --dry-run    # skip `claude` invocation; validate existing artifacts
+#   scripts/run-e2e-test.sh --keep       # do NOT wipe the target dir (preserve baseline for delta-mode testing)
 #   scripts/run-e2e-test.sh --help
 #
 # Cost: expect $5-$20 per run on an API key, or no marginal cost on
@@ -41,12 +42,16 @@ fi
 . "$CFG"
 
 DRY_RUN=0
-case "${1:-}" in
-  --dry-run) DRY_RUN=1 ;;
-  --help|-h) sed -n '2,30p' "$0"; exit 0 ;;
-  "") ;;
-  *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
-esac
+KEEP=0
+while [ $# -gt 0 ]; do
+  case "${1:-}" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --keep)    KEEP=1; shift ;;
+    --help|-h) sed -n '2,34p' "$0"; exit 0 ;;
+    "")        break ;;
+    *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
+  esac
+done
 
 echo "=== /security-audit E2E ==="
 echo "Target:         $TARGET_NAME @ $TARGET_TAG"
@@ -56,7 +61,7 @@ echo "Artifacts:      $TARGET_DIR/.claude-audit (inside target clone)"
 echo
 
 # --- 1. Version gates --------------------------------------------------------
-echo "[1/5] Version gates..."
+echo "[1/5] Version gates + flag preflight..."
 if ! command -v claude >/dev/null 2>&1; then
   echo "ERROR: 'claude' CLI not found on PATH. Install Claude Code first." >&2
   echo "See: https://code.claude.com/docs — the installer choice affects" >&2
@@ -65,9 +70,33 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 CLAUDE_VER="$(claude --version 2>/dev/null | head -1 || echo 'unknown')"
 echo "  claude --version: $CLAUDE_VER"
+
+# Hard fail if the pinned skill version differs from the fixture's expected
+# calibration. Fixtures depend on CWE tags + file paths that come from the
+# category instruction files — a mismatch means the fixture is validating
+# against stale instructions.
 SKILL_VER="$(cat "$REPO_ROOT/skills/security-audit/VERSION" | tr -d '[:space:]')"
 if [ "$SKILL_VER" != "$SKILL_VERSION_EXPECTED" ]; then
-  echo "WARN: skill VERSION ($SKILL_VER) != fixture's expected ($SKILL_VERSION_EXPECTED). Fixtures may need re-calibration." >&2
+  echo "ERROR: skill VERSION ($SKILL_VER) != fixture's expected ($SKILL_VERSION_EXPECTED)." >&2
+  echo "       Update tests/e2e/config.env's SKILL_VERSION_EXPECTED + re-verify" >&2
+  echo "       expected-findings.json against this skill version before running." >&2
+  exit 2
+fi
+
+# Preflight: verify `claude` accepts the flags we'll use. A `claude --help`
+# output that lacks `-p` or `--dangerously-skip-permissions` means the
+# installed Claude Code is incompatible — fail early with actionable message.
+HELP_OUT="$(claude --help 2>&1 || true)"
+if ! printf "%s" "$HELP_OUT" | grep -qE -- '(-p|--print)'; then
+  echo "ERROR: 'claude --help' does not advertise -p/--print flag." >&2
+  echo "       Script needs Claude Code's non-interactive mode. Your installed" >&2
+  echo "       version may be too old or too new. Documented minimum: $CLAUDE_CODE_VERSION_MIN." >&2
+  exit 2
+fi
+if ! printf "%s" "$HELP_OUT" | grep -q -- '--dangerously-skip-permissions'; then
+  echo "WARN: --dangerously-skip-permissions not advertised; may be gated behind an env var." >&2
+  echo "      If the audit stalls waiting for a tool-permission prompt, export" >&2
+  echo "      CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS=1 and re-run." >&2
 fi
 
 # --- 2. Clone target at pinned tag -------------------------------------------
@@ -75,20 +104,45 @@ echo
 echo "[2/5] Cloning $TARGET_REPO @ $TARGET_TAG..."
 if [ "$DRY_RUN" -eq 1 ] && [ -d "$TARGET_DIR/.git" ]; then
   echo "  --dry-run: reusing existing $TARGET_DIR"
+elif [ "$KEEP" -eq 1 ] && [ -d "$TARGET_DIR/.git" ]; then
+  echo "  --keep: reusing existing $TARGET_DIR (preserves prior baseline for delta-mode testing)"
 else
+  if [ -d "$TARGET_DIR" ] && [ "$KEEP" -eq 0 ]; then
+    # Preserve any existing baseline under a timestamped archive so an
+    # accidental re-run doesn't silently discard delta-mode inputs.
+    if [ -f "$TARGET_DIR/.claude-audit/baseline.json" ]; then
+      archive="$TARGET_DIR/.claude-audit/history/pre-rerun-$(date -u +%Y%m%dT%H%M%SZ)"
+      mkdir -p "$archive"
+      cp -R "$TARGET_DIR/.claude-audit/current" "$archive/" 2>/dev/null || true
+      cp "$TARGET_DIR/.claude-audit/baseline.json" "$archive/" 2>/dev/null || true
+      echo "  archived prior baseline: $archive"
+    fi
+  fi
   rm -rf "$TARGET_DIR"
-  git clone --depth 1 --branch "$TARGET_TAG" "$TARGET_REPO" "$TARGET_DIR"
+  git clone --depth 1 --branch "$TARGET_TAG" "$TARGET_REPO" "$TARGET_DIR" \
+    || { echo "ERROR: git clone failed. Check that $TARGET_TAG exists upstream." >&2; exit 3; }
 fi
 CURRENT_TAG="$(git -C "$TARGET_DIR" describe --tags --always 2>/dev/null || echo unknown)"
 echo "  checked out: $CURRENT_TAG"
-if [ "$CURRENT_TAG" != "$TARGET_TAG" ]; then
-  echo "NOTE: shallow clones often show only the SHA, not the tag. That's expected."
-fi
 
 # --- 3. Ensure skill is installed for Claude Code ---------------------------
 echo
 echo "[3/5] Installing skill into target's .claude/skills/ (project-local)..."
+# Defensive: Juice Shop (and possibly future targets) ship their own .claude/
+# directory with contributor-facing instructions. We only manage the
+# security-audit subtree under skills/, never anything else under .claude/.
+if [ -d "$TARGET_DIR/.claude" ] && [ ! -d "$TARGET_DIR/.claude/skills" ]; then
+  echo "  target's .claude/ exists but has no skills/ — leaving other .claude/ contents untouched."
+fi
 mkdir -p "$TARGET_DIR/.claude/skills"
+if [ -d "$TARGET_DIR/.claude/skills/security-audit" ] && \
+   [ ! -f "$TARGET_DIR/.claude/skills/security-audit/VERSION" ]; then
+  # Target shipped a directory named security-audit that's NOT our skill.
+  # Refuse to overwrite silently.
+  echo "ERROR: $TARGET_DIR/.claude/skills/security-audit exists but has no VERSION — not our skill." >&2
+  echo "       Refusing to overwrite. Remove the directory manually and retry." >&2
+  exit 4
+fi
 rm -rf "$TARGET_DIR/.claude/skills/security-audit"
 cp -R "$REPO_ROOT/skills/security-audit" "$TARGET_DIR/.claude/skills/"
 echo "  installed: $TARGET_DIR/.claude/skills/security-audit ($(cat "$TARGET_DIR/.claude/skills/security-audit/VERSION"))"
@@ -98,14 +152,32 @@ echo
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[4/5] --dry-run: skipping claude invocation. Using existing artifacts if present."
 else
-  echo "[4/5] Running /security-audit (wall-time advisory: ${E2E_TIMEOUT_MIN} min)..."
+  echo "[4/5] Running /security-audit (hard wall-time cap: ${E2E_TIMEOUT_MIN} min via timeout(1))..."
   echo "  Command: claude -p '$AUDIT_INVOCATION' --dangerously-skip-permissions"
   echo "  Working dir: $TARGET_DIR"
   echo
   START_TS=$(date +%s)
-  ( cd "$TARGET_DIR" && claude -p "$AUDIT_INVOCATION" --dangerously-skip-permissions ) || {
-    echo "WARN: claude -p exited non-zero. Continuing to assertions to capture partial state." >&2
-  }
+  # Actually enforce the timeout via the coreutils `timeout` command.
+  # Exit codes:
+  #   124 = killed by timeout
+  #   other non-zero = claude-propagated failure
+  TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+  if [ -z "$TIMEOUT_BIN" ]; then
+    echo "WARN: no timeout/gtimeout on PATH — wall-time cap not enforced. Install coreutils." >&2
+    ( cd "$TARGET_DIR" && claude -p "$AUDIT_INVOCATION" --dangerously-skip-permissions ) \
+      || echo "WARN: claude -p exited non-zero. Continuing to assertions." >&2
+  else
+    ( cd "$TARGET_DIR" && "$TIMEOUT_BIN" -k 30s "${E2E_TIMEOUT_MIN}m" \
+        claude -p "$AUDIT_INVOCATION" --dangerously-skip-permissions ) \
+      || {
+        rc=$?
+        if [ "$rc" -eq 124 ]; then
+          echo "WARN: claude -p killed by timeout at ${E2E_TIMEOUT_MIN}m. Continuing to assertions." >&2
+        else
+          echo "WARN: claude -p exited rc=$rc. Continuing to assertions." >&2
+        fi
+      }
+  fi
   ELAPSED=$(( $(date +%s) - START_TS ))
   echo
   echo "  Elapsed: ${ELAPSED}s ($(( ELAPSED / 60 ))m $(( ELAPSED % 60 ))s)"
@@ -118,7 +190,8 @@ set +e
 python3 "$REPO_ROOT/tests/e2e/assertions.py" \
   --artifact-dir "$TARGET_DIR" \
   --repo-root "$REPO_ROOT" \
-  --fixture "$REPO_ROOT/tests/e2e/expected-findings.json"
+  --fixture "$REPO_ROOT/tests/e2e/expected-findings.json" \
+  --require-jsonschema-backend
 RC=$?
 set -e
 

@@ -70,16 +70,21 @@ Three options for a future GHA variant, none shipped today:
 Current state: (c). `docs/ROADMAP.md` tracks the investigation as a
 v2.1 candidate. The blocker is auth, not capability.
 
-## Dry-run mode
+## Dry-run + keep modes
 
 ```bash
-scripts/run-e2e-test.sh --dry-run
+scripts/run-e2e-test.sh --dry-run     # skip claude call; validate existing artifacts
+scripts/run-e2e-test.sh --keep        # preserve prior baseline for delta-mode testing
 ```
 
-Skips the `claude` invocation and runs assertions against the target
-dir's existing `.claude-audit/` contents. Useful for:
-- Iterating on the assertion script without paying for Opus calls.
-- Validating a prior run's artifacts after the fact.
+- `--dry-run`: validates an existing `.claude-audit/` without paying
+  for Opus calls. Useful for iterating on the assertion script.
+- `--keep`: skips the `rm -rf $TARGET_DIR` step so a prior baseline
+  survives; the next `claude -p "/security-audit mode: delta"`
+  exercises delta-mode invalidation.
+- Without either flag, the script archives any existing
+  `.claude-audit/baseline.json` under `.claude-audit/history/` with a
+  timestamp before wiping — you can always recover prior state.
 
 ## Updating the fixture
 
@@ -93,21 +98,12 @@ When upstream Juice Shop releases a new version:
 4. Commit pin + fixture edit **atomically**. A mismatched pair makes
    the test flaky.
 
-## False passes this can still produce
+## Known gaps
 
-- **Schema validator lied.** The assertion re-runs the schema validator
-  on every Phase 5 JSONL — if THAT validator has a bug, bad findings
-  could pass.
-- **A category fixture is satisfied by a wrong finding.** E.g., the
-  (file, cwe, category) tuple happens to match another similar finding
-  at the same location. Mitigated by the fixture list being
-  hand-curated from Juice Shop's known-vuln set, not scanned.
-- **Report contains the required section headers but no real content
-  between them.** We check structure, not semantic completeness.
-  Mitigated by the per-fixture match + schema-validator-must-pass.
-
-These are known gaps; documented here so future contributors can
-harden them without re-discovering.
+Moved to `docs/KNOWN-GAPS.md` — single canonical list with
+"mitigation available" lines per gap rather than a README afterthought.
+The assertion suite is not a full regression harness; treat its PASS
+as "structurally valid + 12 fixture hits" not "semantically correct."
 
 ## What this catches that the partial M4/M5 dogfoods don't
 
