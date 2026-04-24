@@ -1,0 +1,50 @@
+# CodeQL analysis for this repo.
+#
+# The skill's documentation says CodeQL is excluded BY DEFAULT for
+# audits because CodeQL's CLI is license-restricted to OSI-approved
+# open source. This repo IS MIT-licensed, so CodeQL is fine for our
+# own CI.
+
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'   # Monday 06:00 UTC weekly
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+        # We could add 'javascript-typescript' if we add JS/TS to the
+        # repo. Currently only Python (scripts/*.py) and shell scripts
+        # (not CodeQL-supported) carry real logic.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@2c779ab0d087cd7fe7b826087247c2c81f27bfa6  # v3.26.5
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@2c779ab0d087cd7fe7b826087247c2c81f27bfa6  # v3.26.5
+        with:
+          category: "/language:${{ matrix.language }}"

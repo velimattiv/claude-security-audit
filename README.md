@@ -1,5 +1,9 @@
 # /security-audit — Claude Code Skill
 
+[![ci](https://github.com/velimattiv/claude-security-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/velimattiv/claude-security-audit/actions/workflows/ci.yml)
+[![codeql](https://github.com/velimattiv/claude-security-audit/actions/workflows/codeql.yml/badge.svg)](https://github.com/velimattiv/claude-security-audit/actions/workflows/codeql.yml)
+[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A thorough, multi-phase security audit skill for [Claude Code](https://code.claude.com).
 Goes beyond generic vulnerability scanning by enumerating every attack
 surface (HTTP, gRPC, GraphQL, WebSocket, queue consumers, serverless
