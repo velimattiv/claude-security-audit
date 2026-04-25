@@ -53,21 +53,27 @@ baseline exists).
 
 ## Install
 
-User-level (available in every project):
+User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone https://github.com/velimattiv/claude-security-audit.git /tmp/csa
-mkdir -p ~/.claude/skills
-cp -r /tmp/csa/skills/security-audit ~/.claude/skills/
+git clone --depth 1 --branch v2.0.2 \
+  https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
+cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
+cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
 ```
 
 Project-level (just this repo):
 
 ```bash
-git clone https://github.com/velimattiv/claude-security-audit.git /tmp/csa
+git clone --depth 1 --branch v2.0.2 \
+  https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
-cp -r /tmp/csa/skills/security-audit .claude/skills/
+cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
 ```
+
+For a step-by-step install (with backup of any existing
+`security-audit` skill, smoke-test, full-E2E validation, troubleshooting,
+and uninstall), see **[`docs/INSTALL.md`](docs/INSTALL.md)**.
 
 ## Scanner prerequisites
 
