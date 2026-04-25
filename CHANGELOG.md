@@ -8,6 +8,95 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Nothing queued. The skill is pre-release; open a Discussion issue to
 propose v2.1 work.
 
+## [2.0.2] — 2026-04-25
+
+### Changed — reliability patch, no new capability
+
+This is a patch release. **No new capability, no new artifacts, no
+public-API changes.** (The E2E harness's invocation shape *does*
+change — `--append-system-prompt` is gone — see the Honest Scope Note
+below.) The patch moves the v2.0.1 artifact contract from external
+runtime injection (the `--append-system-prompt` mandate in
+`scripts/run-e2e-test.sh`) into the skill itself, so `/security-audit`
+is self-mandating for every invocation shape — `claude -p`, interactive
+chat, or external harness.
+
+**Why this is a patch, not a minor.** The skill already *claims* to
+produce machine-readable artifacts (per SKILL.md, per workflow.md's
+MANDATORY ARTIFACT CONTRACT, per every phase's "Verify before exit"
+block). It just failed to honor those claims reliably without the
+external mandate. v2.0.2 makes the skill self-honor its existing
+contract — by definition a bug fix.
+
+#### What moved in-skill
+
+- **`SKILL.md` description field** now carries the imperative artifact
+  contract (the `MANDATORY ARTIFACT CONTRACT` text that was previously
+  only in the `--append-system-prompt` injection). The description is
+  loaded into model context on every skill invocation, so the mandate
+  travels with the skill regardless of how the user invokes it.
+
+- **Every `steps/phase-NN.md`** now leads with a
+  `## 🛑 MANDATORY EXECUTION RULES (READ FIRST)` block (BMAD-shaped —
+  emphatic, emoji-flagged, listing required outputs + sub-agent fan-out
+  + DO-NOT anti-patterns). Pattern borrowed from the
+  `bmad-create-architecture` skill in the BMAD installation.
+
+- **Phase 5 §5.2 rewrite** — the fan-out procedure is now an explicit
+  Agent-tool invocation procedure with the exact tool-call shape, not
+  descriptive prose. Single-shot orchestrator mode can no longer
+  interpret "Phase 5 fans out to sub-agents" as "cover all 9 categories
+  in one head-space" — the missed-bug anti-pattern from E2E runs 2-3 is
+  now called out explicitly.
+
+- **Phase 6 §6.9, §6.12, §6.13 rewrite** — ASVS, LINDDUN, and STRIDE
+  methodology fan-outs similarly made literal.
+
+- **`skills/security-audit/manifest.yaml`** — new structured machine-
+  readable version of the per-phase contract (schema-versioned). The
+  prose files remain authoritative for orchestrator behavior; the
+  manifest is authoritative for downstream tooling (E2E assertion
+  suite, future CI checks, delta-mode preflight).
+
+#### What moved out of the E2E harness
+
+- **`scripts/run-e2e-test.sh` drops `--append-system-prompt`.** The
+  E2E run now validates that the in-skill mandate is sufficient. If a
+  future regression re-breaks report-only output, the E2E fails and
+  the fix belongs in-skill, not as external scaffolding. A comment
+  in the script records this principle.
+
+#### Delivery note
+
+v2.0.1's E2E PASS (documented in
+`docs/test-runs/e2e-full-run-2026-04-24T232300Z.md`) relied on the
+external `--append-system-prompt` mandate. **v2.0.2 produces a clean
+PASS on the same Juice Shop @ v19.2.1 fixture *without* the mandate**
+— validated 2026-04-25 in
+`docs/test-runs/e2e-full-run-v2.0.2-2026-04-25T0250Z.md`. Highlights:
+
+- **12/12 fixtures matched** (vs 8/12 in v2.0.1) — the four soft
+  misses (alg:none, 2FA trust, zip-slip, LFI) are all caught now,
+  thanks to Phase 5 fan-out actually fanning out.
+- **474 findings** (vs 25 in v2.0.1, 19× depth) across **60 unique
+  CWEs** (vs 21).
+- **Phase 5 emitted 64 per-(category × partition) JSONLs** + matching
+  `.done` markers, vs v2.0.1's single consolidated `phase-05-tokens.json`.
+- **17 ASVS L2 sub-agents** ran (V1-V17), each writing per-category
+  intermediates concatenated into the canonical `phase-06-asvs.jsonl`.
+- 51m 41s wall time — slower than v2.0.1's 7m, but trading minimum-
+  viable for genuinely deep per-(cat, part) analysis.
+
+#### Honest scope note
+
+This patch removes the external `--append-system-prompt` mandate from
+`scripts/run-e2e-test.sh`. That is a behavioural change to the E2E
+harness even though there is no public API change. Any local user
+copying `run-e2e-test.sh`'s mandate text for their own GHA harness
+should know that the in-skill MANDATORY blocks are now the only place
+the contract lives — there is no second source of truth to fall back
+on.
+
 Round 4 of adversarial review — additional fixes integrated into the
 [2.0.1] entry below:
 - `cwe-map.json` gains a `$schema` declaration for consistency with

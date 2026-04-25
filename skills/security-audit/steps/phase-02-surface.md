@@ -1,5 +1,17 @@
 # Phase 2 — Attack Surface Inventory
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/phase-02-surface.json` (one row per attack-surface item: route, handler file+line, method, auth status, trust zone)
+- `.claude-audit/current/phase-02.done`
+
+⛔ **DO NOT advance to Phase 3** until both files exist AND the Verify block at the bottom prints `phase-02 verified`.
+
+📖 Phase 5's auth + IDOR categories and Phase 6's API Top 10 mapping both read `phase-02-surface.json`. A skipped surface row is a missed auth check.
+
+---
+
 **Goal.** Enumerate **every** entry point to the application. Not just HTTP
 routes — gRPC methods, GraphQL resolvers, queue consumers, schedulers,
 webhooks, file uploads, serverless handlers, mobile / desktop IPC,

@@ -51,6 +51,82 @@ def load_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def check_manifest_required_outputs(repo_root: Path, artifact_dir: Path,
+                                    failures: list[str]) -> None:
+    """Walk skills/security-audit/manifest.yaml and validate the contract:
+      - every required_outputs.path exists,
+      - every required_outputs.path_glob with at_least_one matches at
+        least one file,
+      - no file matching forbidden_pattern exists,
+      - empty_if_gated is documented but not enforced (we don't replay
+        the gate condition here; that lives in the audit's own logic).
+
+    Soft-skip with a note if PyYAML is missing — manifest cross-check
+    is supplementary; the rest of the suite still validates the run.
+    Phase 8 is also skipped because its skip_if rules require replaying
+    audit-time conditions; v2.0.3 candidate."""
+    manifest_path = repo_root / "skills" / "security-audit" / "manifest.yaml"
+    if not manifest_path.exists():
+        return  # Pre-2.0.2 layout — existing checks cover.
+
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        print("  NOTE: PyYAML not installed; skipping manifest cross-check.",
+              file=sys.stderr)
+        return
+
+    try:
+        with open(manifest_path) as f:
+            manifest = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        failures.append(f"manifest.yaml: parse error — {e}")
+        return
+
+    for phase in manifest.get("phases", []):
+        pid = phase.get("id")
+        if pid == 8:
+            # Phase 8's skip_if conditions need audit.log replay; defer.
+            continue
+        for req in phase.get("required_outputs", []):
+            if "path" in req:
+                target = artifact_dir / req["path"]
+                if not target.exists():
+                    failures.append(
+                        f"manifest phase-{pid:02d}: missing required output {req['path']}"
+                    )
+            elif "path_glob" in req and req.get("at_least_one"):
+                pattern = req["path_glob"]
+                matches = list(artifact_dir.glob(pattern))
+                if not matches:
+                    failures.append(
+                        f"manifest phase-{pid:02d}: zero matches for required glob {pattern}"
+                    )
+        # forbidden_outputs is a phase-level sibling of required_outputs.
+        # Each entry has {path, reason}; the reason is surfaced in the
+        # failure message so a user can act on it.
+        for forbidden in phase.get("forbidden_outputs", []):
+            target = artifact_dir / forbidden["path"]
+            if target.exists():
+                reason = forbidden.get("reason", "no reason given in manifest")
+                failures.append(
+                    f"manifest phase-{pid:02d}: forbidden output {forbidden['path']} is present — {reason}"
+                )
+
+    # Phase 5 specifically: validate phase-05-skipped.json shape if present.
+    skipped_path = artifact_dir / ".claude-audit" / "current" / "phase-05-skipped.json"
+    if skipped_path.exists():
+        try:
+            with open(skipped_path) as f:
+                skipped_doc = json.load(f)
+            if not (isinstance(skipped_doc, dict) and "skipped" in skipped_doc and isinstance(skipped_doc["skipped"], list)):
+                failures.append(
+                    f"manifest phase-05: phase-05-skipped.json must be {{'skipped': [...]}}; got {type(skipped_doc).__name__}"
+                )
+        except json.JSONDecodeError as e:
+            failures.append(f"manifest phase-05: phase-05-skipped.json parse error — {e}")
+
+
 def check_phase_markers(artifact_dir: Path, failures: list[str]) -> None:
     current = artifact_dir / ".claude-audit" / "current"
     required = [f"phase-{i:02d}.done" for i in range(0, 8)]
@@ -117,9 +193,12 @@ def check_report_sections(artifact_dir: Path, failures: list[str]) -> None:
         return
     content = report.read_text()
 
-    # Hard-fail headers.
+    # Hard-fail headers. Title check accepts any leading-`# ` line that
+    # mentions "security" + "audit" (e.g. `# Security Audit Report` or
+    # `# OWASP Juice Shop — Security Audit Report` — the orchestrator
+    # often prefixes the project name).
     hard_required = [
-        (r"^#\s+(Security|Audit)", "report title (e.g., `# Security Audit Report`)"),
+        (r"^#\s+.*[Ss]ecurity.*[Aa]udit", "report title containing 'Security Audit'"),
     ]
     for pattern, description in hard_required:
         if not re.search(pattern, content, re.MULTILINE):
@@ -183,21 +262,30 @@ def check_jsonl_schema_validity(
         parts = name.rsplit("-", 1)
         cat = parts[0] if len(parts) == 2 else name
 
+        # An empty JSONL is VALID if the matching .done marker exists —
+        # that means the sub-agent ran and legitimately found zero
+        # findings on this (category, partition) pair. The .done marker
+        # is the source of truth for "did the sub-agent execute"; the
+        # JSONL contents reflect what it found. Only flag empty JSONLs
+        # that ALSO lack a .done (genuinely missing fan-out output).
+        done_marker = jsonl.with_suffix(".done")
         if jsonl.stat().st_size == 0:
+            if done_marker.exists():
+                continue  # legitimate "checked, nothing here"
             if cat in gated_categories:
                 continue
             failures.append(
-                f"EMPTY: {jsonl.name} — category '{cat}' produced no findings "
-                "(not listed in gated_categories)"
+                f"EMPTY: {jsonl.name} — category '{cat}' produced no findings AND no .done marker"
             )
             continue
         rows = load_jsonl(jsonl)
         if not rows:
+            if done_marker.exists():
+                continue
             if cat in gated_categories:
                 continue
             failures.append(
-                f"EMPTY: {jsonl.name} — no findings rows "
-                "(not listed in gated_categories)"
+                f"EMPTY: {jsonl.name} — no rows AND no .done marker"
             )
             continue
 
@@ -458,6 +546,8 @@ def main():
                         help="Only run structural checks; skip fixture match.")
     parser.add_argument("--require-jsonschema-backend", action="store_true",
                         help="Hard-fail if Python `jsonschema` is not installed.")
+    parser.add_argument("--skip-manifest-check", action="store_true",
+                        help="Skip the manifest.yaml required_outputs / forbidden_outputs cross-check. Use when a known false-positive exists and the rest of the suite is sufficient.")
     args = parser.parse_args()
 
     if not args.artifact_dir.exists():
@@ -475,27 +565,33 @@ def main():
     print(f"artifact-dir: {args.artifact_dir}")
     print()
 
-    print("[1/5] Phase-done markers...", flush=True)
+    print("[1/6] Phase-done markers...", flush=True)
     check_phase_markers(args.artifact_dir, failures)
 
-    print("[2/5] SARIF structure...", flush=True)
+    if args.skip_manifest_check:
+        print("[2/6] Manifest cross-check — SKIPPED (--skip-manifest-check).", flush=True)
+    else:
+        print("[2/6] Manifest required_outputs cross-check...", flush=True)
+        check_manifest_required_outputs(args.repo_root, args.artifact_dir, failures)
+
+    print("[3/6] SARIF structure...", flush=True)
     check_sarif_structure(args.artifact_dir, failures)
 
-    print("[3/5] Report section headers (tolerant)...", flush=True)
+    print("[4/6] Report section headers (tolerant)...", flush=True)
     check_report_sections(args.artifact_dir, failures)
 
-    print("[4/5] Phase-05 JSONL schema + CWE-in-map (gated-aware)...", flush=True)
+    print("[5/6] Phase-05 JSONL schema + CWE-in-map (gated-aware)...", flush=True)
     check_jsonl_schema_validity(
         args.repo_root, args.artifact_dir, gated_cats,
         args.require_jsonschema_backend, failures,
     )
 
     if not args.skip_expectations:
-        print("[5/5] Fixture expectations...", flush=True)
+        print("[6/6] Fixture expectations...", flush=True)
         check_expectations(args.artifact_dir, expected, failures)
         check_gated_categories_diagnostic(args.artifact_dir, expected)
     else:
-        print("[5/5] Fixture expectations — SKIPPED (--skip-expectations).", flush=True)
+        print("[6/6] Fixture expectations — SKIPPED (--skip-expectations).", flush=True)
 
     sys.stdout.flush()
     print()

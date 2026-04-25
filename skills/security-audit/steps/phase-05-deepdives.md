@@ -1,5 +1,24 @@
 # Phase 5 — Parallel Deep Dives (9 categories)
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/phase-05-<category>-<partition>.jsonl` for EACH applicable-category × top-N-partition pair. NOT a single consolidated file.
+- `.claude-audit/current/phase-05-skipped.json` — ALWAYS written, even if no categories were skipped (`{"skipped": []}`). The file's presence is the signal that filtering ran.
+- `.claude-audit/current/phase-05.done` (marker written only after ALL expected JSONLs exist)
+
+🔁 **Sub-agent fan-out is MANDATORY, not optional:**
+- For each `(category, partition)` pair where the category's gate condition holds, invoke ONE sub-agent via the Agent tool with `subagent_type: "general-purpose"` and the prompt template from `templates/subagent-prompt.md`. Concurrency cap: 8 in flight.
+- **If you find yourself reasoning "I'll just cover all 9 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
+- Categories whose gating condition is false (e.g., `llm` when `profile.llm_usage.detected == false`) are legitimately skipped — record the skip in `phase-05-skipped.json`. The skipped list always exists; if no categories were skipped, write `{"skipped": []}`.
+
+⛔ **DO NOT:**
+- Advance to Phase 6 until every applicable `(category × partition)` JSONL exists on disk AND the Verify block prints `phase-05 verified`.
+- Collapse categories into a single `phase-05-tokens.json` / `phase-05-findings.json` / similar consolidated shape — those are v1-era and break Phase 7 per-category aggregation + fixture matching.
+- Downgrade the sub-agent `model` to Haiku/Sonnet — Phase 5 is Opus-only (see §5.4).
+
+---
+
 **Goal.** For each top-N partition, run 9 category-specific sub-agents in
 parallel. Each sub-agent consumes the Phase 0/1/2/3/4 artifacts and writes
 JSONL findings to disk. Only JSON summaries return through tool output.
@@ -41,20 +60,91 @@ unless the user passes `categories: "<subset>"`.
 
 ## 5.2 — Fan-out procedure
 
-For each partition `p` with `p.depth == "full"`:
-  For each category `c` in §5.1:
-    If `c` has a gate that fails against `profile`, skip.
-    Otherwise enqueue sub-agent with:
-      - `description`: `"Deep dive <c.slug> on <p.id>"`
-      - `subagent_type`: `general-purpose`
-      - `model`: `opus`
-      - `prompt`: the filled template from `templates/subagent-prompt.md`
-        with `phase-specific-method-body` = the full contents of
-        `cat-<NN>-<slug>.md`.
+The orchestrator must invoke the **Agent tool** once per applicable
+`(category, partition)` pair. This section is procedural, not a
+template — you call the Agent tool through your normal tool-calling
+protocol, with the parameters described below.
 
-Partitions with `p.depth == "inventory-only"` are **not** deep-dived. Their
-Phase 2 surface rows still appear in the Phase 7 report, but they receive
-no finding sub-agents.
+### Step A: compute the pair list
+
+Load `partitions.json` and the category table in §5.1. For every
+`p` in `partitions` where `p.depth == "full"`, walk every category `c`
+in §5.1. If `c`'s gate passes against `profile`, add `(c, p)` to the
+pair list. If the gate fails, record `{"category": c.id, "partition":
+p.id, "reason": c.gate_reason}` in a skip list.
+
+**Write the skip list** to `.claude-audit/current/phase-05-skipped.json`
+unconditionally. The shape is always an object wrapping an array:
+`{"skipped": [<entry>, ...]}`. If nothing was skipped, the array is
+empty: `{"skipped": []}`. The file's presence is the signal that
+filtering ran; the array length tells consumers whether any gating
+was triggered.
+
+### Step B: fan out, concurrency cap 8
+
+For each `(c, p)` in the pair list, invoke the Agent tool with:
+- `description`: a short label like `"Deep dive auth on services-api"`
+  (one line, ≤80 chars).
+- `subagent_type`: `"general-purpose"`.
+- `prompt`: the full prompt body assembled from
+  `templates/subagent-prompt.md`, with `{{phase-specific-method-body}}`
+  replaced by the contents of the matching `steps/deepdive/cat-NN-<slug>.md`,
+  `{{partition}}` replaced by the partition struct from
+  `partitions.json`, and `{{skill_dir}}` replaced by the absolute path
+  of this skill's directory (so the sub-agent can resolve
+  `$SKILL_DIR/lib/validate-findings.py` etc.).
+
+**Concurrency procedure (cap 8):** maintain a window of up to 8
+in-flight Agent invocations. Emit up to 8 Agent tool-calls in one
+assistant turn; on the next turn, after the in-flight set has shrunk,
+dispatch the next pair(s) to refill the window. Do not exceed 8 in
+flight. Do not fire all `len(pairs)` Agent calls at once.
+
+**Model selection.** Do not pass a `model` parameter — Claude Code
+routes `general-purpose` sub-agents automatically to the
+harness-appropriate Opus variant. Do not downgrade to Sonnet/Haiku.
+
+### Step C: validate each returned JSONL before marking the pair done
+
+`$SKILL_DIR` was resolved during the workflow's first action and saved
+as a bare path to `.claude-audit/.skill-dir`. **Every** Bash invocation
+in this step must re-load it — Claude Code's Bash tool starts a fresh
+shell per call, so the variable does not persist across `(c, p)`
+iterations:
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/validate-findings.py" \
+    --schema "$SKILL_DIR/lib/finding-schema.json" \
+    --cwe-map "$SKILL_DIR/lib/cwe-map.json" \
+    .claude-audit/current/phase-05-<c.id>-<p.id>.jsonl
+```
+
+On exit 0, write `.claude-audit/current/phase-05-<c.id>-<p.id>.done`.
+On exit != 0, re-invoke the Agent with the validator's errors quoted
+back into the prompt. After the retry, if it still fails, record one
+placeholder INFO finding documenting the validator errors and proceed.
+
+### Step D: write the umbrella marker
+
+Only after every `(c, p)` pair has a matching `.done` file (or
+placeholder INFO on double-failure), write
+`.claude-audit/current/phase-05.done`.
+
+Partitions with `p.depth == "inventory-only"` are **not** deep-dived.
+Their Phase 2 surface rows still appear in the Phase 7 report, but they
+receive no finding sub-agents.
+
+### Anti-pattern seen in earlier runs
+
+A single-shot orchestrator can be tempted to reason "I'll just walk
+through all 9 categories serially in one head-space and write a single
+consolidated JSON." **That pattern missed alg:none JWT acceptance,
+2FA trust gaps, zip-slip, and LFI** in v2.0.1's E2E iteration runs —
+all four are bugs that require category-specific deep attention which
+only per-sub-agent invocation provides. If you reach for the shortcut,
+stop and fan out.
 
 ## 5.3 — Finding schema (enforced on every sub-agent)
 
@@ -71,12 +161,25 @@ Strongly encouraged: `suggested_fix`, `attack_scenario`, `surface_id`,
 `remediation_effort`, `fingerprint` (stable across title drift; see
 `phase-07-synthesis.md §7.2`).
 
-**Enforcement (v2.0.1).** Every sub-agent MUST run the schema validator
-before emitting its RETURN SHAPE:
+**Enforcement.** Every sub-agent MUST run the schema validator before
+emitting its RETURN SHAPE.
+
+**The bash block below is what the SUB-AGENT runs, NOT what the
+orchestrator runs.** The orchestrator's own validation pass is in
+§5.2 Step C and uses `$SKILL_DIR` from `.claude-audit/.skill-dir`.
+For the sub-agent, the orchestrator substitutes the literal absolute
+path into the prompt (per §5.2 Step B) before the prompt reaches the
+sub-agent. The placeholder shown here as `<absolute-path-to-skill>`
+will arrive at the sub-agent as a real path like
+`/home/user/.claude/skills/security-audit`. **Do not emit this block
+directly to your Bash tool** — it is illustrative of the sub-agent's
+view, not a command for you to run:
 
 ```bash
-python3 scripts/validate-findings.py \
-    --schema skills/security-audit/lib/finding-schema.json \
+# AS SEEN BY THE SUB-AGENT (orchestrator-side substitution already done):
+python3 "<absolute-path-to-skill>/lib/validate-findings.py" \
+    --schema "<absolute-path-to-skill>/lib/finding-schema.json" \
+    --cwe-map "<absolute-path-to-skill>/lib/cwe-map.json" \
     .claude-audit/current/phase-05-<cat>-<partition>.jsonl
 ```
 
