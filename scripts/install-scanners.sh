@@ -153,6 +153,17 @@ fetch_checksum_from_release() {
   fi
   local hash
   hash="$(awk -v t="$target_filename" '$2 == t || $2 == "./"t || $2 == "*"t {print $1; exit}' "$tmp")"
+  # Some vendors publish the .sha256 with the asset filename in a
+  # different case than the URL uses. hadolint, for example, lists the
+  # asset on its release page as `hadolint-Linux-x86_64` but the
+  # accompanying `.sha256` file's body says `hadolint-linux-x86_64`
+  # (lowercase). Fall back to a case-insensitive match using POSIX
+  # awk's tolower() so we don't silently fail to verify.
+  if [ -z "$hash" ]; then
+    local target_lower
+    target_lower="$(printf "%s" "$target_filename" | tr '[:upper:]' '[:lower:]')"
+    hash="$(awk -v t="$target_lower" 'tolower($2) == t || tolower($2) == "./"t || tolower($2) == "*"t {print $1; exit}' "$tmp")"
+  fi
   rm -f "$tmp"
   [ -n "$hash" ] && printf "%s" "$hash"
 }

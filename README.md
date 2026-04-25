@@ -16,8 +16,12 @@ Deployment, Injection/SSRF, LLM-specific).
 
 ## Version
 
-- **v2.0.3** (current) — Path B Containerfile fix (PEP 668) +
-  regression gate (`tests/e2e/test-path-b-build.sh`).
+- **v2.0.4** (current) — case-insensitive checksum match in
+  `install-scanners.sh` (fixes silent hadolint install failure
+  caused by the hadolint vendor publishing its `.sha256` file body
+  in lowercase while the asset URL uses capital-L `Linux`).
+- **v2.0.3** — Path B Containerfile fix (PEP 668) + regression gate
+  (`tests/e2e/test-path-b-build.sh`).
 - **v2.0.2** — in-skill artifact mandate (no external
   `--append-system-prompt`); E2E PASS against juice-shop@v19.2.1
   with 12/12 fixtures matched, 474 findings, 60 unique CWEs.
@@ -61,7 +65,7 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.0.3 \
+git clone --depth 1 --branch v2.0.4 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
 cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
@@ -70,7 +74,7 @@ cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.0.3 \
+git clone --depth 1 --branch v2.0.4 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -115,7 +119,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.0.3 \
+git clone --depth 1 --branch v2.0.4 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
