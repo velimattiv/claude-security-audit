@@ -8,6 +8,58 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Nothing queued. The skill is pre-release; open a Discussion issue to
 propose v2.1 work.
 
+## [2.0.3] — 2026-04-25
+
+### Fixed — Path B Containerfile build (release-blocker for the recommended scanner-isolation path)
+
+`scripts/Dockerfile.audit` line 75 used `pip3 install --user
+jsonschema==4.22.0`, which fails on the Debian 12 (bookworm) base
+image with `error: externally-managed-environment` (PEP 668). The
+fix adds `--break-system-packages` to that line, matching the
+fallback chain `install-scanners.sh` already uses for semgrep
+(lines 252-258 of that script). We're in a container — there's no
+system Python to protect.
+
+This bug shipped in v2.0.2 because the v2.0.2 E2E only validated
+the host-install path (Path A inside the test environment). Path B
+(`scripts/run-audit-in-container.sh --build`) was never built in
+the E2E loop, so the regression went undetected. Caught by a real
+user trying the recommended path on Fedora/Podman.
+
+### Added — Path B regression gate
+
+New `tests/e2e/test-path-b-build.sh` smoke test that:
+1. Detects the container runtime (Podman preferred, Docker fallback).
+2. Runs `scripts/run-audit-in-container.sh --build` end-to-end.
+3. Runs preflight inside the built image and asserts ≥5 of 6
+   scanners report `[OK]`.
+
+Cheap (~3-5 min on first build, ~30s on rebuild with layer cache),
+so it can run alongside the deep audit E2E without doubling wall
+time. This is the regression gate that should have existed in
+v2.0.2 — without it, any Dockerfile breakage ships silently.
+
+### Changed — install docs reframe
+
+`README.md` and `docs/INSTALL.md` reframe scanner installation:
+
+- **Recommended pattern: isolated full container** (everything
+  inside — `git`, `claude`, the skill, the scanner bundle, the
+  audit target). Use `cw`, Codespaces, dev containers, or plain
+  Docker — whichever isolation primitive you have. Path A install
+  inside the disposable container is the right model: scanners
+  belong there, host pollution is a non-concern.
+- **Acceptable: Path B** (scanners-only-in-container, Claude on
+  host). Reasonable for one-off audits where Claude Code is already
+  installed on the host.
+- **Strongly discouraged: Path A on your daily-driver host.** Six
+  security tools with auto-updating rule databases on your laptop
+  is invasive state for a tool that may run once a week.
+
+The previous framing led at least one downstream system Claude to
+default to host install when Podman was available and would have
+been better served by container isolation.
+
 ## [2.0.2] — 2026-04-25
 
 ### Changed — reliability patch, no new capability

@@ -77,72 +77,99 @@ and uninstall), see **[`docs/INSTALL.md`](docs/INSTALL.md)**.
 
 ## Scanner prerequisites
 
-Two install paths — but **Path B (container) is the recommended
-default for almost everyone**. The skill brings six security tools
-(semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint) plus
-their rule databases. Installing all six on the host is invasive
-host state for a tool that may run once a week. Path B keeps the
-host clean; Path A exists for environments without a container
-runtime.
+The skill brings six security tools (semgrep, osv-scanner, gitleaks,
+trufflehog, trivy, hadolint) plus their rule databases. **The
+recommended deployment shape is to run the entire audit — Claude
+Code, the skill, the scanners, and the project clone — inside an
+isolated container.** That keeps your daily-driver host clean and
+matches CI/production isolation.
 
-### Path B — container-isolated scanner execution (recommended)
+### Recommended — isolated container (everything inside)
 
-**Scope.** This path isolates the *scanner bundle* — not the full
-skill orchestration. Claude Code and its deep-dive sub-agents still
-run on the host (or wherever Claude Code is installed); only the
-scanner phase's binaries live in an ephemeral container.
+Use any container shape that gives you a clean working environment
+with `git`, Node 20+, Python 3.10+, plus a way to run `claude`. Common
+patterns:
 
-```bash
-# One-time: build the scanner-isolation image (size depends on your base — expect a few hundred MB of scanners + dependencies on top of debian:bookworm-slim)
-scripts/run-audit-in-container.sh --build
+- **VS Code Dev Container / GitHub Codespaces** — declare
+  `git`/`claude`/`python3` in `.devcontainer/devcontainer.json`,
+  open the project, run the scanner installer + audit inside.
+- **`cw` launcher / similar tmux-based container launchers** — boot
+  a fresh container per audit, install everything inside, throw
+  the container away after.
+- **Plain Docker / Podman** — `docker run --rm -it` a base image,
+  install dependencies, mount the project read-only.
 
-# Run preflight (scanner presence check) in the container
-scripts/run-audit-in-container.sh preflight
-
-# Run a specific scanner against the target repo from inside the container
-scripts/run-audit-in-container.sh scan semgrep
-scripts/run-audit-in-container.sh scan osv-scanner
-scripts/run-audit-in-container.sh scan gitleaks
-scripts/run-audit-in-container.sh scan trufflehog
-scripts/run-audit-in-container.sh scan trivy
-scripts/run-audit-in-container.sh scan hadolint
-
-# Drop into a container shell for ad-hoc runs
-scripts/run-audit-in-container.sh shell
-```
-
-The wrapper uses Podman (preferred, rootless) or Docker — whichever
-you have. Container hardening: `--cap-drop=ALL`,
-`--security-opt=no-new-privileges`, `--read-only` rootfs, non-root
-`audit` user. The target repo is bind-mounted read-only; only
-`.claude-audit/` is writable.
-
-### Path A — host install (fallback for hosts without a container runtime)
-
-Only use this if Path B isn't available (no Podman, no Docker, and
-you can't install one). It dumps six binaries plus auto-updating
-rule databases onto your host.
+Inside the isolated container:
 
 ```bash
-scripts/install-scanners.sh            # install required set
-scripts/install-scanners.sh --check    # report current state
-scripts/install-scanners.sh --help
+# Clone the audit target inside the container
+git clone <your-target-repo> /workspace/target
+
+# Install Claude Code (https://docs.anthropic.com/claude-code/install)
+# and authenticate in this container instance only
+claude login
+
+# Install the skill at user-level inside the container
+git clone --depth 1 --branch v2.0.2 \
+  https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
+cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
+
+# Install the scanner bundle (Path A — direct install). This is the
+# right install model for an isolated container: scanners are part
+# of the container's purpose, host pollution is a non-concern.
+bash ~/Code/csa/scripts/install-scanners.sh
+
+# Run the audit
+cd /workspace/target
+claude --dangerously-skip-permissions
+> /security-audit
 ```
 
-Supported hosts:
+When the audit's done, the entire container is disposable —
+including the auth, the scanner binaries, and any cached rule
+databases. Nothing leaks to your host.
 
-- **macOS** (Homebrew)
-- **Debian / Ubuntu** (apt)
-- **Fedora** (dnf)
-- **Arch** (pacman)
+### Acceptable — Path B (scanners-only-in-container, Claude on host)
 
-Windows is **not** supported — run inside WSL or Path B. The installer
-**verifies published checksums** for every downloaded binary (v2.0.1+);
-mismatches abort the install. **Don't half-install:** if any scanner
-fails, either fully fix the failure and re-run the installer, or roll
-back the partial install and use Path B. A partial host install is
-worse than no install — the audit report won't tell you which
-scanner-corroborated categories silently skipped.
+If you really want Claude running on your daily-driver host (e.g. you
+already have Claude Code installed and authenticated there, and the
+audit is one-off), Path B isolates only the scanner bundle:
+
+```bash
+scripts/run-audit-in-container.sh --build      # one-time
+scripts/run-audit-in-container.sh preflight    # verify
+scripts/run-audit-in-container.sh scan semgrep # per-scanner runs
+```
+
+The wrapper uses Podman (preferred, rootless) or Docker. Container
+hardening: `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
+`--read-only` rootfs, non-root `audit` user. Target repo bind-mounted
+read-only; only `.claude-audit/` is writable.
+
+This still leaves Claude Code on your host. The skill orchestrator
+runs there and is the larger trust boundary.
+
+### Strongly discouraged — Path A on your daily-driver host
+
+```bash
+scripts/install-scanners.sh    # only if you really mean it
+```
+
+Six security tools on your laptop is invasive host state for a tool
+that may run once a week. The scanners auto-update their detection
+databases — that's continuous host churn from a security tool you
+installed *to look at security*. Use the isolated-container pattern
+above unless you genuinely have no option.
+
+If you do go this route: don't half-install. A partial host install
+(some scanners present, some missing) is worse than no install —
+the audit report won't tell you which scanner-corroborated categories
+silently skipped. Run `scripts/install-scanners.sh --check` to verify
+all six landed; if any failed, fully fix the failure and re-run.
+
+Supported hosts: macOS (Homebrew), Debian/Ubuntu (apt), Fedora (dnf),
+Arch (pacman). Windows is **not** supported — use WSL or the isolated
+container pattern.
 
 **What Path B does NOT isolate.** The skill's orchestrator
 (`workflow.md`), deep-dive sub-agents (Phase 5), built-in-review
