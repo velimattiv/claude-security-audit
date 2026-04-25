@@ -75,7 +75,14 @@ echo
 echo "[2/4] Probing bind-mount support..."
 PROBE_DIR=$(mktemp -d)
 echo "test" > "$PROBE_DIR/probe.txt"
-if ! "$RUNTIME" run --rm -v "$PROBE_DIR":/probe:ro alpine \
+# Use lowercase :z (shared SELinux label) — without it, this probe
+# misclassifies normal SELinux confinement on Fedora/RHEL/CentOS as
+# "bind mounts blocked" and pushes the whole test to
+# PASS-WITH-LIMITATIONS on hosts where the actual wrapper works fine.
+# Lowercase z is appropriate for ephemeral tmpdirs (vs uppercase Z
+# which the wrapper uses for repo paths it owns); the flag is
+# silently ignored on non-SELinux systems, so this works everywhere.
+if ! "$RUNTIME" run --rm -v "$PROBE_DIR":/probe:ro,z alpine \
     cat /probe/probe.txt >/dev/null 2>&1; then
   rm -rf "$PROBE_DIR"
   echo "  SKIP: bind mounts blocked in this environment (DinD or restricted namespace)."

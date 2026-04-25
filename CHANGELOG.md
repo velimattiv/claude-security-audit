@@ -8,6 +8,32 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Nothing queued. The skill is pre-release; open a Discussion issue to
 propose v2.1 work.
 
+## [2.0.6] — 2026-04-25
+
+### Fixed — DinD probe misclassifies SELinux confinement on Fedora/RHEL/CentOS
+
+`tests/e2e/test-path-b-build.sh` line 78's bind-mount probe used
+`-v $PROBE_DIR:/probe:ro` without the SELinux `,z` shared-label flag.
+On SELinux-enforcing hosts (Fedora, RHEL, CentOS Stream — every
+distro the wrapper is designed to work on with rootless podman) the
+probe failed not because bind mounts were blocked but because the
+default SELinux `container_t` ↔ `unlabeled_t` denial fired. The test
+exited `PASS-WITH-LIMITATIONS` and the user concluded their setup
+was unsupported — when in fact the actual wrapper would have worked
+fine (the wrapper itself uses `:ro,Z` / `:rw,Z` correctly, lines 179-180
+of `run-audit-in-container.sh`).
+
+Fix: add `,z` (lowercase — shared label, appropriate for ephemeral
+tmpdirs) to the probe. The flag is silently ignored on non-SELinux
+systems, so the probe works correctly on Linux distros without
+SELinux too. Caught by a downstream user running v2.0.5's smoke
+test on Fedora.
+
+This was a one-line bug with high visibility — every Fedora / RHEL
+contributor running the smoke test would hit it and get a misleading
+result, blocking the very Path B validation the test was meant to
+provide.
+
 ## [2.0.5] — 2026-04-25
 
 ### Fixed — Phase 4 / Path B integration gap (the skill never used the wrapper)

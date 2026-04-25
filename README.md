@@ -16,7 +16,11 @@ Deployment, Injection/SSRF, LLM-specific).
 
 ## Version
 
-- **v2.0.5** (current) — Phase 4 ↔ Path B wrapper integration.
+- **v2.0.6** (current) — DinD probe `:ro,z` SELinux fix in the
+  Path B smoke test (probe was misclassifying SELinux confinement
+  as DinD blockage, pushing every Fedora / RHEL / CentOS contributor
+  to a misleading PASS-WITH-LIMITATIONS exit).
+- **v2.0.5** — Phase 4 ↔ Path B wrapper integration.
   The skill now actually uses the container wrapper when host
   scanners aren't on PATH (or when `$AUDIT_FORCE_PATH_B=1`).
   Closes the gap that made Path B half-implemented in v2.0.2-2.0.4.
@@ -72,7 +76,7 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.0.5 \
+git clone --depth 1 --branch v2.0.6 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
 cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
@@ -81,7 +85,7 @@ cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.0.5 \
+git clone --depth 1 --branch v2.0.6 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -126,7 +130,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.0.5 \
+git clone --depth 1 --branch v2.0.6 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
