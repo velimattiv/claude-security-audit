@@ -8,6 +8,86 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Nothing queued. The skill is pre-release; open a Discussion issue to
 propose v2.1 work.
 
+## [2.0.5] — 2026-04-25
+
+### Fixed — Phase 4 / Path B integration gap (the skill never used the wrapper)
+
+v2.0.2's "in-skill mandate" + v2.0.3's Path B Containerfile fix both
+shipped without ever validating that the skill's Phase 4 actually
+USES the wrapper. Phase 4 just probed `command -v <scanner>` against
+host `PATH`. A user who built the Path B container but didn't install
+host scanners would invoke `/security-audit` and Phase 4 would find
+zero scanners, log degraded-mode warnings, and never call the wrapper
+— making Path B effectively a half-implemented feature.
+
+This release closes the gap.
+
+#### Phase 4 precedence chain
+
+`steps/phase-04-scanners.md` rewritten with a 3-step precedence per
+scanner:
+
+1. **Path A (host PATH binary)** — preferred when present and
+   `$AUDIT_FORCE_PATH_B != 1`.
+2. **Path B (container wrapper)** — used when (1) is unavailable OR
+   forced via `$AUDIT_FORCE_PATH_B=1`. Wrapper resolved via
+   `$AUDIT_SKILL_REPO/scripts/run-audit-in-container.sh`, with
+   fallbacks at `~/Code/`, `~/projects/`, and the cwd's `./scripts/`.
+3. **Skip with warning** — append `{tool, reason}` to
+   `phase-04-scanners/skipped.json`; never fail the phase.
+
+`summary.json` records the chosen invocation method per scanner
+(`invocation: "path_a" | "path_b" | "skipped"`) so future delta-mode
+runs can detect path switches.
+
+#### Wrapper hardening
+
+`scripts/run-audit-in-container.sh`:
+
+- New `$AUDIT_CONTAINER_RUNTIME` env override. Forces `podman` or
+  `docker` regardless of detection order — for environments where
+  rootless podman is misconfigured (e.g. `XDG_RUNTIME_DIR` pointing
+  at a world-writable `/tmp` inside a nested container) but docker
+  works.
+- `--load` flag now passed to docker builds. The modern docker buildx
+  default driver caches build output rather than loading it into the
+  local daemon; without `--load`, `docker run` then fails with
+  "Unable to find image ... locally". podman doesn't need this.
+- `--build` alone (no subcommand) now exits after the build instead
+  of falling through to default `preflight` (which needs bind mounts
+  and fails in CI/DinD when the user just wanted to validate the
+  build).
+- Default image tag bumped from `:2.0.1` to `:latest` so the local
+  image floats with rebuilds.
+
+#### Path B regression gate, expanded
+
+`tests/e2e/test-path-b-build.sh` now has 4 stages instead of 3:
+build → DinD probe → preflight → end-to-end gitleaks scan against
+the repo. The DinD probe lets the test exit `PASS-WITH-LIMITATIONS`
+in nested-docker environments where bind mounts are blocked, instead
+of producing a misleading FAIL. On real hosts (Fedora/Podman, Ubuntu/
+Docker), all four stages run.
+
+#### `scripts/run-e2e-test.sh --path-b` flag
+
+New flag that:
+1. Builds the Path B container.
+2. Sets `AUDIT_SKILL_REPO=$REPO_ROOT` so Phase 4 finds the wrapper.
+3. Sets `AUDIT_FORCE_PATH_B=1` so Phase 4 uses the wrapper for every
+   scanner regardless of host PATH state — testing the recommended
+   path even on a host that happens to have scanners installed.
+
+#### What's NOT validated by this release
+
+- Full `--path-b` E2E run against juice-shop. Requires a non-DinD
+  host. Smoke test (`test-path-b-build.sh`) validates the wrapper
+  end-to-end on bare metal; the deep audit run is the user's next
+  step on Fedora.
+- Hadolint output redirection — the wrapper's hadolint scan case
+  (line 109) doesn't `> /target/.claude-audit/.../hadolint.sarif`.
+  Out of scope for v2.0.5; tracked for v2.0.6.
+
 ## [2.0.4] — 2026-04-25
 
 ### Fixed — silent hadolint install failure on case-mismatched checksum file
