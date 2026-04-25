@@ -61,6 +61,10 @@ jobs:
             bash -n "$f"
           done
 
+      - name: Validate install-snippet version pins
+        run: |
+          scripts/validate-install-pins.sh
+
       - name: Summary
         if: always()
         run: |
