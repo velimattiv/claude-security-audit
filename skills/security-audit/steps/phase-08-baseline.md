@@ -1,5 +1,18 @@
 # Phase 8 — Baseline Persistence
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before exit (full-mode only):**
+- `.claude-audit/baseline.json` (full baseline; gitignored)
+- `docs/security-audit-baseline.json` (pruned baseline; checked in)
+- `.claude-audit/current/phase-08.done`
+
+⛔ **SKIP Phase 8 ONLY IF** mode=delta OR `phase-07.done` is absent OR `audit.log` has CRITICAL runtime errors (`findings` CRITICAL-severity is fine and expected — that's the audit's job; the gate is on runtime errors, not findings severity).
+
+📖 In full mode, without a baseline, **delta mode is permanently unavailable to the user**. Skipping Phase 8 when it shouldn't be skipped silently eliminates the sub-minute incremental re-audit capability.
+
+---
+
 **Goal.** After a successful full audit, write a baseline JSON that future
 `mode: delta` runs can diff against for sub-minute incremental audits.
 
@@ -36,7 +49,7 @@ Per `lib/baseline-schema.json`. The shape:
 {
   "schema_version": 2,
   "audit_id": "...",
-  "skill_version": "2.0.0-mX",
+  "skill_version": "2.0.2",
   "git_head": "abc123def",
   "git_branch": "main",
   "created_at": "ISO-8601",

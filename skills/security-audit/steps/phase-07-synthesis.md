@@ -1,5 +1,26 @@
 # Phase 7 — Synthesis & Report
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/phase-07-report.md` (full structured human-readable report)
+- `.claude-audit/current/findings.sarif` (SARIF 2.1.0 — see ⚠ below for per-result requirements)
+- `.claude-audit/current/findings.cyclonedx.json` (SBOM, minimal skeleton if no scanner SBOM available)
+- `.claude-audit/current/phase-07.done`
+
+⚠ **EVERY `results[]` row in the synthetic `security-audit-skill` SARIF run MUST carry these properties:**
+- `properties.security-severity`: CVSS-style numeric string. CRITICAL→`"9.0"`, HIGH→`"7.0"`, MEDIUM→`"5.0"`, LOW→`"3.0"`, INFO→`"1.0"`. Required for the GitHub Security tab.
+- `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required for fixture matching, baseline delta, and GitHub Security tab grouping. Look up the CWE in `lib/cwe-map.json`; if absent, use your best judgement and add an entry in a follow-up.
+- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `config`.
+
+Per-scanner SARIF runs are copied through verbatim — do NOT rewrite
+scanner results. Scanner CWE lives in `tags[]` / `rule.properties.tags` /
+driver relationships per the scanner's own conventions (§7.8).
+
+⛔ **DO NOT emit the human report without also emitting findings.sarif with CWE-per-result.** The report is the cover page; SARIF is the machine-readable deliverable. Producing only the report is a regression to v1 and breaks every downstream integration (delta mode, GitHub Security tab upload, CI gating on CRITICAL counts, fixture-based E2E validation).
+
+---
+
 **Goal.** Collect every finding from Phases 1-6, deduplicate, cross-
 reference sources, assign final severity, identify skill-unique findings,
 and emit three consumable artifacts: a human Markdown report, a
@@ -182,7 +203,7 @@ Required per SARIF 2.1.0:
 - `runs[]`: each with `tool.driver.name`, `tool.driver.rules[]`,
   `results[]`.
 
-Every `results[]` item:
+Every `results[]` item in the synthetic `security-audit-skill` run:
 - `ruleId`: finding's id
 - `level`: SARIF maps from our severity — CRITICAL/HIGH → `error`,
   MEDIUM → `warning`, LOW/INFO → `note`
@@ -193,6 +214,20 @@ Every `results[]` item:
 - `properties.security-severity`: CVSS-compatible numeric (CRITICAL=9.0,
   HIGH=7.0, MEDIUM=5.0, LOW=3.0, INFO=1.0) — consumed by GitHub Security
   tab.
+- `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required
+  for fixture matching, baseline carryover, and GitHub Security tab
+  grouping. Look up in `lib/cwe-map.json`.
+- `properties.category`: one of the 10 category slugs. Recommended.
+
+**Scanner-run results.** Per-scanner SARIF runs (semgrep, trivy, etc.)
+emit CWE in scanner-specific locations — `tags[]`, `rule.properties.tags`,
+or driver `relationships`. The skill copies those runs through
+*verbatim* — do NOT rewrite scanner results to add `properties.cwe`
+where they already encode CWE elsewhere. The per-result-CWE mandate
+applies to the synthetic skill run only; scanner-run CWE is consumed by
+the assertion suite via the same multi-source extraction logic that
+`tests/e2e/assertions.py:_sarif_result_to_finding` uses (it inspects
+`ruleId`, `properties.cwe`, `properties.cwes`, and `tags`).
 
 Validate with `jq -e .runs .` before write.
 

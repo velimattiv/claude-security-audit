@@ -1,5 +1,19 @@
 # Phase 4 — External Inputs (Scanner Orchestration)
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/phase-04-scanners/*.slim.json` (one per scanner that ran: semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint — whichever are installed)
+- `.claude-audit/current/phase-04-scanners/security-review-*.md` (Claude Code `/security-review` output)
+- `.claude-audit/current/phase-04-scanners/adversarial-*.md` (adversarial-review sub-agent output)
+- `.claude-audit/current/phase-04.done`
+
+⛔ **DO NOT advance to Phase 5** until the scanner directory has at least one `slim.json` AND the Verify block prints `phase-04 verified`. Missing scanner binaries are NOT fatal — degrade gracefully, but still emit the marker after the attempt.
+
+📖 Phase 7 synthesis cross-references scanner findings against skill findings to tag CONFIRMED vs LIKELY confidence. No scanner artifacts ⇒ every skill finding drops to LIKELY or POSSIBLE.
+
+---
+
 **Goal.** Run the standardized scanner bundle + Claude Code's built-in
 reviews in parallel. Emit SARIF per scanner for later cross-referencing.
 Never hard-fail: any missing scanner becomes a degraded-mode warning.

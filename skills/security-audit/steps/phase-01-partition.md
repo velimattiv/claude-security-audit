@@ -1,5 +1,17 @@
 # Phase 1 — Partition & Risk Rank
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/partitions.json` (list of partition structs with id, path, risk score, depth, paths_included)
+- `.claude-audit/current/phase-01.done`
+
+⛔ **DO NOT advance to Phase 2** until both files exist AND the Verify block at the bottom prints `phase-01 verified`.
+
+📖 `partitions.json` drives Phase 5 fan-out. Missing or malformed partitions collapse the deep-dive fan-out into a shallow single-pass review that misses per-class bugs.
+
+---
+
 **Goal.** Split the repo into audit partitions and score each by risk so the
 deep-dive budget goes where it matters.
 

@@ -1,5 +1,17 @@
 # Phase 3 — Keystone File Index
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/cache/keystone-files.json` (global list of cross-cutting files: middleware, auth config, CORS config, error handlers)
+- `.claude-audit/current/phase-03.done`
+
+⛔ **DO NOT advance to Phase 4** until both files exist AND the Verify block at the bottom prints `phase-03 verified`.
+
+📖 Keystone index feeds Phase 5 sub-agents — they grep against this index rather than re-scanning the repo. Missing keystone list ⇒ each sub-agent burns tokens re-discovering middleware.
+
+---
+
 **Goal.** Identify files whose modification invalidates many audit rows at
 once — auth middleware, session config, crypto bootstrap, CORS/CSP policy,
 error handlers, config loaders. These are **keystone files**. Delta mode

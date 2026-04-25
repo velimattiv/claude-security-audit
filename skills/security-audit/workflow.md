@@ -14,6 +14,15 @@ every commit). This workflow implements it.
 
 ---
 
+## Machine-readable contract
+
+The per-phase artifact contract — what each phase must produce, what
+sub-agent fan-out it requires, what gate conditions apply — lives in
+`manifest.yaml` in this skill directory. That file is authoritative for
+downstream tooling (E2E assertion suite, CI checks). This workflow + the
+per-step files are authoritative for your behavior as the orchestrator.
+When they disagree, fix the discrepancy; do not silently pick one.
+
 ## ⚠ MANDATORY ARTIFACT CONTRACT — READ FIRST
 
 A `/security-audit` run is **only valid** when it produces, on disk, all of:
@@ -39,12 +48,70 @@ write them.
 **First action — execute literally as your first Bash tool call:**
 
 ```bash
-mkdir -p .claude-audit/current/phase-04-scanners .claude-audit/cache .claude-audit/history && touch .claude-audit/.skill-acknowledged && cat skills/security-audit/VERSION 2>/dev/null || cat .claude/skills/security-audit/VERSION 2>/dev/null || echo "VERSION not found"
+set -e
+mkdir -p .claude-audit/current/phase-04-scanners .claude-audit/cache .claude-audit/history
+SKILL_DIR=""
+for p in "$HOME/.claude/skills/security-audit" "./.claude/skills/security-audit" "./skills/security-audit"; do
+  if [ -d "$p" ]; then
+    SKILL_DIR=$(cd "$p" && pwd -P)
+    break
+  fi
+done
+if [ -z "$SKILL_DIR" ]; then
+  echo "ERROR: security-audit skill not found at any of: \$HOME/.claude/skills/security-audit, ./.claude/skills/security-audit, ./skills/security-audit" >&2
+  exit 1
+fi
+printf '%s\n' "$SKILL_DIR" > .claude-audit/.skill-dir
+if [ ! -f "$SKILL_DIR/VERSION" ]; then
+  echo "ERROR: VERSION file missing at $SKILL_DIR/VERSION — install is incomplete" >&2
+  exit 1
+fi
+cat "$SKILL_DIR/VERSION"
 ```
 
-This creates the blackboard, marks the skill as acknowledged, and
-prints the skill version you're running. After this command succeeds,
-you may proceed to the rest of this file.
+`set -e` makes any command failure abort the chain — replacing the
+fragile `&& \` sequence from earlier rounds. Each step's failure
+produces a specific error message instead of a silent non-zero exit.
+
+The probe order is: canonical user-level install
+(`$HOME/.claude/skills/security-audit`) → project-local under
+`.claude/skills/` → in-repo dev path. The canonical path is what
+Claude Code's skill resolution uses; the other two are dev/edge-case
+fallbacks. We use `cd && pwd -P` instead of `realpath` because it is
+portable across distros without coreutils.
+
+The resolved path is written as a single bare path to
+`.claude-audit/.skill-dir` (no `KEY=value`, no shell-source). Later
+phases read it as data, never as code.
+
+**Resolving `$SKILL_DIR` in later phases.** Every Claude Code Bash tool
+call starts a fresh shell — environment variables do NOT survive
+across invocations. So **every** Bash command that references
+`$SKILL_DIR` must re-load it from disk at the top of the same Bash
+invocation:
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved (preflight didn't run?)"; exit 1; }
+python3 "$SKILL_DIR/lib/validate-findings.py" ...
+```
+
+The `[ -n "$SKILL_DIR" ]` guard catches the case where `.skill-dir`
+exists but is empty — without it, an empty SKILL_DIR causes path
+collapse (`"" + "/lib/..." = "/lib/..."`) which is silently wrong.
+
+Do NOT `source` or `.` the file — it is data, not shell code. Reading
+it with `cat` cannot trigger code execution if the file is later
+tampered with.
+
+**Substituting `$SKILL_DIR` into sub-agent prompts.** When invoking the
+Agent tool with a prompt rendered from `templates/subagent-prompt.md`,
+substitute `{{skill_dir}}` with the *literal absolute path* you just
+resolved (not the string `$SKILL_DIR`). The sub-agent's prompt should
+contain the actual path so the sub-agent's own Bash invocations work
+without re-discovery.
+
+After this command succeeds, you may proceed to the rest of this file.
 
 ---
 
@@ -255,8 +322,9 @@ For each top-N partition × each deep-dive category:
 - Model: `opus`. **Never downgrade** to Sonnet/Haiku.
 - **Orchestrator-side re-validation (defense in depth).** After the
   sub-agent returns, the orchestrator re-runs
-  `scripts/validate-findings.py --schema lib/finding-schema.json
-  --cwe-map lib/cwe-map.json <artifact>` against the emitted JSONL.
+  After loading `SKILL_DIR=$(cat .claude-audit/.skill-dir)`, run:
+  `python3 "$SKILL_DIR/lib/validate-findings.py" --schema "$SKILL_DIR/lib/finding-schema.json"
+  --cwe-map "$SKILL_DIR/lib/cwe-map.json" <artifact>` against the emitted JSONL.
   The sub-agent is *told* to validate before returning; the
   orchestrator's re-run catches cases where the sub-agent skipped
   the self-check. Validation failure triggers one retry with the

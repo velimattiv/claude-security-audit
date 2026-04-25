@@ -31,9 +31,14 @@ METHOD:
        .claude-audit/current/phase-{{NN}}-{{category}}-{{partition_id}}.jsonl
      Schema per finding: see lib/finding-schema.json.
   4. **Validate your JSONL output before exit:**
-       python3 scripts/validate-findings.py \
-         --schema skills/security-audit/lib/finding-schema.json \
+       python3 "{{skill_dir}}/lib/validate-findings.py" \
+         --schema "{{skill_dir}}/lib/finding-schema.json" \
+         --cwe-map "{{skill_dir}}/lib/cwe-map.json" \
          .claude-audit/current/phase-{{NN}}-{{category}}-{{partition_id}}.jsonl
+     The `{{skill_dir}}` placeholder is replaced by the orchestrator
+     with the literal absolute path of the security-audit skill before
+     this prompt reaches you — it appears as a real path here, not as
+     a variable to expand at runtime.
      If exit code is non-zero, you MUST fix the invalid rows (missing
      required fields, bad CWE format, etc.) and re-validate until clean.
      Do not emit the RETURN SHAPE with an un-validated artifact.

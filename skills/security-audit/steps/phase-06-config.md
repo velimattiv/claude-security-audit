@@ -1,5 +1,27 @@
 # Phase 6 — Config + Methodology Spine
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/phase-06-config.json` (CORS / headers / cookies / errors / env / rate-limit / transport / CI-CD findings)
+- `.claude-audit/current/phase-06-asvs.jsonl` (one row per ASVS L2 sub-item where relevant)
+- `.claude-audit/current/phase-06-api-top10.jsonl` (per-surface mapping to API Top 10 2023)
+- `.claude-audit/current/phase-06-llm-top10.jsonl` — ALWAYS written. If `profile.llm_usage.detected == false` or `kind == "internal"`, write a zero-byte file (the file's presence is the signal that the gate ran).
+- `.claude-audit/current/phase-06-linddun.jsonl` — ALWAYS written. If `profile.pii.detected == false`, write a zero-byte file.
+- `.claude-audit/current/phase-06-stride/*.md` — one Markdown file per top-N partition (filename uses the partition id, e.g. `services-api.md`)
+- `.claude-audit/current/phase-06.done`
+
+🔁 **Methodology fan-out is MANDATORY (per §6.9, §6.12, §6.13):**
+- ASVS: invoke one Agent sub-agent per ASVS category. Do NOT summarize all ASVS categories in a single pass.
+- LINDDUN: invoke a sub-agent per (entity × threat-category) when PII is detected.
+- STRIDE: invoke a sub-agent per top-N partition.
+
+⛔ **DO NOT advance to Phase 7** until every file above exists (empty JSONLs are fine for legitimately-gated methodologies) AND the Verify block prints `phase-06 verified`.
+
+📖 Phase 7 synthesis computes the methodology coverage matrix from these JSONLs. Empty-when-shouldn't-be-empty or missing methodology files ⇒ the report's "Methodology Coverage" section is misleading.
+
+---
+
 **Goal.** Audit whole-application configuration (CORS, security headers,
 cookies, error handling, env-var exposure, transport config, outbound-
 client config, CI/CD pipeline) AND apply the structured OWASP
@@ -132,18 +154,48 @@ Cross-reference zizmor SARIF if present. Findings tagged
 
 ## 6.9 — ASVS 5.0 Level 2 spine
 
-Fan-out one sub-agent per ASVS category (17 total). Each sub-agent gets:
-- The ASVS Level 2 category spec (verbatim from OWASP — the skill
-  ships a curated subset in `lib/asvs-l2.md`).
-- Project files filtered by a category-specific grep (e.g., V6 Crypto →
-  `lib/crypto-imports.md` seed).
+Invoke the **Agent tool** once per ASVS L2 category (V1 through V17 —
+17 sub-agents). For each category, the Agent invocation has:
+- `description`: a short label like `"ASVS L2 V6 (Crypto)"`.
+- `subagent_type`: `"general-purpose"`.
+- `prompt`: the ASVS L2 spec for that category (curated subset in
+  `lib/asvs-l2.md`) plus a category-specific file seed
+  (e.g. V6 Crypto → `lib/crypto-imports.md`).
 
-Each sub-agent emits `.claude-audit/current/phase-06-asvs.jsonl` rows:
+Concurrency cap: 8 in flight (same window-dispatch procedure as
+Phase 5 §5.2 Step B). Do NOT pass a `model` parameter — Claude Code
+routes general-purpose sub-agents to the harness-appropriate Opus
+variant automatically. Do NOT collapse the 17 categories into a
+single summary pass — each sub-agent is doing targeted file inspection
+against its category's required controls.
+
+Each sub-agent appends JSONL rows to its own per-category file at
+`.claude-audit/current/phase-06-asvs-<cat>.jsonl`. After all 17 return,
+the orchestrator concatenates them into the canonical aggregate via
+this **literal Bash command** (with a count check so a partial fan-out
+fails loudly instead of producing a partial aggregate):
+
+```bash
+count=$(ls .claude-audit/current/phase-06-asvs-*.jsonl 2>/dev/null | wc -l)
+if [ "$count" -ne 17 ]; then
+  echo "ERROR: expected 17 ASVS per-category files, got $count — sub-agents failed or were not all dispatched" >&2
+  exit 1
+fi
+cat .claude-audit/current/phase-06-asvs-*.jsonl \
+  > .claude-audit/current/phase-06-asvs.jsonl
+```
+
+The `ls | wc -l` count is robust under both `nullglob` ON and OFF
+(unlike a `set -- glob` test). Run via the Bash tool — do NOT re-write
+the rows by reading them into context. Both the per-category files and
+the concatenated aggregate are required outputs (see `manifest.yaml`).
+
+Row shape (one JSON object per line):
 ```json
 {"asvs_id":"V6.2.1","status":"PASS|FAIL|N/A","file":"...","line":0,"message":"...","severity":"..."}
 ```
 
-Aggregate at the end; compute coverage percentage for the report.
+Compute coverage percentage for the report at the end.
 
 ## 6.10 — API Top 10 (2023) mechanical mapping
 
@@ -166,23 +218,48 @@ containing counts and pointers into the underlying findings.
 
 ## 6.11 — LLM Top 10 (2025) — conditional
 
-Skip if `profile.llm_usage.detected == false` or `kind == "internal"`.
+If `profile.llm_usage.detected == false` or `kind == "internal"`,
+write an empty `.claude-audit/current/phase-06-llm-top10.jsonl` (zero
+bytes) — the empty file is the signal that the gate ran; do not omit it.
+
 Otherwise, ALL cat-09 findings get aggregated here with additional
 context mapping (system-prompt sources, tool-calling scope).
 
 ## 6.12 — LINDDUN — conditional
 
-Skip if `profile.pii.detected == false`. Otherwise, run one sub-agent
-that walks the 7 LINDDUN threat categories (Linkability, Identifiability,
-Non-repudiation, Detectability, Disclosure, Unawareness, Non-compliance)
-over the PII columns in `profile.data_model.entities[]`. Output:
-`phase-06-linddun.jsonl` one line per (entity × threat) pair.
+If `profile.pii.detected == false`, write an empty
+`.claude-audit/current/phase-06-linddun.jsonl` (literally zero bytes)
+and note the skip in the methodology coverage. The empty file is the
+signal that the gate ran; do not omit the file.
+
+If PII *is* detected, invoke the **Agent tool** once per
+`(entity, threat)` pair, where threat is one of: Linkability,
+Identifiability, Non-repudiation, Detectability, Disclosure, Unawareness,
+Non-compliance. Each Agent invocation has:
+- `description`: a short label like `"LINDDUN Disclosure on User"`.
+- `subagent_type`: `"general-purpose"`.
+- `prompt`: the LINDDUN threat definition for that threat plus the
+  scope of `entity.pii_cols`.
+
+Each sub-agent appends one JSONL row to
+`.claude-audit/current/phase-06-linddun.jsonl` for its `(entity, threat)`
+pair. Concurrency cap: 8. Do NOT pass a `model` parameter (per §6.9).
 
 ## 6.13 — STRIDE per surface
 
-For each top-N partition, spawn a sub-agent that produces a 6-column
-(S/T/R/I/D/E) table in Markdown per attack-surface item. Write to:
-`.claude-audit/current/phase-06-stride/<partition>.md`.
+Invoke the **Agent tool** once per top-N partition. For each `p` in the
+top-N partition list, the Agent invocation has:
+- `description`: a short label like `"STRIDE table for services-api"`.
+- `subagent_type`: `"general-purpose"`.
+- `prompt`: STRIDE methodology + `phase-02-surface.json` scoped to `p`,
+  plus `profile.auth`, `profile.trust_zones`, plus the partition's
+  Phase 5 `auth` and `idor` findings.
+
+Each sub-agent writes its partition's Markdown table to
+`.claude-audit/current/phase-06-stride/<p.id>.md`. Concurrency cap: 8.
+Do NOT pass a `model` parameter (per §6.9). Do NOT summarize all
+partitions' STRIDE into a single Markdown blob — the per-partition file
+layout is how Phase 7 stitches partitions into the final report.
 
 The STRIDE sub-agent reads:
 - `phase-02-surface.json` scoped to the partition

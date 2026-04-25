@@ -1,5 +1,17 @@
 # Phase 0 — Discovery & Recon
 
+## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
+
+📋 **This phase MUST produce, on disk, before advancing:**
+- `.claude-audit/current/phase-00-profile.json` (schema-valid per `lib/profile-schema.json`)
+- `.claude-audit/current/phase-00.done` (zero-byte marker)
+
+⛔ **DO NOT advance to Phase 1** until both files exist AND the Bash verification block at the bottom of this file prints `phase-00 verified`.
+
+📖 Writing only the final report without this artifact is an **INVALID run**. Every later phase (partition risk ranking, framework-driven surface enumeration, Phase 5 fan-out) reads `phase-00-profile.json` as authoritative input.
+
+---
+
 **Goal.** Build the Project Map — a single JSON document that every later
 phase reads. Nothing deep happens until this is complete.
 

@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: "Comprehensive polyglot security audit. Discovers the attack surface across 60+ frameworks, runs a SARIF scanner bundle, executes 9 parallel deep-dive categories, and produces machine-readable artifacts (.claude-audit/current/phase-NN-*.json + findings.sarif + baseline) PLUS an OWASP-methodology-tagged human report. The artifacts are mandatory outputs, not optional ceremony. Invoke when the user asks to 'run security audit', 'security audit', 'audit security', or passes args like 'mode: delta' / 'scope: services/api' / 'categories: crypto,mitm,secrets'. Typical run 15-60 minutes (full) or 2-5 minutes (delta)."
+description: "Comprehensive polyglot security audit across 60+ frameworks. Runs a SARIF scanner bundle, fans out 9 parallel deep-dive categories, and emits an OWASP-methodology-tagged report. Invoke when the user says 'run security audit', 'security audit', 'audit security', or passes args like 'mode: delta' / 'scope: services/api' / 'categories: crypto,mitm,secrets'. Typical run 15-60 min (full) or 2-5 min (delta). MANDATORY ARTIFACT CONTRACT: every run MUST write (1) .claude-audit/current/ as your FIRST tool action via mkdir -p; (2) per-phase phase-NN-*.json AND a phase-NN.done marker for each completed phase 0-7 (8 if mode=full) BEFORE moving to the next phase; (3) findings.sarif (SARIF 2.1.0) where EVERY results[] row carries properties.security-severity (CVSS-style numeric) AND properties.cwe (e.g. 'CWE-798' — required for downstream tooling, lookup in lib/cwe-map.json) AND optionally properties.category (one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, config); (4) human report LAST, not first. Producing only the human report without the .claude-audit/current/ blackboard is INVALID — delta mode breaks, GitHub Security tab integration breaks, CI gating breaks. If you find yourself reasoning 'the user just wants a summary' — STOP and write the artifacts first. The artifacts ARE the deliverable; the report is the cover page."
 ---
 
 # Mandatory contract before you do anything else
@@ -23,17 +23,14 @@ delta mode fails (no baseline), GitHub Security tab integration fails
 **If you find yourself reasoning "I'll just produce the final
 report" — STOP. The artifacts come first.**
 
-# First action — execute literally before anything else
+# First action — read workflow.md and run its preflight
 
-Before reading workflow.md in full, run this Bash command to establish
-the blackboard:
-
-```bash
-mkdir -p .claude-audit/current/phase-04-scanners .claude-audit/cache .claude-audit/history && touch .claude-audit/.skill-acknowledged
-```
-
-If `.claude-audit/.skill-acknowledged` does not exist on disk after
-the audit, the audit is INVALID and must be retried.
+The blackboard creation + `$SKILL_DIR` resolution + version check are
+defined as a single multi-line Bash command in
+[workflow.md](workflow.md) under "First action — execute literally as
+your first Bash tool call". Run that command verbatim before doing
+anything else. It writes `.claude-audit/.skill-dir` (the bare path of
+this skill's install location), which every later phase reads.
 
 # Then follow the workflow
 

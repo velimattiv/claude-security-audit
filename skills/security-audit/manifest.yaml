@@ -1,0 +1,249 @@
+# /security-audit — Phase Contract Manifest
+#
+# This file is the STRUCTURED, machine-readable version of the per-phase
+# artifact contract. Prose versions live in:
+#   - SKILL.md (description field, runtime context)
+#   - steps/phase-NN-*.md (MANDATORY EXECUTION RULES blocks)
+#   - workflow.md §3 (Saga Checkpointing)
+#
+# All three must agree. When they disagree, this file is authoritative
+# for the E2E assertion suite. Prose files are authoritative for the
+# orchestrator model's behavior.
+#
+# Consumers as of 2.0.2:
+#   - tests/e2e/assertions.py — reads phases[].required_outputs and
+#     phases[].forbidden_outputs to cross-check artifact presence /
+#     absence on disk.
+# CI workflows (.github/workflows/*.yml) do NOT currently consume the
+# manifest — that's a v2.1 candidate. Adding entries here does not
+# automatically gate CI; only the local E2E suite enforces them.
+#
+# Schema (informal — formal JSON Schema is a v2.1 candidate):
+#   - schema_version (int): bump on breaking shape changes.
+#   - skill, skill_version (str).
+#   - phases[] (list of objects):
+#       - id (int 0-8), name (str), step_file (path).
+#       - inputs (list of paths or descriptors).
+#       - required_outputs (list):
+#           - path (str): exact file path expected on disk.
+#           - path_glob (str): glob — at least one match required if
+#             at_least_one is true.
+#           - schema (str): optional path to JSON-schema for this artifact.
+#           - empty_if_gated (str): condition under which the file is
+#             allowed to be empty (zero bytes) — but the file MUST exist.
+#           - per_result_required_properties (list, Phase 7 only).
+#       - sub_agent_fan_out (str "none" or object describing fan-out).
+#       - skip_if (list of conditions, Phase 8 only).
+#       - forbidden_outputs (list, optional): per-phase blocklist of
+#         specific paths that MUST NOT exist; each entry has `path`
+#         and `reason` (the reason surfaces in assertion failure
+#         messages).
+#   - final_outputs (list with conditional path resolution).
+#   - invariants (list of human-readable rules).
+
+schema_version: 1
+skill: security-audit
+skill_version: 2.0.2
+
+description: |
+  Per-phase contract. Every phase MUST produce the listed required_outputs
+  on disk before advancing. A run is INVALID if it produces the human
+  report (docs/security-audit-report.md) without the .claude-audit/current/
+  blackboard. Downstream integrations (delta mode, GitHub Security tab,
+  CI gating, fixture-based E2E) all depend on the blackboard.
+
+# Glob paths are relative to the skill-user's project root.
+
+phases:
+
+  - id: 0
+    name: Discovery & Recon
+    step_file: steps/phase-00-discovery.md
+    inputs: [project root]
+    required_outputs:
+      - path: .claude-audit/current/phase-00-profile.json
+        schema: lib/profile-schema.json
+      - path: .claude-audit/current/phase-00.done
+    sub_agent_fan_out: none
+
+  - id: 1
+    name: Partition & Risk Rank
+    step_file: steps/phase-01-partition.md
+    inputs: [.claude-audit/current/phase-00-profile.json]
+    required_outputs:
+      - path: .claude-audit/current/partitions.json
+        schema: lib/partitions-schema.json
+      - path: .claude-audit/current/phase-01.done
+    sub_agent_fan_out: none
+
+  - id: 2
+    name: Attack Surface Inventory
+    step_file: steps/phase-02-surface.md
+    inputs:
+      - .claude-audit/current/phase-00-profile.json
+      - .claude-audit/current/partitions.json
+    required_outputs:
+      - path: .claude-audit/current/phase-02-surface.json
+        schema: lib/surface-schema.json
+      - path: .claude-audit/current/phase-02.done
+    sub_agent_fan_out: none
+
+  - id: 3
+    name: Keystone File Index
+    step_file: steps/phase-03-keystone.md
+    inputs:
+      - .claude-audit/current/phase-00-profile.json
+      - .claude-audit/current/phase-02-surface.json
+    required_outputs:
+      - path: .claude-audit/cache/keystone-files.json
+      - path: .claude-audit/current/phase-03.done
+    sub_agent_fan_out: none
+
+  - id: 4
+    name: External Inputs (Scanners)
+    step_file: steps/phase-04-scanners.md
+    required_outputs:
+      - path_glob: .claude-audit/current/phase-04-scanners/*.slim.json
+        at_least_one: true
+        graceful_degradation: true  # if no scanners installed, still emit marker
+      - path_glob: .claude-audit/current/phase-04-scanners/security-review-*.md
+      - path_glob: .claude-audit/current/phase-04-scanners/adversarial-*.md
+      - path: .claude-audit/current/phase-04.done
+    sub_agent_fan_out:
+      scanners_parallel: 6   # one per scanner binary (semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint)
+      reviews_parallel: 2    # /security-review + adversarial-review
+
+  - id: 5
+    name: Parallel Deep Dives
+    step_file: steps/phase-05-deepdives.md
+    required_outputs:
+      - path_glob: .claude-audit/current/phase-05-*-*.jsonl
+        shape: per-category-per-partition
+      - path: .claude-audit/current/phase-05-skipped.json
+        # ALWAYS written. Shape: {"skipped": [...]} — an object wrapping
+        # an array of {category, partition, reason} entries. Empty array
+        # when nothing was skipped: {"skipped": []}. The file's presence
+        # signals filtering ran; absence indicates the orchestrator
+        # skipped fan-out entirely.
+        shape: '{"skipped": [...]}'
+      - path: .claude-audit/current/phase-05.done
+    # Specific consolidated-shape filenames forbidden under .claude-audit/
+    # current/. These are v1-era shapes seen in real regressions; a glob
+    # like phase-05-*.json over-matches and would flag the legitimate
+    # phase-05-skipped.json.
+    #
+    # KNOWN LIMITATION: this list is necessarily incomplete — a model can
+    # invent fresh consolidated names (phase-05-summary.json,
+    # phase-05-results.json, phase-05-data.json, etc.). Add to this list
+    # whenever a new consolidated shape is observed in a regression.
+    # The path_glob in required_outputs above (phase-05-*-*.jsonl with
+    # at_least_one) is the positive invariant; this list is the negative
+    # one. The two together don't fully fence "no consolidated shapes"
+    # but they fence the observed ones.
+    forbidden_outputs:
+      - path: .claude-audit/current/phase-05-tokens.json
+        reason: "v1-era consolidated shape; breaks per-category aggregation"
+      - path: .claude-audit/current/phase-05-findings.json
+        reason: "v1-era consolidated shape; breaks per-category aggregation"
+      - path: .claude-audit/current/phase-05-all.json
+        reason: "consolidated shape; breaks per-category aggregation"
+      - path: .claude-audit/current/phase-05-combined.json
+        reason: "consolidated shape; breaks per-category aggregation"
+    sub_agent_fan_out:
+      pairs: [category, top_n_partition]
+      concurrency_cap: 8
+      # Model: do NOT pass a model parameter to Agent. Claude Code routes
+      # general-purpose sub-agents to the harness-appropriate Opus
+      # variant automatically. Phase 5 §5.2 documents this; orchestrator
+      # MUST NOT downgrade to Sonnet/Haiku.
+      per_pair_output_pattern: .claude-audit/current/phase-05-<category>-<partition>.jsonl
+      categories:
+        - {id: auth,          file: steps/deepdive/cat-01-auth-authz.md,      gate: always}
+        - {id: idor,          file: steps/deepdive/cat-02-idor-bola.md,       gate: always}
+        - {id: token_scope,   file: steps/deepdive/cat-03-token-scope.md,     gate: always}
+        - {id: mitm,          file: steps/deepdive/cat-04-mitm.md,            gate: always}
+        - {id: crypto,        file: steps/deepdive/cat-05-crypto.md,          gate: always}
+        - {id: secret_sprawl, file: steps/deepdive/cat-06-secret-sprawl.md,   gate: always}
+        - {id: deployment,    file: steps/deepdive/cat-07-deployment.md,      gate: always}
+        - {id: injection,     file: steps/deepdive/cat-08-injection-ssrf.md,  gate: always}
+        - {id: llm,           file: steps/deepdive/cat-09-llm.md,             gate: "profile.llm_usage.detected == true && profile.llm_usage.kind != 'internal'"}
+
+  - id: 6
+    name: Config + Methodology Spine
+    step_file: steps/phase-06-config.md
+    required_outputs:
+      - path: .claude-audit/current/phase-06-config.json
+      - path_glob: .claude-audit/current/phase-06-asvs-*.jsonl
+        # Per-category intermediates from §6.9 fan-out, one per ASVS
+        # category. Concatenated into the aggregate below.
+        at_least_one: true
+      - path: .claude-audit/current/phase-06-asvs.jsonl
+        # Concatenated aggregate of phase-06-asvs-*.jsonl above.
+      - path: .claude-audit/current/phase-06-api-top10.jsonl
+      - path: .claude-audit/current/phase-06-llm-top10.jsonl
+        empty_if_gated: "profile.llm_usage.detected == false || profile.llm_usage.kind == 'internal'"
+      - path: .claude-audit/current/phase-06-linddun.jsonl
+        empty_if_gated: "profile.pii.detected == false"
+      - path_glob: .claude-audit/current/phase-06-stride/*.md
+        at_least_one: true
+      - path: .claude-audit/current/phase-06.done
+    sub_agent_fan_out:
+      # All three Phase 6 fan-outs: do NOT pass a `model` parameter to
+      # Agent. Claude Code routes general-purpose sub-agents to the
+      # harness-appropriate Opus variant automatically. Phase 6 §6.9
+      # documents this; orchestrator MUST NOT downgrade.
+      asvs:
+        pairs: [17 ASVS L2 categories]
+        concurrency_cap: 8
+        per_pair_output_pattern: .claude-audit/current/phase-06-asvs-<cat>.jsonl
+      linddun:
+        pairs: [entity, threat]
+        gate: "profile.pii.detected == true"
+        concurrency_cap: 8
+      stride:
+        pairs: [top_n_partitions]
+        concurrency_cap: 8
+        per_pair_output_pattern: .claude-audit/current/phase-06-stride/<partition>.md
+
+  - id: 7
+    name: Synthesis & Report
+    step_file: steps/phase-07-synthesis.md
+    required_outputs:
+      - path: .claude-audit/current/phase-07-report.md
+      - path: .claude-audit/current/findings.sarif
+        format: SARIF 2.1.0
+        per_result_required_properties:
+          - security-severity   # CVSS-style numeric string, required for GitHub Security tab
+          - cwe                  # e.g. "CWE-798" — required for fixture matching + baseline carryover
+        per_result_recommended_properties:
+          - category             # one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, config
+      - path: .claude-audit/current/findings.cyclonedx.json
+      - path: .claude-audit/current/phase-07.done
+    sub_agent_fan_out: none
+
+  - id: 8
+    name: Baseline Persistence
+    step_file: steps/phase-08-baseline.md
+    skip_if:
+      - "mode == 'delta'"
+      - ".claude-audit/current/phase-07.done missing"
+      - "audit.log has CRITICAL runtime-error entries"
+    required_outputs:
+      - path: .claude-audit/baseline.json
+      - path: docs/security-audit-baseline.json
+      - path: .claude-audit/current/phase-08.done
+    sub_agent_fan_out: none
+
+final_outputs:
+  # Copied from .claude-audit/current/phase-07-report.md at the end of Phase 7.
+  - path_conditional:
+      if_exists: _bmad-output/
+      then: _bmad-output/implementation-artifacts/security-audit-report.md
+      else: docs/security-audit-report.md
+
+invariants:
+  - Every phase writes its .done marker AFTER its artifacts exist on disk.
+  - A run that produces only docs/security-audit-report.md without .claude-audit/current/* is INVALID.
+  - SARIF results without properties.cwe break the E2E regression test's fixture-matching.
+  - Consolidated phase-05-<foo>.json files (v1-era shape) break Phase 7 per-category aggregation.
+  - Skipping Phase 5 fan-out in favor of serial single-pass coverage regresses the E2E test (misses alg:none, 2FA, zip-slip, LFI).
