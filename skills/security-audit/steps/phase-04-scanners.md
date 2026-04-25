@@ -8,6 +8,8 @@
 - `.claude-audit/current/phase-04-scanners/adversarial-*.md` (adversarial-review sub-agent output)
 - `.claude-audit/current/phase-04.done`
 
+🔁 **Scanner invocation has TWO supported paths** (Path A = host binaries, Path B = container wrapper). For each scanner, follow the precedence chain in §4.1.5. **Don't assume PATH is the only source.**
+
 ⛔ **DO NOT advance to Phase 5** until the scanner directory has at least one `slim.json` AND the Verify block prints `phase-04 verified`. Missing scanner binaries are NOT fatal — degrade gracefully, but still emit the marker after the attempt.
 
 📖 Phase 7 synthesis cross-references scanner findings against skill findings to tag CONFIRMED vs LIKELY confidence. No scanner artifacts ⇒ every skill finding drops to LIKELY or POSSIBLE.
@@ -36,18 +38,66 @@ Never hard-fail: any missing scanner becomes a degraded-mode warning.
 
 ## 4.1 — Preflight
 
-Run `scripts/install-scanners.sh --check` (or equivalent inline probe).
-Build two lists:
+Build two lists by probing in this order:
 
-- `present`: scanners detected on `PATH`.
-- `missing`: scanners in the required / conditional sets not on `PATH`.
+1. **`present_path`**: scanners detected via `command -v <scanner>` on
+   the host's `PATH`.
+2. **`present_container`**: scanners reachable through the Path B
+   wrapper. The wrapper lives at `$AUDIT_SKILL_REPO/scripts/run-audit-in-container.sh`,
+   where `$AUDIT_SKILL_REPO` is set by the user (typically points at
+   their cloned `claude-security-audit` repo). If the env var is
+   unset, fall back to these probe paths in order:
+   - `~/Code/claude-security-audit/scripts/run-audit-in-container.sh`
+   - `~/projects/claude-security-audit/scripts/run-audit-in-container.sh`
+   - `./scripts/run-audit-in-container.sh` (in case the audit target
+     IS the skill repo — dogfood case)
+   The wrapper is "present" if its file exists AND a container
+   runtime (`podman` or `docker`) is on PATH.
+
+If `$AUDIT_FORCE_PATH_B` is set to `1` in the environment, skip the
+PATH probe entirely and use the wrapper for every scanner. The E2E
+harness sets this when running `--path-b` so it can validate the
+container path without uninstalling host scanners.
+
+3. **`missing`**: scanners in the required/conditional set found in
+   neither list.
 
 For every missing required scanner, append one line to the audit log:
 
-> Scanner `<name>` missing. Install with
-> `scripts/install-scanners.sh`. Degraded mode: skipping this scanner.
+> Scanner `<name>` missing on PATH and no wrapper available. Install
+> with `scripts/install-scanners.sh` (Path A) or build the Path B
+> container with `scripts/run-audit-in-container.sh --build`.
+> Degraded mode: skipping this scanner.
 
-**Do not halt.** Proceed with whatever is present.
+**Do not halt.** Proceed with whatever is reachable.
+
+## 4.1.5 — Scanner invocation precedence
+
+For each required scanner, the orchestrator picks ONE invocation
+method per the precedence below. Once chosen, all extra args
+documented in §4.2's table are appended.
+
+1. **Path A (host PATH binary).** If `command -v <scanner>` succeeds
+   AND `$AUDIT_FORCE_PATH_B != 1`, invoke the binary directly per
+   §4.2's table. Output goes to
+   `.claude-audit/current/phase-04-scanners/<tool>.sarif` (orchestrator
+   sets `--output` / `-o` / equivalent).
+
+2. **Path B (container wrapper).** If Path A is unavailable OR
+   `$AUDIT_FORCE_PATH_B == 1`, invoke
+   `bash $WRAPPER_PATH scan <tool>` where `$WRAPPER_PATH` was
+   resolved in §4.1. The wrapper writes to the same
+   `.claude-audit/current/phase-04-scanners/<tool>.sarif` path
+   (the bind-mount makes them the same file on host disk).
+
+3. **Skip with warning.** If neither path is available, append a
+   `{tool, reason}` row to `phase-04-scanners/skipped.json` and
+   continue. Do not fail.
+
+Log the chosen invocation method per scanner in `summary.json`
+(field: `invocation: "path_a" | "path_b" | "skipped"`) so Phase 7
+synthesis can report it and a future delta-mode run can detect
+when the user has switched paths.
 
 ## 4.2 — Required scanner bundle
 

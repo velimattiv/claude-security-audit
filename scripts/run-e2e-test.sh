@@ -20,7 +20,11 @@
 # scripts/install-scanners.sh.
 #
 # Usage:
-#   scripts/run-e2e-test.sh              # full E2E
+#   scripts/run-e2e-test.sh              # full E2E (Path A — host scanners)
+#   scripts/run-e2e-test.sh --path-b     # full E2E with Path B — scanners run in
+#                                        # the isolated container, host PATH
+#                                        # binaries (if any) are bypassed via
+#                                        # AUDIT_FORCE_PATH_B=1
 #   scripts/run-e2e-test.sh --dry-run    # skip `claude` invocation; validate existing artifacts
 #   scripts/run-e2e-test.sh --keep       # do NOT wipe the target dir (preserve baseline for delta-mode testing)
 #   scripts/run-e2e-test.sh --help
@@ -43,11 +47,13 @@ fi
 
 DRY_RUN=0
 KEEP=0
+PATH_B=0
 while [ $# -gt 0 ]; do
   case "${1:-}" in
     --dry-run) DRY_RUN=1; shift ;;
     --keep)    KEEP=1; shift ;;
-    --help|-h) sed -n '2,34p' "$0"; exit 0 ;;
+    --path-b)  PATH_B=1; shift ;;
+    --help|-h) sed -n '2,40p' "$0"; exit 0 ;;
     "")        break ;;
     *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
   esac
@@ -167,6 +173,26 @@ if [ -n '$BACKUP_DIR' ] && [ -d '$BACKUP_DIR' ]; then
 fi
 " EXIT
 
+# --- 3.5. Path B prep (optional) ---------------------------------------------
+if [ "$PATH_B" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
+  echo
+  echo "[3.5/5] --path-b: building scanner-isolation container..."
+  if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+    echo "ERROR: --path-b requires podman or docker. Install one or run without --path-b." >&2
+    exit 2
+  fi
+  bash "$REPO_ROOT/scripts/run-audit-in-container.sh" --build
+  echo "  container ready"
+  # AUDIT_SKILL_REPO tells Phase 4 where to find the wrapper.
+  # AUDIT_FORCE_PATH_B=1 makes Phase 4 use the wrapper for every
+  # scanner regardless of host PATH state — so a host with scanners
+  # already installed (Path A leftover) still exercises Path B.
+  export AUDIT_SKILL_REPO="$REPO_ROOT"
+  export AUDIT_FORCE_PATH_B=1
+  echo "  AUDIT_SKILL_REPO=$AUDIT_SKILL_REPO"
+  echo "  AUDIT_FORCE_PATH_B=1"
+fi
+
 # --- 4. Run the skill --------------------------------------------------------
 echo
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -175,6 +201,11 @@ else
   echo "[4/5] Running /security-audit (hard wall-time cap: ${E2E_TIMEOUT_MIN} min via timeout(1))..."
   echo "  Command: claude -p '$AUDIT_INVOCATION' --dangerously-skip-permissions"
   echo "  Working dir: $TARGET_DIR"
+  if [ "$PATH_B" -eq 1 ]; then
+    echo "  Mode: Path B (scanners-in-container via run-audit-in-container.sh)"
+  else
+    echo "  Mode: Path A (scanners on host PATH)"
+  fi
   echo
   START_TS=$(date +%s)
   # v2.0.2: the runtime --append-system-prompt mandate from v2.0.1 is gone.

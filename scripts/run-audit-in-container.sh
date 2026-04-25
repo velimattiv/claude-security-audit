@@ -30,7 +30,13 @@
 
 set -eu
 
-IMAGE_DEFAULT="localhost/claude-security-audit:2.0.1"
+# Image tag is floating (`latest`) so it tracks the user's local
+# rebuild rather than a pinned release. The skill's VERSION lives in
+# skills/security-audit/VERSION; the image tag is a separate concern
+# (the user might rebuild after a wrapper-only fix without bumping
+# the skill version, or vice versa). --image overrides for users who
+# want explicit version-tracked tags.
+IMAGE_DEFAULT="localhost/claude-security-audit:latest"
 IMAGE="$IMAGE_DEFAULT"
 BUILD=0
 
@@ -44,11 +50,29 @@ while [ $# -gt 0 ]; do
 done
 
 # Subcommand (scan / preflight / shell). Default: preflight.
-CMD="${1:-preflight}"
-shift || true
+# Track whether the user gave one explicitly — `--build` alone (no
+# subcommand) should exit after the build, NOT proceed to default
+# preflight (which needs bind mounts and fails in CI/DinD).
+if [ -n "${1:-}" ]; then
+  EXPLICIT_CMD=1
+  CMD="$1"
+  shift
+else
+  EXPLICIT_CMD=0
+  CMD="preflight"
+fi
 
-# Detect container runtime.
-if command -v podman >/dev/null 2>&1; then
+# Detect container runtime. Order: explicit override → podman →
+# docker. The override matters for users on systems where rootless
+# podman is misconfigured (e.g. XDG_RUNTIME_DIR pointing at a world-
+# writable /tmp inside a container) but docker works.
+if [ -n "${AUDIT_CONTAINER_RUNTIME:-}" ]; then
+  RUNTIME="$AUDIT_CONTAINER_RUNTIME"
+  if ! command -v "$RUNTIME" >/dev/null 2>&1; then
+    echo "ERROR: AUDIT_CONTAINER_RUNTIME=$RUNTIME but '$RUNTIME' not on PATH." >&2
+    exit 1
+  fi
+elif command -v podman >/dev/null 2>&1; then
   RUNTIME=podman
 elif command -v docker >/dev/null 2>&1; then
   RUNTIME=docker
@@ -68,7 +92,25 @@ mkdir -p "$ARTIFACT_DIR"
 if [ "$BUILD" -eq 1 ] || ! "$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Building image $IMAGE (first-time or --build)..."
   SKILL_REPO="${SKILL_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
-  (cd "$SKILL_REPO" && "$RUNTIME" build -t "$IMAGE" -f scripts/Dockerfile.audit .)
+  # docker's modern default builder is buildx with the docker-container
+  # driver, which caches build output rather than loading it into the
+  # local daemon. We need --load so the image is actually runnable.
+  # podman has no equivalent — its build directly populates the local
+  # image store.
+  BUILD_FLAGS=""
+  if [ "$RUNTIME" = "docker" ]; then
+    BUILD_FLAGS="--load"
+  fi
+  (cd "$SKILL_REPO" && "$RUNTIME" build $BUILD_FLAGS -t "$IMAGE" -f scripts/Dockerfile.audit .)
+  # If --build was the explicit user intent (no subcommand given on the
+  # command line), exit after the build. Otherwise the script falls
+  # through to the default `preflight` subcommand, which needs bind
+  # mounts and will fail in CI / DinD setups where the user just
+  # wanted to validate the build.
+  if [ "$BUILD" -eq 1 ] && [ "$EXPLICIT_CMD" -eq 0 ]; then
+    echo "Build complete. Run preflight / scan / shell as separate subcommands."
+    exit 0
+  fi
 fi
 
 # Compose the inner command based on the subcommand.
