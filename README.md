@@ -16,10 +16,15 @@ Deployment, Injection/SSRF, LLM-specific).
 
 ## Version
 
-- **v2.0.0** (current) — full polyglot audit, 9 deep-dive categories, 6
+- **v2.0.3** (current) — Path B Containerfile fix (PEP 668) +
+  regression gate (`tests/e2e/test-path-b-build.sh`).
+- **v2.0.2** — in-skill artifact mandate (no external
+  `--append-system-prompt`); E2E PASS against juice-shop@v19.2.1
+  with 12/12 fixtures matched, 474 findings, 60 unique CWEs.
+  See `docs/test-runs/e2e-full-run-v2.0.2-2026-04-25T0250Z.md`.
+- **v2.0.0** — full polyglot audit, 9 deep-dive categories, 6
   required + 6 conditional scanners, SARIF + SBOM + delta-mode baseline.
-  See `docs/V2-SCOPE.md` for the design spec. Dogfooded against OWASP
-  Juice Shop; test-run evidence in `docs/test-runs/`.
+  See `docs/V2-SCOPE.md` for the design spec.
 - **v2.1 candidates** — listed in `docs/ROADMAP.md`.
 
 ## What it does
@@ -56,7 +61,7 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.0.2 \
+git clone --depth 1 --branch v2.0.3 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
 cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
@@ -65,7 +70,7 @@ cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.0.2 \
+git clone --depth 1 --branch v2.0.3 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -110,7 +115,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.0.2 \
+git clone --depth 1 --branch v2.0.3 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
@@ -177,24 +182,7 @@ sub-agents (Phase 4's `/security-review`, adversarial-review), and
 synthesis (Phase 7) all run in whatever runtime Claude Code uses.
 Treat Path B as "sandboxed scanners," not "sandboxed audit."
 
-### Required scanner bundle (both paths)
-
-- **semgrep** — polyglot SAST, community ruleset.
-- **osv-scanner** — SCA across all manifest ecosystems.
-- **gitleaks** — secrets in working tree + git history.
-- **trufflehog** — verified-secret sweep.
-- **trivy** — IaC + Dockerfile + vulns + SBOM.
-- **hadolint** — Dockerfile lint.
-
-Conditional adds (installed on demand by context): brakeman (Rails), checkov
-(Terraform-heavy), kube-linter (Kubernetes), govulncheck (Go reachability),
-psalm (PHP taint), zizmor (GitHub Actions).
-
-If any scanner is missing, the skill prints a degraded-mode warning and
-continues with whatever is installed. **Never hard-fails** for a missing
-scanner.
-
-Required scanner bundle (six, all SARIF-emitting, free / open-source):
+### Required scanner bundle (six, all SARIF-emitting, free / open-source)
 
 - **semgrep** — polyglot SAST, community ruleset.
 - **osv-scanner** — SCA across all manifest ecosystems.

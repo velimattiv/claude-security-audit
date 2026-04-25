@@ -13,49 +13,99 @@ optional Phase 4 scanner bundle for full coverage.
 - Optional: `pip install jsonschema pyyaml` for full assertion-suite
   coverage if you'll run the E2E
 
-## Quick install (recommended)
+## Recommended install: isolated full container
+
+The canonical deployment shape — and the only one that doesn't put
+six security tools with auto-updating databases on your daily-driver
+host — runs the entire audit inside a disposable container. Claude
+Code, the skill, the scanner bundle, and the audit target all live
+in the container; nothing leaks to your host.
+
+Common container shapes:
+
+- **VS Code Dev Container / GitHub Codespaces** — declare `git`,
+  `claude`, `python3` in `.devcontainer/devcontainer.json`.
+- **`cw` / similar tmux-based launchers** — boot a fresh container
+  per audit, throw it away after.
+- **Plain Docker / Podman** — `docker run --rm -it` a base image,
+  install dependencies, mount the project read-only.
+
+Inside the container:
 
 ```bash
-# 1. Clone the source somewhere persistent
-git clone --depth 1 --branch v2.0.2 \
-  https://github.com/velimattiv/claude-security-audit.git \
-  ~/Code/claude-security-audit
+# 1. Clone the audit target inside the container
+git clone <your-target-repo> /workspace/target
 
-# 2. Install the skill at user-level. Claude Code prefers
-#    ~/.claude/skills/ over project-local installs.
-cp -R ~/Code/claude-security-audit/skills/security-audit \
-  ~/.claude/skills/security-audit
+# 2. Install Claude Code per docs.anthropic.com/claude-code/install
+#    and authenticate in this container instance only
+claude login
 
-# 3. Verify
-cat ~/.claude/skills/security-audit/VERSION                  # 2.0.2
+# 3. Install the skill at user-level inside the container
+git clone --depth 1 --branch v2.0.3 \
+  https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
+cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
+
+# 4. Verify
+cat ~/.claude/skills/security-audit/VERSION                  # 2.0.3
 ls  ~/.claude/skills/security-audit/manifest.yaml            # must exist
 ls  ~/.claude/skills/security-audit/lib/validate-findings.py # must exist
 
-# 4. Install the Phase 4 scanner bundle. Path B is the default
-#    recommendation; Path A is fallback-only for hosts without a
-#    container runtime.
-#
-#    Path B — container-isolated (DEFAULT — six security tools +
-#    rule databases stay in an ephemeral container, host stays
-#    clean). Requires Podman OR Docker. Matches CI / production.
-bash ~/Code/claude-security-audit/scripts/run-audit-in-container.sh --build
-bash ~/Code/claude-security-audit/scripts/run-audit-in-container.sh preflight
-#
-#    Path A — host install. Only if Path B isn't available (no
-#    Podman, no Docker, can't install one). Six binaries land at
-#    ~/.local/bin/ + ~/.local/share/. Supports macOS / Debian /
-#    Ubuntu / Fedora / Arch. Windows is NOT supported — use WSL.
-# bash ~/Code/claude-security-audit/scripts/install-scanners.sh
-# bash ~/Code/claude-security-audit/scripts/install-scanners.sh --check
+# 5. Install the scanner bundle directly. Inside an isolated
+#    container, host pollution is a non-concern — scanners belong
+#    in the container that's about to be thrown away.
+bash ~/Code/csa/scripts/install-scanners.sh
+bash ~/Code/csa/scripts/install-scanners.sh --check    # all six [OK]?
+
+# 6. Run the audit
+cd /workspace/target
+claude --dangerously-skip-permissions
+> /security-audit
 ```
 
-Without scanners (either path), the skill runs in degraded mode —
-fewer corroborating sources, every finding drops to LIKELY/POSSIBLE
-confidence. **Don't half-install** — a partial host install (some
-scanners present, some missing) is worse than no install: the audit
-report won't tell you which categories ran fully and which silently
-skipped. If Path A fails partway, either fully fix the host install
-or roll back and switch to Path B.
+When the audit completes, the container is disposable. Auth tokens,
+scanner binaries, rule databases — all gone with the container.
+
+## Acceptable: Path B (scanners-only-in-container, Claude on host)
+
+If Claude Code is already installed and authenticated on your daily-
+driver host and you don't want to set up a full container per audit,
+Path B isolates the scanner bundle alone:
+
+```bash
+# Build the scanner-isolation image (one-time, ~3-5 min)
+bash ~/Code/csa/scripts/run-audit-in-container.sh --build
+bash ~/Code/csa/scripts/run-audit-in-container.sh preflight
+```
+
+The wrapper uses Podman (preferred, rootless) or Docker. Container
+hardening: `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
+`--read-only` rootfs, non-root `audit` user. Target repo bind-mounted
+read-only.
+
+Path B leaves Claude Code itself on your host. The skill orchestrator
+runs there; that's the larger trust boundary, but for one-off audits
+it's a reasonable simplification of the recommended pattern.
+
+## Strongly discouraged: host install (Path A direct)
+
+```bash
+# Don't do this on your daily-driver host without a strong reason.
+bash ~/Code/csa/scripts/install-scanners.sh
+```
+
+Six security tools with auto-updating detection databases on your
+laptop is invasive host state for a tool that may run once a week.
+**Don't half-install** — a partial host install (some scanners
+present, some missing) is worse than no install because the audit
+report won't tell you which scanner-corroborated categories silently
+skipped. If `install-scanners.sh --check` reports any scanner
+missing, either fully fix the failure (e.g. `pipx` for semgrep) and
+re-run, or roll back the partial install and switch to one of the
+container patterns above.
+
+Without scanners at all, the skill runs in degraded mode — fewer
+corroborating sources, every finding drops to LIKELY/POSSIBLE
+confidence.
 
 ## Smoke test
 
