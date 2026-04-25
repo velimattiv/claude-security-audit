@@ -8,6 +8,31 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Nothing queued. The skill is pre-release; open a Discussion issue to
 propose v2.1 work.
 
+## [2.0.4] — 2026-04-25
+
+### Fixed — silent hadolint install failure on case-mismatched checksum file
+
+`scripts/install-scanners.sh:fetch_checksum_from_release()` did a
+case-sensitive `awk` match against the asset filename inside the
+vendor's `.sha256` file. Hadolint publishes its release asset as
+`hadolint-Linux-x86_64` (capital L, in the URL) but the body of the
+accompanying `hadolint-Linux-x86_64.sha256` file lists the filename
+as `hadolint-linux-x86_64` (lowercase). The match failed; the script
+returned an empty hash; `download_verified` aborted with
+`cannot fetch checksum for hadolint-Linux-x86_64`; the user was
+left with 5 of 6 scanners installed and no clear pointer to the
+case-mismatch root cause.
+
+The fix adds a fallback case-insensitive comparison using POSIX
+`awk`'s `tolower()`. The exact-case match is still tried first
+(unchanged behaviour for vendors who get this right); only on a
+miss does the lowercased fallback run. Any future vendor with the
+same case-quirk gets handled transparently.
+
+Caught in production by a downstream user running v2.0.3's
+`install-scanners.sh` on Fedora — same dogfood loop that caught
+the v2.0.3 PEP 668 issue.
+
 ## [2.0.3] — 2026-04-25
 
 ### Fixed — Path B Containerfile build (release-blocker for the recommended scanner-isolation path)
