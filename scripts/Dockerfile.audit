@@ -72,7 +72,12 @@ ENV PATH="/home/audit/.local/bin:/usr/local/bin:${PATH}" \
 RUN mkdir -p /home/audit/.local/bin && /usr/local/bin/install-scanners.sh
 
 # Install jsonschema so validate-findings.py runs with the full backend.
-RUN pip3 install --user jsonschema==4.22.0
+# PEP 668 (externally-managed-environment) is enforced on Debian 12+'s
+# system Python, so plain `pip3 install --user` fails. We're in a
+# container — there's no system Python to protect — so override with
+# --break-system-packages, matching install-scanners.sh's fallback for
+# semgrep (lines 252-258 of that script).
+RUN pip3 install --user --break-system-packages jsonschema==4.22.0
 
 # Mount points — actual mounts come from the wrapper at run time.
 #
