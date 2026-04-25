@@ -31,11 +31,31 @@ cat ~/.claude/skills/security-audit/VERSION                  # 2.0.2
 ls  ~/.claude/skills/security-audit/manifest.yaml            # must exist
 ls  ~/.claude/skills/security-audit/lib/validate-findings.py # must exist
 
-# 4. Install the Phase 4 scanner bundle (optional but recommended).
-#    Without it, the skill runs in degraded mode — fewer
-#    corroborating sources, every finding drops to LIKELY/POSSIBLE.
-bash ~/Code/claude-security-audit/scripts/install-scanners.sh
+# 4. Install the Phase 4 scanner bundle. Path B is the default
+#    recommendation; Path A is fallback-only for hosts without a
+#    container runtime.
+#
+#    Path B — container-isolated (DEFAULT — six security tools +
+#    rule databases stay in an ephemeral container, host stays
+#    clean). Requires Podman OR Docker. Matches CI / production.
+bash ~/Code/claude-security-audit/scripts/run-audit-in-container.sh --build
+bash ~/Code/claude-security-audit/scripts/run-audit-in-container.sh preflight
+#
+#    Path A — host install. Only if Path B isn't available (no
+#    Podman, no Docker, can't install one). Six binaries land at
+#    ~/.local/bin/ + ~/.local/share/. Supports macOS / Debian /
+#    Ubuntu / Fedora / Arch. Windows is NOT supported — use WSL.
+# bash ~/Code/claude-security-audit/scripts/install-scanners.sh
+# bash ~/Code/claude-security-audit/scripts/install-scanners.sh --check
 ```
+
+Without scanners (either path), the skill runs in degraded mode —
+fewer corroborating sources, every finding drops to LIKELY/POSSIBLE
+confidence. **Don't half-install** — a partial host install (some
+scanners present, some missing) is worse than no install: the audit
+report won't tell you which categories ran fully and which silently
+skipped. If Path A fails partway, either fully fix the host install
+or roll back and switch to Path B.
 
 ## Smoke test
 
@@ -110,18 +130,27 @@ The full reference run is documented at
 | `~/.claude/skills/security-audit/lib/validate-findings.py` | Sub-agent self-validation script |
 | `~/.claude/skills/security-audit/templates/subagent-prompt.md` | Sub-agent prompt template |
 
-The scanner bundle install (step 4 above) places binaries at:
+**Path A — host install** places binaries at:
 
 | Tool | Default install path |
 |---|---|
-| semgrep | `~/.local/share/semgrep` (pip user install) |
+| semgrep | `~/.local/share/semgrep` (pip user install — needs `pipx` or `pip3 --user`) |
 | osv-scanner | `~/.local/bin/osv-scanner` |
 | gitleaks | `~/.local/bin/gitleaks` |
 | trufflehog | `~/.local/bin/trufflehog` |
 | trivy | `~/.local/bin/trivy` |
 | hadolint | `~/.local/bin/hadolint` |
 
-Make sure `~/.local/bin/` is on your `PATH`.
+Make sure `~/.local/bin/` is on your `PATH`. Run
+`scripts/install-scanners.sh --check` to verify all six landed.
+
+**Path B — container-isolated** doesn't touch the host. The
+`run-audit-in-container.sh` wrapper builds a Podman/Docker image with
+all six scanners pre-baked and runs each scanner ephemerally with
+hardening flags (`--cap-drop=ALL`, `--security-opt=no-new-privileges`,
+`--read-only` rootfs, non-root `audit` user, bind-mounted target
+read-only). See `scripts/run-audit-in-container.sh --help` for the
+full command surface.
 
 ## Invocation forms
 
@@ -182,4 +211,19 @@ landed at the expected path.
 
 **Phase 4 scanners missing → audit runs in degraded mode.**
 This is by design — missing scanners are warnings, not failures.
-Run `bash scripts/install-scanners.sh` to fix.
+Run `bash scripts/run-audit-in-container.sh --build` (Path B) or
+`bash scripts/install-scanners.sh` (Path A) to fix.
+
+**Path A install half-succeeded (some scanners present, some
+missing).** Don't run the audit in this state — the report won't
+tell you which categories ran fully. Either:
+1. Fix the underlying issue (e.g. install `pipx` if semgrep
+   failed; verify network for binary fetch failures) and re-run
+   `scripts/install-scanners.sh`, OR
+2. Roll back and use Path B:
+   ```bash
+   rm -f ~/.local/bin/{osv-scanner,gitleaks,trufflehog,trivy,hadolint}
+   pip3 uninstall semgrep   # if it landed
+   bash scripts/run-audit-in-container.sh --build
+   bash scripts/run-audit-in-container.sh preflight
+   ```

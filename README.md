@@ -77,37 +77,20 @@ and uninstall), see **[`docs/INSTALL.md`](docs/INSTALL.md)**.
 
 ## Scanner prerequisites
 
-Two install paths. Pick based on whether you want the six scanners on
-your host or isolated in a container.
+Two install paths — but **Path B (container) is the recommended
+default for almost everyone**. The skill brings six security tools
+(semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint) plus
+their rule databases. Installing all six on the host is invasive
+host state for a tool that may run once a week. Path B keeps the
+host clean; Path A exists for environments without a container
+runtime.
 
-### Path A — host install (simple, default)
+### Path B — container-isolated scanner execution (recommended)
 
-```bash
-scripts/install-scanners.sh            # install required set
-scripts/install-scanners.sh --check    # report current state
-scripts/install-scanners.sh --help
-```
-
-Supported hosts:
-
-- **macOS** (Homebrew)
-- **Debian / Ubuntu** (apt)
-- **Fedora** (dnf)
-- **Arch** (pacman)
-
-Windows is **not** supported — run inside WSL or Path B. The installer
-**verifies published checksums** for every downloaded binary (v2.0.1+);
-mismatches abort the install.
-
-### Path B — container-isolated scanner execution
-
-**Scope clarification.** This path isolates the *scanner bundle*
-(semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint) — not the
-full skill orchestration. Claude Code and its deep-dive sub-agents still
+**Scope.** This path isolates the *scanner bundle* — not the full
+skill orchestration. Claude Code and its deep-dive sub-agents still
 run on the host (or wherever Claude Code is installed); only the
-scanner phase's binaries live in an ephemeral container. For many
-users that's the point: scanners are the new dependency the skill
-introduces; Claude Code was already installed.
+scanner phase's binaries live in an ephemeral container.
 
 ```bash
 # One-time: build the scanner-isolation image (size depends on your base — expect a few hundred MB of scanners + dependencies on top of debian:bookworm-slim)
@@ -133,6 +116,33 @@ you have. Container hardening: `--cap-drop=ALL`,
 `--security-opt=no-new-privileges`, `--read-only` rootfs, non-root
 `audit` user. The target repo is bind-mounted read-only; only
 `.claude-audit/` is writable.
+
+### Path A — host install (fallback for hosts without a container runtime)
+
+Only use this if Path B isn't available (no Podman, no Docker, and
+you can't install one). It dumps six binaries plus auto-updating
+rule databases onto your host.
+
+```bash
+scripts/install-scanners.sh            # install required set
+scripts/install-scanners.sh --check    # report current state
+scripts/install-scanners.sh --help
+```
+
+Supported hosts:
+
+- **macOS** (Homebrew)
+- **Debian / Ubuntu** (apt)
+- **Fedora** (dnf)
+- **Arch** (pacman)
+
+Windows is **not** supported — run inside WSL or Path B. The installer
+**verifies published checksums** for every downloaded binary (v2.0.1+);
+mismatches abort the install. **Don't half-install:** if any scanner
+fails, either fully fix the failure and re-run the installer, or roll
+back the partial install and use Path B. A partial host install is
+worse than no install — the audit report won't tell you which
+scanner-corroborated categories silently skipped.
 
 **What Path B does NOT isolate.** The skill's orchestrator
 (`workflow.md`), deep-dive sub-agents (Phase 5), built-in-review
