@@ -6,4 +6,4 @@
 # file exists so Dependabot can bump jsonschema when upstream releases,
 # keeping the CI pin in sync.
 
-jsonschema==4.22.0
+jsonschema==4.26.0
