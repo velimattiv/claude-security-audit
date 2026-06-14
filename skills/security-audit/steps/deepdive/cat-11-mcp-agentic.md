@@ -19,7 +19,11 @@ Human-Agent Trust Exploitation, `ASI10:2026` Rogue Agents. Overlapping
 LLM Top 10 (2025): `LLM01:2025` Prompt Injection, `LLM05:2025` Improper
 Output Handling, `LLM06:2025` Excessive Agency.
 
-**Baseline CWEs:** 77, 78, 94, 200, 269, 668, 862, 863, 918, 1426, 1427.
+**Baseline CWEs:** 22, 77, 78, 94, 200, 269, 668, 862, 863, 918, 1426, 1427.
+
+> CVE IDs cited in this file are **class anchors**, not asserted facts —
+> verify each against NVD before quoting it in a finding's `sources`
+> (cross-ref `lib/known-vuln-versions.md`).
 
 ---
 
@@ -124,7 +128,7 @@ child_process\.(exec|execSync|spawn)\(
 ```
 
 → handler arg in path with no resolve/allow-list (verify no
-`realpath`/normalise + prefix check): **HIGH** / CWE-94 / ASI05.
+`realpath`/normalise + prefix check): **HIGH** / CWE-22 / ASI05.
 
 ### Confused-deputy / OAuth token pass-through (ASI03)
 

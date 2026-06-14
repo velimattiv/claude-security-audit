@@ -11,6 +11,10 @@
 
 **Baseline CWEs:** 285, 287, 522, 538, 598, 601, 798, 862, 863.
 
+> CVE IDs cited in this file are **class anchors**, not asserted facts —
+> verify each against NVD before quoting it in a finding's `sources`
+> (cross-ref `lib/known-vuln-versions.md`).
+
 **Gate.** Skip the whole category if neither `profile.auth.kinds` nor
 `phase-02-surface.json` show token / PAT / API-key mechanisms. Record
 `notes: "no token system detected — category skipped"` in the sub-agent's

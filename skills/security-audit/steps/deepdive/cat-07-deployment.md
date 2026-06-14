@@ -167,7 +167,7 @@ http\.(?:Get|Post)\(
 ```
 `http.Get(` / `http.Post(` inside a Kyverno CEL expression → **HIGH**
 (escalate to **CRITICAL** if the cluster's Kyverno chart version is in the
-NVD-confirmed affected range) / CWE-918 / A10:2025. Confirming the
+NVD-confirmed affected range) / CWE-918 / A01:2025. Confirming the
 running chart version is **out of scope: flag location (the policy +
 `Chart.yaml` / Helm values), defer to human** for live-version
 confirmation.
@@ -183,11 +183,11 @@ resources\s*:\s*\[?\s*(?:"|')?\*
 operations\s*:\s*\[?\s*(?:"|')?\*
 ```
 - `failurePolicy: Ignore` on a security-relevant webhook (lets requests
-  through when the webhook is down) → **HIGH** / CWE-732 / A04:2025.
+  through when the webhook is down) → **HIGH** / CWE-732 / A02:2025.
 - Missing `namespaceSelector` (matches every namespace incl. `kube-system`)
-  or an empty selector `{}` → **MEDIUM** / CWE-732 / A04:2025.
+  or an empty selector `{}` → **MEDIUM** / CWE-732 / A02:2025.
 - Overly broad `rules` (`apiGroups` / `resources` / `operations` = `*`) →
-  **MEDIUM** / CWE-732 / A04:2025.
+  **MEDIUM** / CWE-732 / A02:2025.
 
 ### Native-sidecar securityContext (k8s 1.33 GA)
 
@@ -202,7 +202,7 @@ restartPolicy\s*:\s*Always
 A `restartPolicy: Always` appearing under `initContainers:` marks a native
 sidecar — apply every escape-enabler check below to that block as well. A
 native sidecar with **no** `securityContext` (inherits pod defaults; not
-hardened) → **MEDIUM** / CWE-276 / A04:2025.
+hardened) → **MEDIUM** / CWE-276 / A02:2025.
 
 **Escape enablers (anywhere in a pod spec — `containers[]`,
 `initContainers[]` native sidecars, or pod-level):**
@@ -216,14 +216,14 @@ path\s*:\s*/var/run/docker\.sock
 /var/run/docker\.sock
 ```
 - `privileged: true` (incl. on a sidecar) → **CRITICAL** / CWE-250 /
-  A04:2025.
+  A02:2025.
 - `hostPID` / `hostIPC` / `hostNetwork: true` → **HIGH** / CWE-276 /
-  A04:2025.
+  A02:2025.
 - `capabilities.add` containing `SYS_ADMIN` (matched via `- SYS_ADMIN`
-  list item) → **HIGH** / CWE-250 / A04:2025.
-- `seccompProfile.type: Unconfined` → **HIGH** / CWE-276 / A04:2025.
+  list item) → **HIGH** / CWE-250 / A02:2025.
+- `seccompProfile.type: Unconfined` → **HIGH** / CWE-276 / A02:2025.
 - `hostPath` mount of `/var/run/docker.sock` (Docker-socket escape) →
-  **CRITICAL** / CWE-250 / A04:2025.
+  **CRITICAL** / CWE-250 / A02:2025.
 
 Cross-ref Phase 4 `kube-linter` / `trivy config` — but the
 `initContainers` native-sidecar case is the net-new parse the scanners'
@@ -243,13 +243,13 @@ repo:[^/\s"']+/\*
 - A `...githubusercontent.com:sub` condition whose value contains `*`
   (esp. `repo:org/*`) → **CRITICAL** / CWE-287 / A07:2025.
 - A trust policy that asserts `...githubusercontent.com:aud` but has **no**
-  `...:sub` condition at all → **HIGH** / CWE-862 / A07:2025. (Detect by
+  `...:sub` condition at all → **HIGH** / CWE-862 / A01:2025. (Detect by
   presence of the `aud` audience condition without any `sub` line in the
   same statement; flag for human confirmation.)
 
 For GCP, `google_iam_workload_identity_pool_provider` with **no**
 `attribute_condition` constraining `assertion.repository` → **HIGH** /
-CWE-862 / A07:2025.
+CWE-862 / A01:2025.
 
 **IMDSv1 allowed (SSRF-to-credential enabler).** EC2 instances /
 launch templates that allow IMDSv1 turn any in-instance SSRF into
@@ -259,7 +259,7 @@ credential theft. In `*.tf` (`aws_instance` / `aws_launch_template` /
 http_tokens\s*=\s*"optional"
 ```
 `metadata_options { http_tokens = "optional" }` → **HIGH** / CWE-918 /
-A05:2025. **Absence** is also a finding: a launch template / instance
+A01:2025. **Absence** is also a finding: a launch template / instance
 with a `metadata_options` block that does **not** set
 `http_tokens = "required"` defaults to IMDSv1-allowed — flag at **MEDIUM**
 / CWE-918. In CloudFormation `LaunchTemplate` `MetadataOptions`:
@@ -267,7 +267,7 @@ with a `metadata_options` block that does **not** set
 HttpTokens\s*:\s*(?:"|')?optional
 ```
 `HttpTokens: optional` (or `MetadataOptions` present without
-`HttpTokens: required`) → **HIGH** / CWE-918 / A05:2025. Cross-ref
+`HttpTokens: required`) → **HIGH** / CWE-918 / A01:2025. Cross-ref
 Phase 4 `checkov` `CKV_AWS_79` / Trivy CFN `MetadataOptions` propagation.
 
 *Static-only:* whether the OIDC role is *actually assumable* by an

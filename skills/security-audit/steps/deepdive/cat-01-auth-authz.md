@@ -16,6 +16,10 @@ as the `phase-specific-method-body`.
 **Baseline CWEs:** 284, 285, 287, 288, 306, 307, 345, 347, 352, 384, 521,
 613, 636, 640, 862, 863.
 
+> CVE IDs cited in this file are **class anchors**, not asserted facts —
+> verify each against NVD before quoting it in a finding's `sources`
+> (cross-ref `lib/known-vuln-versions.md`).
+
 ---
 
 ## Invariants to verify per surface

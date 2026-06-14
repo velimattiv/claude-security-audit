@@ -167,17 +167,12 @@ poisoning (LLM04).
 > only the LLM/model-file framing (untrusted-hub repo ids, `from_pretrained`,
 > `trust_remote_code`); keep version numbers out of here to avoid drift.
 
-```
-# Pickle-family loaders on model / weight files (always unsafe on untrusted)
-(pickle|joblib|dill)\.loads?\s*\(
-
-# torch.load — bypassable even with weights_only=True on torch < 2.10;
-# flag regardless. SAFE: safetensors (load_file / safe_open) on torch >= 2.10.
-torch\.load\s*\((?![^)]*weights_only\s*=\s*True)
-torch\.load\s*\(
-```
-
-→ **CRITICAL** / CWE-502 / LLM04:2025.
+The generic pickle / `torch.load` / `joblib` call-site detection is **owned by
+cat-08** (CWE-502) and fires regardless of LLM usage — do NOT re-emit those
+rows here. When a cat-08 deserialization hit lands on a model/weight file in an
+LLM repo, defer to cat-08 and add `LLM03:2025` / `LLM04:2025` to that finding's
+`owasp_ids` rather than emitting a duplicate. This section flags only the
+**model-file-specific** vectors cat-08 does not cover:
 
 ```
 # Loading from a hub with a user- or variable-controlled repo id

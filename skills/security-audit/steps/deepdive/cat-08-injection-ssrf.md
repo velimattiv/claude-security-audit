@@ -176,12 +176,17 @@ canonicalize-then-classify on the resolved IP:
 ipaddress\.ip_address\([^)]*\)\.is_(private|loopback|link_local)
 ```
 
-Redirect-following without re-validation re-opens SSRF after the initial
-allowlist check:
+Redirect-following re-opens SSRF after an initial allowlist check — but ONLY
+when the request target is user-controlled. A literal-URL call is NOT a
+finding. Require a variable first argument (not a string literal) AND redirects
+not disabled, and treat it as a **locator → POSSIBLE** pending taint
+confirmation, never an automatic HIGH:
 
 ```
-requests\.(get|post)\((?![^)]*allow_redirects\s*=\s*False)
+requests\.(get|post)\(\s*(?!['"])\w+[^)]*\)(?![^)]*allow_redirects\s*=\s*False)
 ```
+(The `(?!['"])\w+` requires a variable, not a `"https://..."` literal, which
+cuts the false-positive storm on ordinary HTTP calls.)
 
 #### Cloud-metadata denylist completeness
 
@@ -288,19 +293,17 @@ property writes keyed on user input, that can reach `Object.prototype`.
 Object\.assign\s*\([^)]*(req|request)\.(body|query|params)
 (merge|extend|assign|clone)\s*\([^)]*JSON\.parse
 
-# Dynamic property write keyed on user-controlled key
-\b\w+\s*\[\s*\w+\s*\]\s*=\s*[^=]
-
-# Danger keys present as object keys / paths
+# Danger keys as write targets / paths (strong, specific signal)
 \[(['"])(__proto__|constructor|prototype)\1\]
 (__proto__|constructor|prototype)\s*:
-
-# Generic recursive-merge shape with no key guard
-for\s*\([^)]*\bin\b[^)]*\)[\s\S]{0,120}\[[^\]]+\]\s*=
 ```
 
-→ **HIGH** / CWE-1321. When the polluted property flows into HTML / a
-DOM sink, the chain becomes XSS → also tag **CWE-79**.
+→ **HIGH** / CWE-1321 only when (a) a deep-merge/set takes user input with no
+own-property key guard, OR (b) a danger key (`__proto__` / `constructor` /
+`prototype`) is a write target. A bare dynamic write (`obj[key] = v`) or a
+generic `for…in` copy is NOT flagged on its own — it needs one of the
+co-signals above, otherwise it is a false-positive storm. When the polluted
+property reaches an HTML / DOM sink, the chain becomes XSS → also tag **CWE-79**.
 
 ```
 # DOMPurify gadget (pre-3.4 / 3.0.1–3.3.3): the

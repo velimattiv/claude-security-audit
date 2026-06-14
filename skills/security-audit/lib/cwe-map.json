@@ -92,6 +92,11 @@
     "CWE-1357": { "name": "Reliance on Insufficiently Trustworthy Component", "category": "supply_chain" },
     "CWE-1395": { "name": "Dependency on Vulnerable Third-Party Component",   "category": "supply_chain" },
     "CWE-1426": { "name": "Improper Validation of Generative AI Output",      "category": "agentic" },
-    "CWE-1427": { "name": "Improper Neutralization of Input Used for LLM Prompting ('Prompt Injection')", "category": "agentic" }
+    "CWE-1427": { "name": "Improper Neutralization of Input Used for LLM Prompting ('Prompt Injection')", "category": "agentic" },
+    "CWE-16":   { "name": "Configuration",                                    "category": "config" },
+    "CWE-73":   { "name": "External Control of File Name or Path",            "category": "injection" },
+    "CWE-98":   { "name": "Improper Control of Filename for Include/Require Statement in PHP Program ('PHP Remote File Inclusion')", "category": "injection" },
+    "CWE-646":  { "name": "Reliance on File Name or Extension of Externally-Supplied File", "category": "injection" },
+    "CWE-1188": { "name": "Initialization of a Resource with an Insecure Default", "category": "deployment" }
   }
 }

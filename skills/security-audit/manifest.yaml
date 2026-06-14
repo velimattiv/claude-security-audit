@@ -193,6 +193,13 @@ phases:
       - path: .claude-audit/current/phase-06-api-top10.jsonl
       - path: .claude-audit/current/phase-06-llm-top10.jsonl
         empty_if_gated: "profile.llm_usage.detected == false || profile.llm_usage.kind == 'internal'"
+      - path: .claude-audit/current/phase-06-web-top10.jsonl
+        # OWASP Top 10:2025 (web) roll-up (§6.16). Always written — pure
+        # roll-up from existing findings' CWEs; never gated.
+      - path: .claude-audit/current/phase-06-agentic-top10.jsonl
+        # OWASP Agentic Apps 2026 lens (§6.17). Always written; zero-byte
+        # when the gate is off.
+        empty_if_gated: "profile.mcp_agentic.detected != true"
       - path: .claude-audit/current/phase-06-linddun.jsonl
         empty_if_gated: "profile.pii.detected == false"
       - path_glob: .claude-audit/current/phase-06-stride/*.md

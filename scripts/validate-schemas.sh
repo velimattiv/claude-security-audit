@@ -68,7 +68,9 @@ echo
 echo "[3/7] CWE cross-references..."
 if [ -f skills/security-audit/lib/cwe-map.json ]; then
   # Extract CWEs referenced anywhere in the spec + catalogs.
-  referenced=$(grep -rhoE "CWE-[0-9]+" skills/security-audit/steps/ skills/security-audit/lib/ 2>/dev/null | sort -u)
+  # Include E2E fixtures: a fixture CWE absent from the map hard-fails
+  # validate-findings.py on that target (Gate-C R1 finding).
+  referenced=$(grep -rhoE "CWE-[0-9]+" skills/security-audit/steps/ skills/security-audit/lib/ tests/e2e/ 2>/dev/null | sort -u)
   missing=0
   for cwe in $referenced; do
     if ! jq -e --arg c "$cwe" '.mappings | has($c)' skills/security-audit/lib/cwe-map.json >/dev/null 2>&1; then
