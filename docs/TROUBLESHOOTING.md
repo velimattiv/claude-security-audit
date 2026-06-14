@@ -95,7 +95,8 @@ The skill will warn when manifests exist without lockfiles.
 
 ### "trufflehog: only verified" misses known test secrets
 
-By default trufflehog's `--only-verified` flag filters to secrets that
+By default trufflehog's `--results=verified` flag (formerly
+`--only-verified`, soft-deprecated since 3.88) filters to secrets that
 were actually confirmed valid via vendor API calls. Test fixtures and
 revoked keys are filtered out. To see everything, override the flag in
 your Phase 4 sub-agent invocation (documented in

@@ -109,7 +109,7 @@ Run these six in parallel (max 4 concurrent — scanners are heavy I/O):
 | **osv-scanner** | `osv-scanner scan --recursive --format sarif --output phase-04-scanners/osv.sarif .` | Ecosystem auto-detected from manifests. Skipped if no lockfiles present — warn, do not fail. |
 | **gitleaks (working tree)** | `gitleaks detect --no-git --report-format sarif --report-path phase-04-scanners/gitleaks.sarif` | Fast — scans the checked-out tree only. |
 | **gitleaks (git history)** | `gitleaks git . --report-format sarif --report-path phase-04-scanners/gitleaks-history.sarif` | Slow; separate sub-agent with 20 min timeout. Non-blocking for Phase 7 synthesis. |
-| **trufflehog** | `trufflehog git file://. --json --only-verified > phase-04-scanners/trufflehog.json` | Emits JSONL, not SARIF; convert in §4.5. |
+| **trufflehog** | `trufflehog git file://. --json --results=verified > phase-04-scanners/trufflehog.json` | Emits JSONL, not SARIF; convert in §4.5. (`--only-verified` is soft-deprecated → `--results=verified`.) |
 | **trivy** | `trivy fs --scanners vuln,secret,misconfig,license --format sarif --output phase-04-scanners/trivy.sarif .` | Also run `trivy config -f sarif -o trivy-iac.sarif .` if IaC files detected. |
 | **hadolint** | `for f in $(find . -name Dockerfile -not -path ./node_modules/*); do hadolint --format sarif "$f"; done > phase-04-scanners/hadolint.sarif` | Conditional: only if `Dockerfile*` present. |
 
@@ -128,7 +128,7 @@ Gate on `phase-00-profile.json`:
 | **brakeman** | `frameworks[*].framework` contains `Rails` |
 | **checkov** | `deployment.iac.terraform` is non-empty |
 | **kube-linter** | `deployment.k8s.manifests` or `.helm_charts` non-empty |
-| **grype** | `deployment.docker.dockerfiles` non-empty (optional; EPSS prioritization) |
+| **grype** | `deployment.docker.dockerfiles` non-empty OR any lockfile present (EPSS + CISA-KEV prioritization). Emit BOTH `grype dir:. -o sarif > grype.sarif` and `grype dir:. -o json > grype.json`; Phase 7 joins EPSS/KEV onto findings (see `lib/scanner-bundle.md`). |
 | **govulncheck** | `languages[*].name` contains `Go` |
 | **psalm** (`--taint-analysis`) | `languages[*].name` contains `PHP` |
 | **zizmor** | `.github/workflows/*.yml` present |

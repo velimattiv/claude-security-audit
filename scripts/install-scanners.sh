@@ -31,10 +31,13 @@ OPTIONAL_TOOLS="brakeman checkov kube-linter grype govulncheck psalm zizmor"
 # Version pins — update alongside release cadence. The GitHub API is
 # consulted at --check time to warn if a newer release has shipped.
 SEMGREP_VER="1.161.0"
-OSV_VER="2.3.5"
+OSV_VER="2.3.8"
 GITLEAKS_VER="8.30.1"
-TRUFFLEHOG_VER="3.95.2"
-TRIVY_VER="0.70.0"
+TRUFFLEHOG_VER="3.95.5"
+# trivy 0.71.0 is the first release outside the GHSA-q3fv-x8vg-qqm4 range
+# (Helm-chart tar-bomb OOM in `trivy config`, affected < 0.71.0). Do not
+# downgrade below 0.71.0.
+TRIVY_VER="0.71.0"
 HADOLINT_VER="2.14.0"
 
 # --- logging helpers ---------------------------------------------------------
@@ -389,7 +392,8 @@ install_optional_hints() {
   grype         (gate: Dockerfile)  https://github.com/anchore/grype/releases
   govulncheck   (gate: Go)          go install golang.org/x/vuln/cmd/govulncheck@latest
   psalm         (gate: PHP)         composer require --dev vimeo/psalm
-  zizmor        (gate: GHA)         cargo install zizmor  OR  download binary
+  zizmor        (gate: GHA)         cargo install zizmor  OR  binary from
+                                    github.com/zizmorcore/zizmor/releases
 HINTS
 }
 
