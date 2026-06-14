@@ -1,5 +1,9 @@
 .DS_Store
 
+# Python bytecode (from running validators locally)
+__pycache__/
+*.pyc
+
 # Orchestration scratch — never commit
 .dev-bootstrap.md
 TODO.md

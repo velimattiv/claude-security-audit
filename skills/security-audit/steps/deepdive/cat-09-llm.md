@@ -153,6 +153,48 @@ intent, the SSRF defenses from cat-08 apply. Specifically flag tools
 that do `fetch(model_chose_url)` without the private-range / IMDS
 blocklist. → **HIGH** / CWE-918 / LLM06.
 
+### Model-file deserialization (LLM03 / LLM04)
+
+Loading model weights / checkpoints is a code-execution sink: pickle-based
+formats execute arbitrary code on load, and `weights_only=True` /
+`picklescan` are bypassable. Untrusted-hub or user-controlled repo ids are
+a supply-chain leg (LLM03); the deserialization itself is data/model
+poisoning (LLM04).
+
+```
+# Pickle-family loaders on model / weight files (always unsafe on untrusted)
+(pickle|joblib|dill)\.loads?\s*\(
+
+# torch.load — bypassable even with weights_only=True on torch < 2.10;
+# flag regardless. SAFE: safetensors (load_file / safe_open) on torch >= 2.10.
+torch\.load\s*\((?![^)]*weights_only\s*=\s*True)
+torch\.load\s*\(
+```
+
+→ **CRITICAL** / CWE-502 / LLM04:2025.
+
+```
+# Loading from a hub with a user- or variable-controlled repo id
+# (untrusted-source supply chain). Check: is the id a literal trusted org,
+# or does it come from a request / variable?
+from_pretrained\s*\(
+hf_hub_download\s*\(
+
+# trust_remote_code=True executes repo-shipped Python at load time
+trust_remote_code\s*=\s*True
+```
+
+→ **HIGH** / CWE-502 / LLM03:2025 (untrusted-hub supply chain) +
+LLM04:2025. `trust_remote_code=True` on an untrusted repo is **CRITICAL**.
+
+SAFE markers (note, don't flag HIGH): `safetensors` format, hub id that
+is a hard-coded trusted org with a pinned `revision`, and torch >= 2.10
+with `weights_only=True` on a trusted file.
+
+```
+safetensors(\.torch)?\.(load_file|safe_open)
+```
+
 ## False-positive notes
 
 - **Internal-only LLM usage** — tooling that summarizes logs or

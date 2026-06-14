@@ -7,7 +7,7 @@
 - API Top 10: `API8:2023`, `API10:2023`.
 
 **Baseline CWEs:** 20, 22, 77, 78, 79, 89, 91, 94, 434, 502, 601, 611, 776,
-918, 943.
+918, 943, 1321.
 
 ---
 
@@ -146,6 +146,64 @@ check for:
 
 Absence → **HIGH** / CWE-918.
 
+#### SSRF validation-method upgrade
+
+2026 SSRF is mostly a *wrong validation method* bug, not just a missing
+allowlist. A denylist/allowlist that checks the URL by string or regex
+instead of canonicalize-then-classify is bypassable. Flag these:
+
+```
+# IPv4-mapped IPv6 form of the IMDS address (string/regex denylists miss it)
+::ffff:169\.254\.169\.254
+::ffff:a9fe:a9fe
+
+# Alternate IP encodings the denylist must also reject (decimal / octal / hex)
+0x[0-9a-fA-F]{8}
+0[0-7]{3,}
+\b\d{8,10}\b
+
+# A dotted-quad-only gate is bypassable (no hex / octal / IPv6 branch)
+\^\\d{1,3}(\\.\\d{1,3}){3}\$
+```
+
+→ **HIGH** / CWE-918. Also bypassable by **DNS rebinding** (validate the
+hostname, then the HTTP client re-resolves the ORIGINAL hostname at fetch
+time — a validate-then-fetch TOCTOU). The robust pattern is
+canonicalize-then-classify on the resolved IP:
+
+```
+# SAFE shape — classify the parsed/resolved address, not the raw string
+ipaddress\.ip_address\([^)]*\)\.is_(private|loopback|link_local)
+```
+
+Redirect-following without re-validation re-opens SSRF after the initial
+allowlist check:
+
+```
+requests\.(get|post)\((?![^)]*allow_redirects\s*=\s*False)
+```
+
+#### Cloud-metadata denylist completeness
+
+An IMDS blocklist that covers only `169.254.169.254` is INCOMPLETE. A
+complete blocklist must reject all of these targets; flag the surface if
+any are missing:
+
+```
+169\.254\.169\.254
+169\.254\.170\.2
+fd00:ec2::254
+metadata\.google\.internal
+100\.100\.100\.200
+AWS_CONTAINER_CREDENTIALS_(RELATIVE|FULL)_URI
+```
+
+Coverage map: `169.254.169.254` (AWS/Azure/OpenStack IMDS),
+`169.254.170.2` (AWS ECS task-role creds), `fd00:ec2::254` (AWS IMDSv6),
+`metadata.google.internal` (GCP, served at `169.254.169.254` with a
+`Metadata-Flavor: Google` header), `100.100.100.200` (Alibaba Cloud).
+Incomplete coverage → **HIGH** / CWE-918.
+
 ### Unsafe deserialization
 
 ```
@@ -176,6 +234,95 @@ YAML\.load\s*\(           # not YAML.safe_load
 ```
 
 All of these on user-controlled data → **CRITICAL** / CWE-502.
+
+#### Deserialization false-safety corrections
+
+These LOOK safe (or are widely assumed safe) but are NOT. Flag them even
+when the code reads as hardened — the "safe" knob does not hold.
+
+```
+# Python — PyYAML FullLoader is NOT safe (it still constructs arbitrary
+# objects). yaml.full_load is the same loader. SAFE: yaml.safe_load /
+# Loader=yaml.SafeLoader.
+yaml\.load\s*\([^)]*Loader\s*=\s*(yaml\.)?(Full|Unsafe)Loader
+yaml\.(full_load|unsafe_load)\s*\(
+```
+
+→ **CRITICAL** / CWE-502.
+
+```
+# Python — torch.load is bypassable even with weights_only=True on
+# torch < 2.10 (malformed pickle opcodes corrupt the restricted
+# unpickler). Flag torch.load on any untrusted input REGARDLESS of the
+# weights_only flag; recommend safetensors (load_file / safe_open) and
+# torch >= 2.10. SAFE only when both hold AND the file is trusted.
+torch\.load\s*\(
+```
+
+→ **HIGH** / CWE-502. Mitigated only on torch >= 2.10 with
+`weights_only=True` AND a trusted source; prefer `safetensors`.
+
+Reaffirm — the base sinks below are unsafe whenever the input is
+attacker-influenced, no matter how the call site is framed:
+
+```
+# Python / Ruby / .NET / PHP — no "safe mode" exists for these
+pickle\.loads?\s*\(
+Marshal\.(load|restore)\b
+BinaryFormatter\.Deserialize
+unserialize\s*\((?![^)]*allowed_classes)
+```
+
+→ **CRITICAL** / CWE-502. For PHP `unserialize`, the only safe form is
+`unserialize($x, ['allowed_classes' => false])` or an explicit class
+allowlist; bare `unserialize(` is unsafe.
+
+### Prototype pollution (JS/TS)
+
+Recursive merge / extend / clone of user-controlled input, or dynamic
+property writes keyed on user input, that can reach `Object.prototype`.
+
+```
+# Recursive deep-merge / set on user input (lodash & friends)
+(_\.|lodash\.)(merge|mergeWith|defaultsDeep|set|setWith)\s*\(
+Object\.assign\s*\([^)]*(req|request)\.(body|query|params)
+(merge|extend|assign|clone)\s*\([^)]*JSON\.parse
+
+# Dynamic property write keyed on user-controlled key
+\b\w+\s*\[\s*\w+\s*\]\s*=\s*[^=]
+
+# Danger keys present as object keys / paths
+\[(['"])(__proto__|constructor|prototype)\1\]
+(__proto__|constructor|prototype)\s*:
+
+# Generic recursive-merge shape with no key guard
+for\s*\([^)]*\bin\b[^)]*\)[\s\S]{0,120}\[[^\]]+\]\s*=
+```
+
+→ **HIGH** / CWE-1321. When the polluted property flows into HTML / a
+DOM sink, the chain becomes XSS → also tag **CWE-79**.
+
+```
+# DOMPurify gadget (pre-3.4 / 3.0.1–3.3.3): the
+# CUSTOM_ELEMENT_HANDLING = cfg.X || {} fallback inherits
+# Object.prototype, so a PP primitive sets tagNameCheck/attributeNameCheck
+# to /.*/ and bypasses default sanitization. Two independent signals:
+DOMPurify\.sanitize\s*\(
+\|\|\s*\{\}
+```
+
+→ **HIGH** / CWE-1321 (chains to **CWE-79**); confirm against
+`dompurify` 3.0.1–3.3.3 in the lockfile.
+
+SAFE markers that LOWER severity (note, don't flag HIGH): keys guarded
+by `key === '__proto__'` / `constructor` / `prototype` rejection,
+`Object.create(null)` maps, `hasOwnProperty.call` checks, or
+`Object.freeze(Object.prototype)`.
+
+```
+Object\.create\s*\(\s*null\s*\)
+hasOwnProperty\.call
+```
 
 ### File upload
 

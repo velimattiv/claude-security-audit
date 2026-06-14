@@ -5,10 +5,11 @@
 **OWASP tags.**
 - ASVS: V2.10 (Service Authentication), V13.2 (REST Web Service — API
   Key / Token scope).
-- API Top 10: `API2:2023`, `API5:2023`, `API10:2023` (Unsafe Consumption
-  of APIs).
+- API Top 10: `API1:2023` (BOLA — redirect_uri token theft / scope-at-use),
+  `API2:2023`, `API5:2023` (Broken Function Authorization — wildcard/
+  use-time scope), `API10:2023` (Unsafe Consumption of APIs).
 
-**Baseline CWEs:** 285, 287, 522, 538, 798, 863.
+**Baseline CWEs:** 285, 287, 522, 538, 598, 601, 798, 862, 863.
 
 **Gate.** Skip the whole category if neither `profile.auth.kinds` nor
 `phase-02-surface.json` show token / PAT / API-key mechanisms. Record
@@ -124,6 +125,66 @@ grep for:
 If different files check `'items:read'` / `'read:items'` / `'read_items'`
 for the same resource, the inconsistency creates a bypass surface. Flag
 → **MEDIUM** / CWE-285.
+
+### Exact redirect_uri validation (OAuth/OIDC)
+
+When an OAuth/OIDC authorization or token endpoint validates the
+`redirect_uri` with a **prefix / substring / `startsWith` / `endsWith` /
+regex** check instead of an **exact** string match against a registered
+URI, an attacker can register `https://good.example.com.evil.com` (suffix
+miss) or `https://good.example.com/../evil` (prefix miss) and steal the
+authorization code / token via open redirect. 2026 reference: Backstage
+`redirect_uri` allowlist bypass (CVE-2026-32235); IETF OAuth security-
+topics update adds Audience Injection / cross-tool ATO.
+
+```
+redirect_?uri[\s\S]{0,40}\.(startsWith|endsWith|includes|indexOf|match|test|search)\s*\(
+redirect_?uri[\s\S]{0,40}\.(startsWith|endsWith)\s*\(
+```
+Also flag regex anchoring mistakes (unanchored or `.` not escaped in the
+host) and `LIKE 'https://app%'` style DB lookups. SAFE shape: an O(1)
+exact lookup of the full URI in the registered set
+(`registered.has(redirect_uri)` / `redirect_uri === registered`). →
+**HIGH** / **CWE-601** (URL Redirection to Untrusted Site). PKCE-downgrade
+nearby (`response_type=code` issued without `code_challenge`) raises
+confidence.
+
+### Scope enforced at grant AND use; no wildcard scopes
+
+Two distinct failures, both flagged here. (1) Tokens / PATs minted with a
+`*` / `all` wildcard scope — invariant #1. (2) Endpoints that verify the
+caller is **authenticated** but never check the token's **scope at
+use-time** — invariant #2's use-side. A token must be scope-checked at
+*both* grant (creator can't exceed their own scope) and use (handler
+asserts `token.scope ⊇ required`).
+
+Wildcard scope at mint (augments §"Wildcard default scope"):
+```
+scopes?\s*[:=]\s*\[?\s*["']\*["']
+(permissions?|scopes?)\s*[:=]\s*["'](all|\*)["']
+scopes?\s*[:=]\s*scopes?\s*\|\|\s*\[?\s*["']\*["']
+```
+→ **HIGH** / **CWE-862** (Missing Authorization — the wildcard grants
+unscoped capability).
+
+Authenticated-but-not-scope-checked at use: the handler resolves
+`req.user` / validates the bearer token, then performs a privileged
+read/write without asserting the required scope. Detect the
+authn-without-authz shape, then confirm no scope assertion in the same
+handler:
+```
+(validateToken|verifyToken|checkApiKey|getServerSession)\s*\((?![\s\S]{0,400}(scope|scopes|permission|can\())
+```
+→ **HIGH** / **CWE-863** (Incorrect Authorization).
+
+Where the privileged read is reachable via a `GET` that also carries the
+token or returns sensitive data in a cacheable/loggable URL response,
+additionally tag **CWE-598** (Use of GET Request Method With Sensitive
+Query Strings) — cross-reference §"Token in URL":
+```
+(app|router)\.get\s*\(\s*["'][^"']*["'][\s\S]{0,200}(token|secret|password|ssn|api_key)
+```
+→ **MEDIUM** / **CWE-598**.
 
 ## Output
 
