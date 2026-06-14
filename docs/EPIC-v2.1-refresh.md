@@ -1,6 +1,8 @@
 # EPIC — v2.1 Security-Audit Capability Refresh
 
-Status: **IN PROGRESS** (autonomous build, 2026-06-14).
+Status: **COMPLETE** (autonomous build, 2026-06-14) — all waves landed on
+`epic/v2.1-security-refresh`; Opengrep deferred to v2.2 per §4. See CHANGELOG
+[2.1.0] for the shipped set.
 Owner: Tech Lead (autonomous).
 Source of truth for scope: `docs/research/` (7 reports) → `docs/ROADMAP.md`
 ("Research round — 2026-06-14") → this epic.

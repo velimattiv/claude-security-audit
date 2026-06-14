@@ -41,7 +41,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # 3. Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.0.6 \
+git clone --depth 1 --branch v2.1.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 

@@ -12,8 +12,14 @@ Synthesized, deduplicated backlog from seven parallel research agents
 (reports in [`research/`](research/)). This is the "since-last-research"
 refresh; the last round (2026-04-24) is the basis for `V2-SCOPE.md`.
 
-**Scope of this round was research only — nothing below is implemented yet.**
 Bracketed `[NN]` tags cite the source report in `research/`.
+
+> **Shipped in v2.1 (2026-06-14):** the Fix-now item, all P0s, and most P1s
+> below are implemented on `epic/v2.1-security-refresh` — see CHANGELOG
+> [2.1.0] and `docs/EPIC-v2.1-refresh.md` for the exact set. **Still open
+> (v2.2):** Opengrep engine swap + rule-licensing (owner decision, §"Needs a
+> user decision"); P2 items (PCI DSS mode, CRA/SBOM note, CVEfixes
+> micro-benchmark, CyberSecEval ICD rule mining); live-container E2E run.
 
 > **Verify-before-ship caveat.** Several 2026 CVE IDs in the source reports
 > are flagged "verify on NVD," and report 01 self-flagged `CVE-2026-23993`

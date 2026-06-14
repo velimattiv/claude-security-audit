@@ -18,6 +18,10 @@ TODO.md
 docs/security-audit-output/*.sarif
 docs/security-audit-output/*.cyclonedx.json
 
+# E2E scorecard output (written next to fixtures on a manual assertions.py run)
+tests/e2e/scorecard.json
+tests/e2e/scorecard.md
+
 # Dogfood targets (cloned into /tmp, not this workspace — listed here for
 # completeness in case an operator clones into /workspace by accident)
 /tmp/audit-targets/

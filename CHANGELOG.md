@@ -5,8 +5,69 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing queued. The skill is pre-release; open a Discussion issue to
-propose v2.1 work.
+Nothing queued.
+
+## [2.1.0] — 2026-06-14
+
+Capability refresh from the 2026-06-14 research round (7 parallel reports in
+`docs/research/`, synthesized backlog in `docs/ROADMAP.md`, plan in
+`docs/EPIC-v2.1-refresh.md`). **Verify every cited 2026 CVE against NVD before
+relying on it** — the detection encodes bug *classes*; specific IDs are
+curated starting points (`docs/research/README.md`).
+
+### Added
+- **Two new deep-dive categories** (Phase 5 now fans out 11, concurrency cap 8):
+  - `cat-10` Supply Chain & CI/CD Integrity — lifecycle hooks, dependency
+    confusion, lockfile integrity, GitHub Actions script-injection /
+    `pull_request_target` / unpinned actions / self-hosted-runner abuse,
+    provenance posture. Always-on.
+  - `cat-11` MCP / Agentic — MCP tool-scope, indirect prompt-injection via
+    tool output, handler injection, confused-deputy / token pass-through,
+    excessive agency. Gated on a NEW Phase-0 `mcp_agentic` detector (separate
+    from the LLM gate). Tags `ASI01:2026`…`ASI10:2026`.
+- **Detection depth** on existing categories: framework fail-open auth /
+  matcher-evasion + SAML signature-wrapping + JWT header-trust (cat-01);
+  exact `redirect_uri` + scope-at-use (cat-03); deserialization false-safety
+  (PyYAML `FullLoader`, `torch.load` `weights_only`) + prototype pollution +
+  SSRF metadata-denylist completeness (cat-08); model-file deserialization
+  (cat-09); Lambda `AuthType=NONE` + Kyverno CEL SSRF + native-sidecar
+  `securityContext` (k8s 1.33) + OIDC trust + IMDSv1 (cat-07); MCP-config
+  secret sweep (cat-06).
+- **Methodology spine**: OWASP Top 10:2025 (web) mapping, MITRE CWE Top 25
+  (2025) prioritization enrichment (±1-rung cap preserved), OWASP Agentic
+  Apps 2026 lens, NIST SP 800-218A (GenAI SSDF). New `lib/owasp-web-top10.md`
+  + `lib/owasp-agentic-2026.md`.
+- **grype promoted** to first-class EPSS + CISA-KEV prioritization
+  (`properties.epss` / `properties.kev`, "Exploit-likely" callout; additive,
+  never lowers severity).
+- **Measurement harness**: fixture schema v3 with `negative_expectations[]`
+  decoys + a precision/recall/F1 **scorecard** (`scorecard.json`/`.md`) with
+  opt-in `--min-precision` / `--min-recall` floors — closes the
+  coverage-only measurement gap (KNOWN-GAPS #1). New E2E targets **DVWA**
+  (PHP) and **OWASP crAPI** (Java/Go/Python) via `--target`.
+- `lib/known-vuln-versions.md`: curated SCA version-threshold reference.
+- 13 CWEs added to the map (incl. CWE-1426 GenAI-output, CWE-1427
+  prompt-injection, CWE-1321 prototype-pollution, supply-chain set). The
+  `owasp_ids` schema now accepts `A##:YYYY` and `ASI##:YYYY`.
+
+### Changed
+- **Output routing unified + configurable.** All deliverables now land in a
+  single output dir (default `docs/security-audit-output/`): the report,
+  `findings.sarif`, `findings.cyclonedx.json`, and the pruned baseline. The
+  skill asks where on first run (honors an `output:` arg + a persisted
+  choice; the non-interactive default never blocks). See
+  `lib/output-routing.md`.
+- **Scanner pins**: trivy 0.70.0 → **0.71.0** (security — GHSA-q3fv-x8vg-qqm4,
+  Helm-chart tar-bomb OOM in the `trivy config` path), osv-scanner
+  2.3.5 → 2.3.8, trufflehog 3.95.2 → 3.95.5 (`--only-verified` →
+  `--results=verified`). Stale refs fixed: psalm SARIF via `--report=*.sarif`,
+  zizmor repo `zizmorcore/zizmor`.
+
+### Removed
+- **BMAD coupling.** The `_bmad-output/` auto-detect output routing is
+  removed entirely (replaced by the configurable output dir). The vendored
+  adversarial-review attribution (MIT, from bmad-method) is retained in
+  `NOTICE.md` / `README.md` as required.
 
 ## [2.0.6] — 2026-04-25
 
