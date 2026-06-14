@@ -44,9 +44,11 @@ the id reaches the query with no ownership / tenant / org scope applied
 anywhere on that path.
 
 Calibrate confidence to trace completeness:
-- `CONFIRMED` only when the full source->sink path is established (the
-  user-controlled id is shown reaching an unscoped query), or a second
-  source (e.g. a scanner) independently agrees.
+- `LIKELY` when the full source->sink path is established by this trace
+  alone (the user-controlled id is shown reaching an unscoped query).
+  Promote to `CONFIRMED` only when a second source (e.g. a scanner)
+  independently agrees — per the Phase-7 §7.3 rubric a single manual trace
+  is `LIKELY`, not `CONFIRMED`.
 - `POSSIBLE` when an unscoped sink is found but the taint / source cannot
   be confirmed from the read region (e.g. the id's origin or a scoping
   middleware lies outside the handler ± ~40 lines you read).

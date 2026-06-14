@@ -39,10 +39,11 @@ across files if validation, the handler, and the sink live apart. Confirm
 nothing canonicalizes / parameterizes / allowlists the value on that path.
 
 Calibrate confidence to trace completeness:
-- `CONFIRMED` only when the full source->sink path is established (a
-  user-controlled value is shown reaching the sink unsanitized), or a
-  second source (e.g. a scanner — see "Cross-reference with scanners")
-  independently agrees.
+- `LIKELY` when the full source->sink path is established by this trace
+  alone (a user-controlled value reaches the sink unsanitized). Promote to
+  `CONFIRMED` only when a second source (e.g. a scanner — see
+  "Cross-reference with scanners") independently agrees — per the Phase-7
+  §7.3 rubric a single manual trace is `LIKELY`, not `CONFIRMED`.
 - `POSSIBLE` when a sink is found but the taint / source cannot be
   confirmed from the read region (e.g. the argument is a variable whose
   origin lies outside the handler ± ~40 lines you read, or sanitization

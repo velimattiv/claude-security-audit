@@ -21,7 +21,7 @@
       "alternate_file_patterns": ["encryptionkeys/*.priv*", "lib/crypto*.ts"],
       "mechanism_keywords": [
         {"keyword": "private key", "alternate": ["rsa key", "signing key", "privatekey"]},
-        {"keyword": "hard-coded", "alternate": ["hardcoded", "hard coded", "inline", "embedded"]}
+        {"keyword": "hard-coded", "alternate": ["hardcoded", "hard coded", "inline", "embedded", "in source", "in code", "committed"]}
       ],
       "rationale": "Secrets-in-source. alternate_categories accepts pre-v2.0.1 dogfoods where cat-01 tagged this auth. mechanism_keywords (v3.1 semantic check) require the finding text to name BOTH the secret TYPE (private/RSA/signing key) AND that it is hard-coded/inline — a generic 'JWT issue' on this file is not THE bug."
     },

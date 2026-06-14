@@ -264,27 +264,34 @@ else
     for f in skills/security-audit/steps/deepdive/cat-*.md; do
       [ -f "$f" ] || continue
       base="$(basename "$f")"
+      # Extract ONLY genuine `CWE-N / A##:2025` ASSERTION adjacencies (the
+      # finding-line format `→ **SEV** / CWE-N / A##:2025`). Anchoring on the
+      # CWE-slash-A## adjacency — and iterating ALL matches per line — avoids
+      # (a) mis-pairing when two assertions share a line, and (b) false pairs
+      # from prose where a CWE and an A## merely co-occur. The line-wrap case
+      # (CWE-N / at EOL, A##:2025 leading the next line) is handled separately.
       awk -v base="$base" '
         { line[NR] = $0 }
         END {
           for (i = 1; i <= NR; i++) {
             cur = line[i]
-            if (cur ~ /A(0[0-9]|10):2025/) {
-              match(cur, /A(0[0-9]|10):2025/); owasp = substr(cur, RSTART, RLENGTH)
-              s = cur; cwe = ""
-              while (match(s, /CWE-[0-9]+/)) {
-                cwe = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-              }
-              if (cwe != "") emit(base, cwe, owasp)
-            } else if (cur ~ /CWE-[0-9]+/) {
+            # (a) same-line adjacent pairs — iterate every match
+            s = cur
+            while (match(s, /CWE-[0-9]+[[:space:]]*\/[[:space:]]*`?A(0[0-9]|10):2025/)) {
+              tok = substr(s, RSTART, RLENGTH)
+              match(tok, /CWE-[0-9]+/);        c = substr(tok, RSTART, RLENGTH)
+              match(tok, /A(0[0-9]|10):2025/); o = substr(tok, RSTART, RLENGTH)
+              emit(base, c, o)
+              s = substr(s, RSTART + RLENGTH)
+            }
+            # (b) line-wrap: "... CWE-N /" at EOL, "A##:2025 ..." next line
+            if (cur ~ /CWE-[0-9]+[[:space:]]*\/[[:space:]]*$/) {
               nxt = (i < NR ? line[i+1] : "")
               if (nxt ~ /^[[:space:]]*`?A(0[0-9]|10):2025/) {
-                s = cur; cwe = ""
-                while (match(s, /CWE-[0-9]+/)) {
-                  cwe = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-                }
-                match(nxt, /A(0[0-9]|10):2025/); owasp = substr(nxt, RSTART, RLENGTH)
-                if (cwe != "") emit(base, cwe, owasp)
+                t = cur; c = ""
+                while (match(t, /CWE-[0-9]+/)) { c = substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH) }
+                match(nxt, /A(0[0-9]|10):2025/); o = substr(nxt, RSTART, RLENGTH)
+                if (c != "") emit(base, c, o)
               }
             }
           }

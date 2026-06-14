@@ -79,7 +79,7 @@ User-level (available in every project), pinned to a tagged release:
 git clone --depth 1 --branch v2.2.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
+cat ~/.claude/skills/security-audit/VERSION   # → 2.2.0
 ```
 
 Project-level (just this repo):

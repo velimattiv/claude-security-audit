@@ -461,7 +461,8 @@ def finding_mechanism_matches(finding: dict, mechanism_keywords: list) -> bool:
 
     for group in mechanism_keywords:
         if isinstance(group, dict):
-            terms = [group.get("keyword", "")] + list(group.get("alternate", []))
+            _alt = group.get("alternate", [])
+            terms = [group.get("keyword", "")] + (_alt if isinstance(_alt, list) else [_alt])
         else:
             terms = [group]
         terms = [t.lower() for t in terms if isinstance(t, str) and t]
