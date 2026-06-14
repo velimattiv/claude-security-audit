@@ -45,7 +45,7 @@ else
     else
       fail "JSON parse error in $f"
     fi
-  done < <(find . -name "*.json" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./_bmad*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*")
+  done < <(find . -name "*.json" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./docs/security-audit-output/*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*")
 fi
 note "$checks JSON files parsed cleanly so far"
 
@@ -68,7 +68,9 @@ echo
 echo "[3/7] CWE cross-references..."
 if [ -f skills/security-audit/lib/cwe-map.json ]; then
   # Extract CWEs referenced anywhere in the spec + catalogs.
-  referenced=$(grep -rhoE "CWE-[0-9]+" skills/security-audit/steps/ skills/security-audit/lib/ 2>/dev/null | sort -u)
+  # Include E2E fixtures: a fixture CWE absent from the map hard-fails
+  # validate-findings.py on that target (Gate-C R1 finding).
+  referenced=$(grep -rhoE "CWE-[0-9]+" skills/security-audit/steps/ skills/security-audit/lib/ tests/e2e/ 2>/dev/null | sort -u)
   missing=0
   for cwe in $referenced; do
     if ! jq -e --arg c "$cwe" '.mappings | has($c)' skills/security-audit/lib/cwe-map.json >/dev/null 2>&1; then
@@ -115,7 +117,7 @@ while IFS= read -r md; do
       broken=$((broken + 1))
     fi
   done < <(grep -oE '\]\(([^)]+\.md[^)]*)\)' "$md" 2>/dev/null | sed 's/^](//' | sed 's/)$//')
-done < <(find . -name "*.md" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./_bmad*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*" -not -path "./docs/test-runs/*")
+done < <(find . -name "*.md" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./docs/security-audit-output/*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*" -not -path "./docs/test-runs/*")
 if [ $broken -eq 0 ]; then
   pass
   note "all markdown refs resolve"

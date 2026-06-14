@@ -1,4 +1,4 @@
-# Phase 5 — Parallel Deep Dives (9 categories)
+# Phase 5 — Parallel Deep Dives (11 categories)
 
 ## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
 
@@ -9,7 +9,7 @@
 
 🔁 **Sub-agent fan-out is MANDATORY, not optional:**
 - For each `(category, partition)` pair where the category's gate condition holds, invoke ONE sub-agent via the Agent tool with `subagent_type: "general-purpose"` and the prompt template from `templates/subagent-prompt.md`. Concurrency cap: 8 in flight.
-- **If you find yourself reasoning "I'll just cover all 9 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
+- **If you find yourself reasoning "I'll just cover all 11 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
 - Categories whose gating condition is false (e.g., `llm` when `profile.llm_usage.detected == false`) are legitimately skipped — record the skip in `phase-05-skipped.json`. The skipped list always exists; if no categories were skipped, write `{"skipped": []}`.
 
 ⛔ **DO NOT:**
@@ -19,8 +19,9 @@
 
 ---
 
-**Goal.** For each top-N partition, run 9 category-specific sub-agents in
-parallel. Each sub-agent consumes the Phase 0/1/2/3/4 artifacts and writes
+**Goal.** For each top-N partition, run the applicable category-specific
+sub-agents (up to 11; gated ones may not fire) in parallel, 8 in flight.
+Each sub-agent consumes the Phase 0/1/2/3/4 artifacts and writes
 JSONL findings to disk. Only JSON summaries return through tool output.
 
 **Inputs.** All prior-phase artifacts in `.claude-audit/current/`, plus
@@ -33,8 +34,9 @@ per-partition scope from `partitions.json` and Phase 2's surface inventory.
 - `.claude-audit/current/phase-05.done` — umbrella marker once all (cat, part)
   pairs are finished.
 
-**Execution model.** `partitions.full_depth_count × 9` sub-agents.
-Concurrency cap: **8 in flight** (see `workflow.md §5`). Partitions over the
+**Execution model.** Up to `partitions.full_depth_count × 11` sub-agents
+(fewer when `llm`/`agentic` gates are false).
+Concurrency cap: **8 in flight** (see `workflow.md §5`); pairs beyond 8 queue. Partitions over the
 500K-token soft ceiling return `needs_recursion`; the orchestrator splits
 them and re-fans-out.
 
@@ -43,8 +45,8 @@ them and re-fans-out.
 ## 5.1 — Categories
 
 Each deep-dive category lives in its own file under
-`steps/deepdive/cat-<NN>-<slug>.md`. All nine are required for a full audit
-unless the user passes `categories: "<subset>"`.
+`steps/deepdive/cat-<NN>-<slug>.md`. All non-gated categories are required for a
+full audit unless the user passes `categories: "<subset>"`.
 
 | # | Category | File | Fan-out gate |
 |---|---|---|---|
@@ -55,8 +57,14 @@ unless the user passes `categories: "<subset>"`.
 | 5 | Cryptography | `cat-05-crypto.md` | always |
 | 6 | Secret Sprawl | `cat-06-secret-sprawl.md` | always |
 | 7 | Deployment Posture | `cat-07-deployment.md` | always |
-| 8 | Injection / SSRF / Deserialization | `cat-08-injection-ssrf.md` | always |
+| 8 | Injection / SSRF / Deserialization / Prototype-Pollution | `cat-08-injection-ssrf.md` | always |
 | 9 | LLM-specific | `cat-09-llm.md` | only if `profile.llm_usage.detected == true` and `kind != "internal"` |
+| 10 | Supply Chain & CI/CD Integrity | `cat-10-supply-chain.md` | always |
+| 11 | MCP / Agentic | `cat-11-mcp-agentic.md` | only if `profile.mcp_agentic.detected == true` |
+
+**11 categories total** (9 always-on, incl. supply_chain; `llm` and `agentic`
+are gated). With the concurrency cap of 8, `(category, partition)` pairs queue
+into successive waves — the cap bounds in-flight sub-agents, not total pairs.
 
 ## 5.2 — Fan-out procedure
 
@@ -139,7 +147,7 @@ receive no finding sub-agents.
 ### Anti-pattern seen in earlier runs
 
 A single-shot orchestrator can be tempted to reason "I'll just walk
-through all 9 categories serially in one head-space and write a single
+through all 11 categories serially in one head-space and write a single
 consolidated JSON." **That pattern missed alg:none JWT acceptance,
 2FA trust gaps, zip-slip, and LFI** in v2.0.1's E2E iteration runs —
 all four are bugs that require category-specific deep attention which
@@ -196,8 +204,11 @@ Every finding gets at least one OWASP identifier:
 - **ASVS 5.0** category id, e.g., `ASVS-V6.2.1`
 - **API Top 10 (2023)**: `API1:2023` … `API10:2023`
 - **LLM Top 10 (2025)**: `LLM01:2025` … `LLM10:2025`
+- **Web Top 10 (2025)**: `A01:2025` … `A10:2025` (cat-08/10 and the §6.16 roll-up)
+- **Agentic Apps (2026)**: `ASI01:2026` … `ASI10:2026` (cat-11 and the §6.17 lens)
 
-Category-specific mapping guidance lives inside each `cat-<NN>` file.
+All five forms are accepted by `lib/finding-schema.json`. Category-specific
+mapping guidance lives inside each `cat-<NN>` file.
 
 ## 5.5 — Confidence calibration
 
@@ -246,7 +257,7 @@ and re-fans-out.
 
 After all (category, partition) combinations finish:
 
-> Phase 5 complete — <total> findings across <N> partitions × <9 - gated>
+> Phase 5 complete — <total> findings across <N> partitions × <11 - gated>
 > categories. Breakdown: <count> CRITICAL, <count> HIGH, ... Proceeding to
 > Phase 6 (Config + Methodology Spine).
 

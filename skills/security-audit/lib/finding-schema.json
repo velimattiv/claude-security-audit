@@ -34,6 +34,7 @@
       "enum": [
         "auth", "idor", "token_scope", "mitm", "crypto",
         "secret_sprawl", "deployment", "injection", "llm",
+        "supply_chain", "agentic",
         "config", "scanner", "methodology"
       ]
     },
@@ -54,9 +55,9 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(ASVS-V\\d+\\.\\d+(\\.\\d+)?|API\\d+:\\d{4}|LLM\\d+:\\d{4})$"
+        "pattern": "^(ASVS-V\\d+\\.\\d+(\\.\\d+)?|API\\d+:\\d{4}|LLM\\d+:\\d{4}|A\\d+:\\d{4}|ASI\\d+:\\d{4})$"
       },
-      "description": "e.g., ASVS-V6.2.1, API1:2023, LLM02:2025"
+      "description": "e.g., ASVS-V6.2.1, API1:2023, LLM02:2025, A03:2025 (web Top 10), ASI01:2026 (agentic)"
     },
     "title": { "type": "string", "maxLength": 120 },
     "description": { "type": "string", "maxLength": 800 },

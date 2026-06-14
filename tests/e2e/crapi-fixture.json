@@ -1,0 +1,134 @@
+{
+  "target": "crAPI@v1.1.6",
+  "schema_version": 3,
+  "target_repo": "https://github.com/OWASP/crAPI.git",
+  "target_ref": "v1.1.6",
+  "target_ref_note": "Pinned to OWASP crAPI v1.1.6 (released 2025-09-30), Apache-2.0. 'completely ridiculous API' — a deliberately vulnerable microservices app: services/identity (Java 17 / Spring Boot), services/workshop (Python / Django REST), services/community (Go / gqlgen GraphQL), services/web (TypeScript / React), plus Docker-Compose + k8s deploy/. Chosen as the third E2E target because one repo covers THREE categories Juice Shop cannot: token_scope (JWT/JWK issues), deployment (intentionally weak compose/k8s posture), and partial mitm (inter-service HTTP calls). Microservice file paths are version-sensitive — re-verify the service/<svc>/.../*.{java,py,go} layout if you re-pin. Select with: scripts/run-e2e-test.sh --target crapi.",
+  "languages": ["java", "python", "go", "typescript"],
+
+  "notes": "Match rule identical to expected-findings.json (see tests/e2e/assertions.py). Several fixtures here are SOFT (must_match:false): crAPI's flaws are runtime-behavioural (BOLA via path param, mass assignment via extra JSON keys) and a static auditor may surface the class without pinning the exact handler. The hard fixtures are the ones a competent static pass over the source must reach: hard-coded JWT secret/JWK, the SSRF, and the deployment misconfig.",
+
+  "schema_changelog": {
+    "v3": "see expected-findings.json — negative_expectations[] decoys + precision/recall scorer."
+  },
+
+  "expectations": [
+    {
+      "id": "crapi-01",
+      "description": "BOLA / IDOR — vehicle-location endpoint returns another user's vehicle by vehicleId path param with no ownership check.",
+      "cwe": "CWE-639",
+      "alternate_cwes": ["CWE-284", "CWE-285", "CWE-863"],
+      "category": "idor",
+      "alternate_categories": ["auth", "token_scope"],
+      "file_pattern": "services/identity/src/main/java/com/crapi/controller/VehicleController.java",
+      "alternate_file_patterns": ["services/identity/src/main/java/com/crapi/service/**/VehicleService*.java", "services/identity/**/*Vehicle*.java"],
+      "rationale": "Classic crAPI BOLA: GET /identity/api/v2/vehicle/{vehicleId}/location resolves the vehicle without checking it belongs to the authenticated user. CWE-639 authorization-bypass-via-key; alternate CWEs cover broader access-control taxonomies."
+    },
+    {
+      "id": "crapi-02",
+      "description": "BOLA on the mechanic/report flow — reading another user's service report by id.",
+      "cwe": "CWE-639",
+      "alternate_cwes": ["CWE-285", "CWE-863"],
+      "category": "idor",
+      "alternate_categories": ["auth"],
+      "file_pattern": "services/workshop/crapi/**/views.py",
+      "alternate_file_patterns": ["services/workshop/**/*report*.py", "services/workshop/crapi/mechanic/**/*.py"],
+      "must_match": false,
+      "rationale": "Soft: the Django workshop service exposes mechanic service-report reads keyed by id without scoping to the requester. Requires per-view authz tracing (cat-02 IDOR fan-out)."
+    },
+    {
+      "id": "crapi-03",
+      "description": "Hard-coded / weak JWT signing key (or JWK with a predictable/embedded private key) used to sign and verify access tokens.",
+      "cwe": "CWE-798",
+      "alternate_cwes": ["CWE-321", "CWE-347", "CWE-522"],
+      "category": "token_scope",
+      "alternate_categories": ["auth", "secret_sprawl", "crypto"],
+      "file_pattern": "services/identity/src/main/java/com/crapi/config/JwtAuthTokenFilter.java",
+      "alternate_file_patterns": ["services/identity/**/JwtProvider*.java", "services/identity/**/JwtService*.java", "services/identity/src/main/resources/*.properties", "services/identity/src/main/resources/jwks.json"],
+      "rationale": "crAPI ships a JWT/JWK token-scope weakness (key confusion / embedded key / unverified kid). CWE-321 hard-coded crypto key, CWE-347 improper signature verification, CWE-522 insufficiently-protected credentials all in scope. This is the token_scope ground truth Juice Shop lacks."
+    },
+    {
+      "id": "crapi-04",
+      "description": "JWT signature verification weakness — algorithm not pinned / alg confusion / unverified token allowed.",
+      "cwe": "CWE-347",
+      "alternate_cwes": ["CWE-287", "CWE-345"],
+      "category": "auth",
+      "alternate_categories": ["token_scope", "crypto"],
+      "file_pattern": "services/identity/src/main/java/com/crapi/config/JwtAuthTokenFilter.java",
+      "alternate_file_patterns": ["services/identity/**/JwtProvider*.java", "services/identity/**/Jwt*.java"],
+      "must_match": false,
+      "rationale": "Soft: crAPI's token validation accepts tokens signed in ways it should reject (the canonical 'forge a token with the leaked/embedded key' lab). Single-shot auditors may fold this into crapi-03 rather than enumerate the verification flaw separately."
+    },
+    {
+      "id": "crapi-05",
+      "description": "Mass assignment — request body binds directly to a model, letting a client set protected fields (e.g. credit/balance, role, isAdmin) it should not control.",
+      "cwe": "CWE-915",
+      "alternate_cwes": ["CWE-639", "CWE-269"],
+      "category": "auth",
+      "alternate_categories": ["idor"],
+      "file_pattern": "services/workshop/crapi/**/serializers.py",
+      "alternate_file_patterns": ["services/workshop/crapi/**/views.py", "services/identity/**/dto/**/*.java", "services/community/**/*.go"],
+      "rationale": "crAPI's coupon/mechanic flows accept extra JSON keys that overwrite server-controlled fields (DRF serializer with fields='__all__' or a Spring DTO with no field allow-list). CWE-915 mass-assignment is the precise tag."
+    },
+    {
+      "id": "crapi-06",
+      "description": "SSRF — server fetches an attacker-controlled URL (e.g. the 'check coupon' / merchant callback that the server-side requests outbound).",
+      "cwe": "CWE-918",
+      "category": "injection",
+      "alternate_categories": ["mitm", "config"],
+      "file_pattern": "services/workshop/crapi/**/views.py",
+      "alternate_file_patterns": ["services/workshop/**/*.py", "services/community/**/*.go", "services/identity/**/*.java"],
+      "rationale": "crAPI's server makes an outbound HTTP request to a client-supplied URL (the merchant/coupon validation callback), the canonical API SSRF. CWE-918. alternate category mitm reflects that the same outbound call is also an unauthenticated inter-service hop."
+    },
+    {
+      "id": "crapi-07",
+      "description": "Deployment misconfiguration — Docker-Compose / k8s manifests run services with weak posture (hard-coded secrets in env, debug enabled, privileged/host networking, or no resource/security context).",
+      "cwe": "CWE-1188",
+      "alternate_cwes": ["CWE-16", "CWE-798", "CWE-732", "CWE-276"],
+      "category": "deployment",
+      "alternate_categories": ["secret_sprawl", "config"],
+      "file_pattern": "docker-compose.yml",
+      "alternate_file_patterns": ["deploy/**/*.yaml", "deploy/**/*.yml", "deploy/k8s/**/*.yaml", "services/**/Dockerfile"],
+      "rationale": "crAPI's compose/k8s setup is intentionally weak (secrets in env, Django DEBUG, no securityContext). This is the deployment-category ground truth Juice Shop's hardened distroless image cannot provide. CWE-1188 insecure-default-init; alternates cover hard-coded secrets / perms."
+    }
+  ],
+
+  "negative_expectations": [
+    {
+      "id": "crapi-neg-01",
+      "description": "Spring Security password storage uses BCryptPasswordEncoder — correct password hashing, not a weak-crypto finding.",
+      "file_pattern": "services/identity/src/main/java/com/crapi/config/**/*.java",
+      "forbidden_cwe": "CWE-916",
+      "forbidden_category": "crypto",
+      "min_severity": "MEDIUM",
+      "rationale": "crAPI's identity service configures a BCryptPasswordEncoder bean. bcrypt is the recommended algorithm; flagging the password-encoder config as weak hashing is a false positive. (The real crypto/token weakness is the JWT key, crapi-03 — a different file and class.)"
+    },
+    {
+      "id": "crapi-neg-02",
+      "description": "Django ORM querysets (Model.objects.filter / get) parameterize SQL — using the ORM is NOT SQL injection.",
+      "file_pattern": "services/workshop/crapi/**/models.py",
+      "forbidden_cwe": "CWE-89",
+      "forbidden_category": "injection",
+      "min_severity": "MEDIUM",
+      "rationale": "The workshop service queries via the Django ORM, which parameterizes. A finding tagging models.py as CWE-89 is the classic ORM false positive — there is no raw-SQL .raw()/.extra() with interpolation in the model layer."
+    },
+    {
+      "id": "crapi-neg-03",
+      "description": "Parameterized prepared statement / repository finder in the identity service is not SQLi.",
+      "file_pattern": "services/identity/src/main/java/com/crapi/repository/**/*.java",
+      "forbidden_cwe": "CWE-89",
+      "forbidden_category": "injection",
+      "min_severity": "MEDIUM",
+      "rationale": "Spring Data JPA repositories use bound parameters; flagging a derived-query repository method as SQL injection is an FP. crAPI's injectable surface is its authz (BOLA) and SSRF, not raw SQL in the repository layer."
+    }
+  ],
+
+  "gated_categories": {
+    "llm": "crAPI has no LLM SDK; cat-09 gated off. Absent phase-05-llm-*.jsonl is pass-via-skip.",
+    "agentic": "crAPI exposes APIs but no MCP server / agent-tool-definition surface; profile.mcp_agentic.detected=false → cat-agentic gated off. Absent phase-05-agentic-*.jsonl is a LEGITIMATE skip — do NOT demand agentic findings here."
+  },
+
+  "always_on_categories": {
+    "supply_chain": "Always-on. crAPI has pom.xml (Java), requirements.txt (Python), go.mod (Go), package.json (TS) — a rich multi-ecosystem dependency surface; cat-supply_chain is expected to execute across all four. No specific supply_chain fixture is pinned (CVEs drift)."
+  }
+}

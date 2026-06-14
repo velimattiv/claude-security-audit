@@ -11,7 +11,7 @@
 ⚠ **EVERY `results[]` row in the synthetic `security-audit-skill` SARIF run MUST carry these properties:**
 - `properties.security-severity`: CVSS-style numeric string. CRITICAL→`"9.0"`, HIGH→`"7.0"`, MEDIUM→`"5.0"`, LOW→`"3.0"`, INFO→`"1.0"`. Required for the GitHub Security tab.
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required for fixture matching, baseline delta, and GitHub Security tab grouping. Look up the CWE in `lib/cwe-map.json`; if absent, use your best judgement and add an entry in a follow-up.
-- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `config`.
+- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`.
 
 Per-scanner SARIF runs are copied through verbatim — do NOT rewrite
 scanner results. Scanner CWE lives in `tags[]` / `rule.properties.tags` /
@@ -39,10 +39,11 @@ consolidated SARIF 2.1.0 document, and a CycloneDX SBOM.
 - `.claude-audit/current/findings.sarif` — SARIF 2.1.0 consolidated.
 - `.claude-audit/current/findings.cyclonedx.json` — SBOM (from trivy
   output if present; otherwise produced by syft if installed).
-- The report is ALSO copied to:
-  - `_bmad-output/implementation-artifacts/security-audit-report.md`
-    if `_bmad-output/` exists in the project,
-  - else `docs/security-audit-report.md`.
+- Deliverable copies under the resolved `<output_dir>` (default
+  `docs/security-audit-output/`, see [../lib/output-routing.md](../lib/output-routing.md)):
+  `<output_dir>/security-audit-report.md`, `<output_dir>/findings.sarif`,
+  `<output_dir>/findings.cyclonedx.json`. Copy AFTER the blackboard files
+  above exist (blackboard-first).
 - `.claude-audit/current/phase-07.done`
 
 **Execution.** Single orchestrator pass. No sub-agent fan-out (synthesis
@@ -161,11 +162,78 @@ Build a table for the report:
 | Methodology | Coverage | Findings tagged |
 |---|---|---|
 | ASVS 5.0 L2 | X% (pass / fail / n.a.) | N |
+| OWASP Top 10:2025 (web) | K/10 categories fired (A01..A10) | N |
 | API Top 10 (2023) | per-category counts | N |
 | LLM Top 10 (2025) | per-category counts (or N/A) | N |
+| OWASP Agentic Applications (2026) | K/10 ASI categories fired (or N/A) | N |
 | LINDDUN | 7-category counts (or N/A) | N |
 | STRIDE | partitions covered | Markdown tables |
 | CWE | unique CWEs seen | N |
+| CWE Top 25 (2025) | hits / 25 (highest-ranked: #R) | N |
+
+- **OWASP Top 10:2025 (web)** row reads `phase-06-web-top10.jsonl` (§6.16);
+  count categories whose `count > 0`. **Agentic (2026)** row reads
+  `phase-06-agentic-top10.jsonl` (§6.17); show `N/A` when that file is
+  zero bytes (gate did not fire).
+- **CWE Top 25 (2025)** row is computed by §7.13 below.
+
+## 7.13 — CWE Top 25 (2025) prioritization enrichment
+
+**Additive, after §7.4 severity is final. Pure lookup, no fan-out.** Uses
+the ranked list in `lib/owasp-web-top10.md` (Part 2) — MITRE CWE Top 25
+(2025), published 2025-12-15.
+
+For each finding whose `properties.cwe` matches an in-map `CWE-NNN` row in
+that list:
+1. Stamp `properties.cwe_top25_2025_rank` = the row's rank (1–25) on the
+   finding's SARIF result (and carry it on the in-memory finding).
+2. Treat Top-25 membership as a **reporting-priority** signal, surfaced in
+   the Executive Summary ("CWE Top 25 (2025) hits: <n>, top-ranked #<r>")
+   and as a tiebreaker when ordering findings of equal severity (lower
+   rank = list first).
+
+**Severity-cap interaction (MANDATORY — do NOT break §7.4):**
+- This enrichment may **raise priority by at most one rung** and **never
+  lowers** severity.
+- The ±1-rung cap in §7.4 is the single authority. If §7.4 already applied
+  a +1 promotion to a finding, Top-25 membership adds **zero** further
+  rungs — it becomes a pure reporting highlight only (no second bump).
+- Concretely: the total context-driven promotion for any finding is **≤ +1
+  rung** counting §7.4 and §7.13 together. Top-25 never stacks on top of an
+  existing §7.4 promotion, and never demotes.
+
+The seven memory-safety entries in the Part 2 list (rendered as `#NNN`,
+not `CWE-NNN`) are not in `lib/cwe-map.json`, so they never match a finding
+— correct for a web/polyglot audit.
+
+## 7.14 — grype EPSS / CISA-KEV join
+
+**Additive prioritization, after §7.4. Never lowers severity.** Scanner
+side already documented in `lib/scanner-bundle.md` (grype EPSS/KEV).
+
+If `phase-04-scanners/grype.json` exists, read it and join onto matching
+findings by CVE / GHSA id:
+- EPSS probability: `.matches[].vulnerability.epss[0].epss`
+- CISA-KEV flag: `.matches[].vulnerability.knownExploited` (boolean)
+
+Match grype entries to findings by vulnerability id (CVE-/GHSA-) — these
+appear in dependency/SCA findings' `id`, `title`, or `sources[].detail`,
+and in scanner-run SARIF `ruleId`. For each matched finding:
+1. Stamp `properties.epss` (numeric string, e.g. `"0.142"`) and
+   `properties.kev` (`"true"`/`"false"`) on its SARIF result.
+2. If **EPSS ≥ 0.10 OR KEV == true**, add it to an **"Exploit-likely"**
+   callout surfaced in the Executive Summary and at the top of the
+   Remediation Roadmap.
+
+**Severity-cap interaction:** EPSS/KEV is prioritization-only and
+**additive** — it may raise reporting priority but **never lowers**
+severity, and like §7.13 it does not stack a second rung on top of any
+§7.4 promotion (the ±1-rung cap is authoritative). KEV/high-EPSS findings
+that are still only MEDIUM by the rubric stay MEDIUM but are flagged
+"Exploit-likely" so triage sees them first.
+
+If `grype.json` is absent, skip silently (grype is optional) and note
+"EPSS/KEV: grype not run" in the report's coverage section.
 
 ## 7.7 — Emit `phase-07-report.md`
 
@@ -174,7 +242,9 @@ Use the template in `lib/report-template.md`. Sections in order:
 1. **Header** — project name, audit id, skill version, generated-at,
    scope, duration.
 2. **Executive Summary** — total findings, by severity, by category,
-   by confidence. Top 3 risks (one line each).
+   by confidence. Top 3 risks (one line each). Plus: **CWE Top 25 (2025)
+   hits** (§7.13) and the **"Exploit-likely" callout** (EPSS ≥ 0.10 OR
+   KEV=true, §7.14) when either is non-empty.
 3. **Partition Risk Ranking** — table from Phase 1 with finding counts
    appended per partition.
 4. **Findings** — grouped by severity (CRITICAL → INFO), within severity
@@ -217,7 +287,12 @@ Every `results[]` item in the synthetic `security-audit-skill` run:
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required
   for fixture matching, baseline carryover, and GitHub Security tab
   grouping. Look up in `lib/cwe-map.json`.
-- `properties.category`: one of the 10 category slugs. Recommended.
+- `properties.category`: one of the 12 category slugs (`auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`). Recommended.
+- `properties.cwe_top25_2025_rank` (optional): integer 1–25 when the
+  finding's CWE is in the 2025 CWE Top 25 (§7.13).
+- `properties.epss` / `properties.kev` (optional): EPSS probability and
+  CISA-KEV flag joined from grype (§7.14). Additive prioritization signals
+  only — they never change `level` or `properties.security-severity`.
 
 **Scanner-run results.** Per-scanner SARIF runs (semgrep, trivy, etc.)
 emit CWE in scanner-specific locations — `tags[]`, `rule.properties.tags`,
@@ -241,15 +316,23 @@ If no SBOM is available, emit a minimal CycloneDX skeleton with the
 detected languages / frameworks from Phase 0 and note "SBOM
 incomplete — install trivy or syft for full coverage".
 
-## 7.10 — Save user-facing report
+## 7.10 — Save user-facing deliverables
 
-Check for `_bmad-output/` directory in the project root. If present:
-- Write to `_bmad-output/implementation-artifacts/security-audit-report.md`.
+Resolve `<output_dir>` per [../lib/output-routing.md](../lib/output-routing.md)
+(already resolved + persisted in `.claude-audit/config.json` during preflight;
+read it from there, default `docs/security-audit-output/`). Then, AFTER the
+blackboard files exist:
 
-Else:
-- Write to `docs/security-audit-report.md`.
+```bash
+OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output)
+mkdir -p "$OUT"
+cp .claude-audit/current/phase-07-report.md      "$OUT/security-audit-report.md"
+cp .claude-audit/current/findings.sarif          "$OUT/findings.sarif"
+cp .claude-audit/current/findings.cyclonedx.json "$OUT/findings.cyclonedx.json"
+```
 
-Echo the path to the user.
+Echo `$OUT/security-audit-report.md` to the user. (The pruned baseline is
+copied to `$OUT/` by Phase 8.)
 
 ## 7.11 — Report summary to user
 
@@ -259,9 +342,10 @@ Echo the path to the user.
 > - **Partitions audited:** <N> at full depth, <K> inventory-only
 > - **Confidence mix:** <X> CONFIRMED, <Y> LIKELY, <Z> POSSIBLE
 > - **Unique-to-skill findings:** <U>
-> - **Report:** `<report_path>`
-> - **SARIF:** `.claude-audit/current/findings.sarif` (upload to GitHub
->   Security tab via `gh security-advisory` or CI integration)
+> - **Report:** `<output_dir>/security-audit-report.md`
+> - **SARIF:** `<output_dir>/findings.sarif` (also in
+>   `.claude-audit/current/findings.sarif`; upload to GitHub Security tab via
+>   `gh security-advisory` or CI integration)
 >
 > **Next steps:**
 > 1. "fix finding <id>" — fix a specific finding

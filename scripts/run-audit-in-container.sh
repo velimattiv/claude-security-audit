@@ -146,7 +146,7 @@ case "$CMD" in
       semgrep)    INNER="semgrep scan --config p/security-audit --config p/owasp-top-ten --sarif -o /target/.claude-audit/current/phase-04-scanners/semgrep.sarif --metrics=off --timeout 600$EXTRA_JOINED /target" ;;
       osv-scanner) INNER="osv-scanner scan --recursive --format sarif --output /target/.claude-audit/current/phase-04-scanners/osv.sarif$EXTRA_JOINED /target" ;;
       gitleaks)   INNER="gitleaks detect --no-git --source /target --report-format sarif --report-path /target/.claude-audit/current/phase-04-scanners/gitleaks.sarif$EXTRA_JOINED" ;;
-      trufflehog) INNER="trufflehog git file:///target --json --only-verified$EXTRA_JOINED > /target/.claude-audit/current/phase-04-scanners/trufflehog.jsonl" ;;
+      trufflehog) INNER="trufflehog git file:///target --json --results=verified$EXTRA_JOINED > /target/.claude-audit/current/phase-04-scanners/trufflehog.jsonl" ;;
       trivy)      INNER="trivy fs --scanners vuln,secret,misconfig --format sarif --output /target/.claude-audit/current/phase-04-scanners/trivy.sarif$EXTRA_JOINED /target" ;;
       hadolint)   INNER="find /target -name Dockerfile -not -path '*/node_modules/*' | xargs -I {} hadolint --format sarif$EXTRA_JOINED {}" ;;
       "")

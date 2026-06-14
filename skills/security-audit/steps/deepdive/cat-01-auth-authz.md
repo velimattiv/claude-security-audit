@@ -13,8 +13,12 @@ as the `phase-specific-method-body`.
   Authorization).
 - LLM Top 10: not applicable.
 
-**Baseline CWEs:** 284, 285, 287, 288, 306, 307, 352, 384, 521, 613, 640,
-862, 863.
+**Baseline CWEs:** 284, 285, 287, 288, 306, 307, 345, 347, 352, 384, 521,
+613, 636, 640, 862, 863.
+
+> CVE IDs cited in this file are **class anchors**, not asserted facts —
+> verify each against NVD before quoting it in a finding's `sources`
+> (cross-ref `lib/known-vuln-versions.md`).
 
 ---
 
@@ -124,6 +128,140 @@ For every surface with `path` matching `/admin|/super|/internal` or
 - The check happens before any data read.
 
 Weak comparison → **HIGH** / CWE-863.
+
+### Framework fail-open auth / matcher-evasion
+
+The headline 2026 auth-bypass class. A middleware/router that uses a
+**positive allowlist** ("protect THESE paths, everything else passes")
+fails **open**: any request that doesn't match the protect-list reaches
+the handler unauthenticated. The robust shape is **default-deny** —
+define the *public* routes and protect everything else. Reference anchor:
+Next.js `x-middleware-subrequest` (CVE-2025-29927); live 2026 heirs:
+Clerk `createRouteMatcher` (CVE-2026-41248), Spring Security servlet-path
+matcher bypass (CVE-2026-22753/22754), Spring Boot Actuator prefix-policy
+leakage (CVE-2026-22731/22733).
+
+Next.js middleware matcher / subrequest bypass:
+```
+export\s+const\s+config\s*=\s*\{[^}]*matcher
+matcher\s*:\s*\[
+x-middleware-subrequest
+```
+Flag a `matcher` config that lists protected paths (auth only runs on
+matched routes — unmatched routes are public). Treat the trusted internal
+`x-middleware-subrequest` header as a bypass primitive on unpatched Next
+(<12.3.5 / <13.5.9 / <14.2.25 / <15.2.3). → **HIGH** / **CWE-636** (the
+positive-allowlist fails open) + **CWE-306** (missing authn on the
+unmatched routes).
+
+Clerk `createRouteMatcher` protect-some idiom:
+```
+createRouteMatcher\s*\(
+clerkMiddleware\s*\([^)]*isProtectedRoute
+```
+The vulnerable shape matches *protected* routes then calls
+`auth().protect()` only inside `if (isProtectedRoute(req))` — unmatched =
+public. SAFE shape (LOWER severity / defense-in-depth note): the matcher
+names PUBLIC routes and code protects the negation, e.g.
+```
+if\s*\(\s*!\s*isPublicRoute\s*\(
+```
+→ **HIGH** / **CWE-636** + **CWE-287** when the protect-some idiom is
+present (raise confidence if `@clerk/nextjs` <7.2.1 / <6.39.2 / <5.7.6 in
+the lockfile; see `cat-04-mitm.md` and Phase-4 SCA for version pins);
+**MEDIUM** when only the idiom is present on a current version.
+
+Spring Security matchers excluded by servlet path:
+```
+securityMatcher\s*\(\s*["']/[^"']+["']
+<intercept-url\s+pattern\s*=
+```
+A rule for `/admin/**` can be bypassed by a request resolving to
+`/myservlet/admin/...` when the matcher drops the servlet-path component.
+Also flag Actuator-prefix leakage where an app route is declared under an
+Actuator-owned prefix:
+```
+management\.endpoint\.health\.group\.[^.]+\.additional-path
+/cloudfoundryapplication
+```
+→ **HIGH** / **CWE-636** + **CWE-306**.
+
+Express/Koa/Fastify auth middleware mounted on specific paths only:
+```
+app\.use\s*\(\s*["']/[^"']+["']\s*,\s*\w*[Aa]uth
+router\.use\s*\(\s*["']/[^"']+["']\s*,
+```
+Path-scoped auth (`app.use('/api', requireAuth)`) leaves every other
+mount point public. Prefer a global guard with an explicit public-route
+allowlist. → **HIGH** / **CWE-636** + **CWE-306** when write/exec surfaces
+sit outside the guarded prefix; **MEDIUM** as a hardening note otherwise.
+
+> Generalizable rule (all frameworks): positive-allowlist auth =
+> fail-open. Recommend **default-deny** in every `suggested_fix`.
+
+### SAML signature-wrapping (XSW)
+
+SAML response processing that validates a signature but then consumes
+assertions/attributes from a **different, unsigned (wrapped)** element —
+the signature covers element A while the application trusts element B.
+Enabled by missing canonicalization/reference checks, comment-preserving
+c14n, or two different XML parsers in one validation path (parser
+differential). 2026 resurgence: ruby-saml (CVE-2025-66567/66568),
+authentik (CVE-2026-47201), SAP NetWeaver (CVE-2026-44748, 9.9);
+PortSwigger "The Fragile Lock" (void canonicalization, attribute
+pollution, namespace confusion).
+
+Config-level tells (highest static value):
+```
+wantAssertionsSigned\s*[=:]\s*false
+wantResponseSigned\s*[=:]\s*false
+xml-c14n[^"'#]*#WithComments
+```
+Reference/element-trust tells — a signature check followed by an assertion
+read that is not pinned to the signed/validated reference:
+```
+(validateSignature|verifySignature|checkSignature)\s*\(
+getElementsByTagName\s*\(\s*["']Assertion["']
+```
+Comment-preserving c14n (`#WithComments`) should be exclusive
+canonicalization (`#xml-exc-c14n`). Two XML parsers (e.g. ReXML +
+Nokogiri, libxml2 + a hand-rolled extractor) in the same validation path
+is the differential signal. → **HIGH** / **CWE-347** (Improper
+Verification of Cryptographic Signature). Whether two parsers actually
+diverge on a crafted payload is **defer-to-human** (needs differential
+fuzzing) — flag the enabling config/shape with `confidence: POSSIBLE`.
+
+### JWT header-trust + missing iss/aud
+
+Beyond invariant #6 (`alg: none`, no algorithm allowlist), flag JWT
+verification that **trusts attacker-controlled header fields** or **omits
+issuer/audience checks**. 2026 regressions: fast-jwt PEM-anchor bypass
+(CVE-2026-34950), Hono alg-from-header (CVE-2026-22817), PyJWT
+JWK-as-HMAC (CVE-2026-48526), Parse Server `alg:none`+lax `kid`
+(CVE-2026-27804), Camel-Keycloak missing `iss` (CVE-2026-23552).
+
+`alg:none` acceptance and alg-confusion (RS256 verified as HS256 with the
+public key as the HMAC secret — a mixed-family allowlist enables it):
+```
+["']?alg["']?\s*[:=]\s*["']none["']
+algorithms\s*=\s*\[[^\]]*HS\d+[^\]]*(RS|ES|PS)\d+
+createVerifier\s*\(\s*\{(?![^}]*\balgorithms\b)
+```
+Trusting attacker-controlled `kid`/`jku`/`x5u`/`jwk` from the token
+header (key fetched from an attacker URL, or `kid` flowing into a file
+read / SQL lookup):
+```
+(header|protectedHeader|decoded(\.header)?)\.(jku|x5u|jwk|x5c)
+header\.kid\b
+```
+Verification that omits `issuer`/`audience` binding — flag a verify/decode
+call whose options block has no `iss`/`aud`:
+```
+(verify|decode)\s*\([^)]*\)(?![\s\S]{0,200}(issuer|iss|audience|aud))
+```
+→ **CRITICAL** / **CWE-347** for `alg:none`, alg-confusion, and
+`jku`/`x5u`/`kid` header-trust; **HIGH** / **CWE-345** (Insufficient
+Verification of Data Authenticity) for missing `iss`/`aud` validation.
 
 ## False-positive notes
 

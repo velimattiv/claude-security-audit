@@ -1,5 +1,9 @@
 .DS_Store
 
+# Python bytecode (from running validators locally)
+__pycache__/
+*.pyc
+
 # Orchestration scratch — never commit
 .dev-bootstrap.md
 TODO.md
@@ -8,11 +12,28 @@ TODO.md
 # so dogfooding runs against this repo don't leave artifacts behind)
 .claude-audit/
 
+# Generated audit deliverables (default output dir). Keep the human report +
+# pruned baseline trackable; ignore the bulky machine artifacts. Consumer
+# guidance: skills/security-audit/lib/output-routing.md
+docs/security-audit-output/*.sarif
+docs/security-audit-output/*.cyclonedx.json
+
+# E2E scorecard output (written next to fixtures on a manual assertions.py run)
+tests/e2e/scorecard.json
+tests/e2e/scorecard.md
+
 # Dogfood targets (cloned into /tmp, not this workspace — listed here for
 # completeness in case an operator clones into /workspace by accident)
 /tmp/audit-targets/
+
+# Local scratch space for external audit artifacts staged for analysis
+# (e.g. user copies a third-party project's .claude-audit/ here for review).
+# Never commit external project's findings to this repo.
+tmp/
 
 # Container-local tooling state (not part of the skill source)
 .claude/
 _bmad/
 _bmad-output/
+_agent-memory/
+AGENTS.md

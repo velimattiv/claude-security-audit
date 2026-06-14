@@ -41,7 +41,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # 3. Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.0.6 \
+git clone --depth 1 --branch v2.1.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
@@ -131,8 +131,8 @@ is wrong with the install.
 ## Migrating from a different `security-audit` skill
 
 If you already have a `security-audit` skill from a different
-project (e.g. an older BMAD-flavoured wrapper around `/security-review`),
-**there is no in-place upgrade path** — v2.0.2 is a fundamentally
+project (e.g. an older custom wrapper around `/security-review`),
+**there is no in-place upgrade path** — this is a fundamentally
 different skill (polyglot SARIF audit with 9-phase orchestration,
 not a review-orchestrator).
 
@@ -247,9 +247,9 @@ others.
 Verify the install path: `ls ~/.claude/skills/security-audit/SKILL.md`.
 Restart Claude Code if needed.
 
-**Audit produces only `docs/security-audit-report.md`, no
+**Audit produces only the report (under `docs/security-audit-output/`), no
 `.claude-audit/`.**
-This is the v2.0.1-era failure mode. v2.0.2's in-skill mandate
+This is the v2.0.1-era failure mode. The in-skill blackboard-first mandate
 prevents it; if you see this, the install may be incomplete.
 Re-run the verify step (cat VERSION, ls manifest.yaml).
 

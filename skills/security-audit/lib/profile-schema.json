@@ -225,6 +225,29 @@
         "frameworks_support": { "type": "array", "items": { "type": "string" } }
       }
     },
+    "mcp_agentic": {
+      "type": "object",
+      "required": ["detected"],
+      "description": "Set by Phase 0. Gates cat-11 (MCP/agentic). SEPARATE from llm_usage: an MCP server or agent tool surface is a distinct attack surface that the LLM gate would wrongly skip. Optional for back-compat — absent means not detected (cat-11 skipped).",
+      "properties": {
+        "detected": { "type": "boolean" },
+        "kind": { "enum": ["mcp-server", "mcp-client", "agent-framework", "mixed"] },
+        "servers": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "supply_chain": {
+      "type": "object",
+      "required": ["detected"],
+      "description": "Set by Phase 0. Informs cat-10 (supply chain & CI/CD), which always runs but scopes to detected ecosystems/CI. Optional for back-compat.",
+      "properties": {
+        "detected": { "type": "boolean" },
+        "ecosystems": { "type": "array", "items": { "type": "string" } },
+        "lockfiles": { "type": "array", "items": { "type": "string" } },
+        "ci_systems": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "ignore_patterns": {
       "type": "array",
       "items": { "type": "string" }

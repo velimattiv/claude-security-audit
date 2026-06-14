@@ -153,6 +153,49 @@ intent, the SSRF defenses from cat-08 apply. Specifically flag tools
 that do `fetch(model_chose_url)` without the private-range / IMDS
 blocklist. → **HIGH** / CWE-918 / LLM06.
 
+### Model-file deserialization (LLM03 / LLM04)
+
+Loading model weights / checkpoints is a code-execution sink: pickle-based
+formats execute arbitrary code on load, and `weights_only=True` /
+`picklescan` are bypassable. Untrusted-hub or user-controlled repo ids are
+a supply-chain leg (LLM03); the deserialization itself is data/model
+poisoning (LLM04).
+
+> Single source of truth: the generic deserialization call-site mechanics
+> live in `cat-08-injection-ssrf.md`, and the `torch < 2.10` `weights_only`
+> bypass threshold lives in `lib/known-vuln-versions.md`. This section adds
+> only the LLM/model-file framing (untrusted-hub repo ids, `from_pretrained`,
+> `trust_remote_code`); keep version numbers out of here to avoid drift.
+
+The generic pickle / `torch.load` / `joblib` call-site detection is **owned by
+cat-08** (CWE-502) and fires regardless of LLM usage — do NOT re-emit those
+rows here. When a cat-08 deserialization hit lands on a model/weight file in an
+LLM repo, defer to cat-08 and add `LLM03:2025` / `LLM04:2025` to that finding's
+`owasp_ids` rather than emitting a duplicate. This section flags only the
+**model-file-specific** vectors cat-08 does not cover:
+
+```
+# Loading from a hub with a user- or variable-controlled repo id
+# (untrusted-source supply chain). Check: is the id a literal trusted org,
+# or does it come from a request / variable?
+from_pretrained\s*\(
+hf_hub_download\s*\(
+
+# trust_remote_code=True executes repo-shipped Python at load time
+trust_remote_code\s*=\s*True
+```
+
+→ **HIGH** / CWE-502 / LLM03:2025 (untrusted-hub supply chain) +
+LLM04:2025. `trust_remote_code=True` on an untrusted repo is **CRITICAL**.
+
+SAFE markers (note, don't flag HIGH): `safetensors` format, hub id that
+is a hard-coded trusted org with a pinned `revision`, and torch >= 2.10
+with `weights_only=True` on a trusted file.
+
+```
+safetensors(\.torch)?\.(load_file|safe_open)
+```
+
 ## False-positive notes
 
 - **Internal-only LLM usage** — tooling that summarizes logs or

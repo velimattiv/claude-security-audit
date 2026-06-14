@@ -7,7 +7,10 @@ description.
 
 ## Preconditions
 
-1. `docs/security-audit-baseline.json` exists at the project root.
+1. The pruned baseline exists, resolved per [output-routing.md](output-routing.md):
+   `output:` arg → `.claude-audit/config.json` `.output_dir` → default
+   `docs/security-audit-output/security-audit-baseline.json` → legacy fallback
+   `docs/security-audit-baseline.json` (pre-v2.1 layout).
 2. `.claude-audit/baseline.json` also exists (the full baseline);
    delta mode uses the full one for findings carryover.
 3. The baseline's `git_head` is reachable from the current HEAD
@@ -24,7 +27,7 @@ explanation; do NOT silently re-run.
 
 ```
 baseline_full   = read(.claude-audit/baseline.json)
-baseline_pruned = read(docs/security-audit-baseline.json)
+baseline_pruned = read(<resolved pruned-baseline path>)   # see Preconditions §1
 changed_files   = git diff --name-only <baseline_full.git_head> HEAD
                     | exclude patterns from baseline_full.ignored
 ```

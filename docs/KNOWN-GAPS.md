@@ -7,7 +7,7 @@ Explicit list of v2.0.1 limitations. Each entry describes what's NOT enforced, s
 ### 1. Semantic correctness of findings
 The suite validates *structural* conformance (schema, CWE-in-map, section headers) and *coverage* (fixture list matches). It does NOT verify that a finding's description is accurate — a sub-agent could emit "SQL injection" when the actual bug is XSS, as long as it satisfies (file, cwe, category).
 
-**Mitigation available:** the fixture's `description` field is human-readable; a reviewer comparing fixture text to actual finding text would catch gross mismatches. Not automated.
+**Mitigation available:** the fixture's `description` field is human-readable; a reviewer comparing fixture text to actual finding text would catch gross mismatches. Not automated. **v2.1 update:** fixture schema v3 adds `negative_expectations[]` decoys and a precision/recall/F1 scorecard (`tests/e2e/assertions.py` → `scorecard.json`/`.md`), giving the first automated false-positive signal — a different axis than semantic accuracy, but the suite is no longer coverage-only.
 
 ### 2. Report body content
 `check_report_sections` verifies section headers are present. It does NOT check that the sections have non-trivial content. A report with `## Executive Summary` followed by an empty line then the next header would pass.
@@ -44,12 +44,29 @@ The assertion suite validates against Juice Shop v19.2.1 + the 12-entry fixture.
 ## Deferred to v2.1
 
 Tracked in `docs/ROADMAP.md`:
-- **GHA-hosted E2E** (Max-auth resolution)
-- **Second polyglot E2E target** (DVWA for PHP, Go repo for TLS)
-- **AST-based handler hashing** (replaces content hash)
-- **Pre-commit recipe** (sub-second incremental checks)
-- **ASVS L3 support**
-- **Non-English codebase framework detection**
+- **GHA-hosted E2E** (Max-auth resolution) — still deferred.
+- ~~**Second polyglot E2E target**~~ — **delivered in v2.1**: DVWA (PHP) +
+  OWASP crAPI (Java/Go/Python) fixtures, `--target` selectable.
+- **AST-based handler hashing** (replaces content hash) — still deferred.
+- **Pre-commit recipe** (sub-second incremental checks) — still deferred.
+- **ASVS L3 support** — still deferred.
+- **Non-English codebase framework detection** — still deferred.
+
+New v2.1 deferrals (see `docs/EPIC-v2.1-refresh.md` §4 + `docs/ROADMAP.md`):
+- **Opengrep engine swap + rule-licensing posture** — held for owner sign-off
+  (legal one-way door; the skill does not vendor Semgrep rule packs, which
+  lowers urgency).
+- **Live-container E2E for v2.1** — not run here (pre-existing Max-auth
+  blocker). The static assertion suite + new scorecard logic are updated and
+  internally consistent; a host run with Claude auth is still required to
+  exercise the new categories end-to-end.
+- **CWE↔OWASP-tag pair validator** — `validate-schemas.sh` checks the *shape*
+  of `owasp_ids` and that CWEs exist in the map, but does NOT assert that a
+  finding's `CWE-N / A##:2025` pairing matches `lib/owasp-web-top10.md`. Two
+  Gate-C rounds each caught a hand-authored tag mismap (cat-07, then cat-06)
+  that all validators passed green. A machine-readable CWE→A## map + a §
+  asserting each pair would prevent recurrence. Deferred (needs the mapping
+  encoded as data first).
 
 ## Reporting a new gap
 

@@ -24,6 +24,8 @@ empty ones. Keep the executive summary to one page.
 - **Partitions audited:** {{n_partitions_full}} at full depth + {{n_partitions_inventory}} inventory-only
 - **Attack surface:** {{n_surfaces}} entry points across {{n_categories}} categories
 - **Unique-to-skill findings:** {{n_unique}} (not flagged by any scanner or built-in review)
+- **CWE Top 25 (2025) hits:** {{cwe_top25_hits}} (highest-ranked #{{cwe_top25_top_rank}})
+- **Exploit-likely (EPSS ≥ 0.10 or CISA-KEV):** {{exploit_likely_count}}
 
 ### Top Risks
 
@@ -36,11 +38,14 @@ empty ones. Keep the executive summary to one page.
 | Methodology | Coverage | Findings |
 |---|---|---|
 | OWASP ASVS 5.0 L2 | {{asvs_pct}}% | {{asvs_count}} |
+| OWASP Top 10:2025 (web) | {{web_top10_cat_count}}/10 categories fired | {{web_top10_total}} |
 | OWASP API Top 10 (2023) | {{api_cat_count}}/10 categories fired | {{api_total}} |
 | OWASP LLM Top 10 (2025) | {{llm_status}} | {{llm_count}} |
+| OWASP Agentic Apps (2026) | {{agentic_status}} | {{agentic_count}} |
 | LINDDUN (privacy) | {{linddun_status}} | {{linddun_count}} |
 | STRIDE | {{stride_partition_count}} partitions covered | see Appendix C |
 | CWE tags | {{unique_cwe_count}} unique CWE IDs | — |
+| MITRE CWE Top 25 (2025) | {{cwe_top25_hits}}/25 hit (top #{{cwe_top25_top_rank}}) | {{cwe_top25_count}} |
 
 ---
 
@@ -80,8 +85,9 @@ empty ones. Keep the executive summary to one page.
 > - **Severity:** {{severity}} · **Confidence:** {{confidence}}
 > - **Category:** {{category}} · **Partition:** {{partition}}
 > - **Location:** {{file}}:{{line}}
-> - **CWE:** [{{cwe}}](https://cwe.mitre.org/data/definitions/{{cwe_number}}.html)
+> - **CWE:** [{{cwe}}](https://cwe.mitre.org/data/definitions/{{cwe_number}}.html){{cwe_top25_badge}}
 > - **OWASP:** {{owasp_ids_joined}}
+> - **Exploit signal:** {{epss_kev_badge}} (omit line if neither EPSS nor KEV present)
 > - **Sources:** {{sources_joined}}
 > - **Description:** {{description}}
 > - **Attack scenario:** {{attack_scenario}}
@@ -136,6 +142,10 @@ specific value-add.
 ## Remediation Roadmap
 
 Grouped by estimated effort (from each finding's `remediation_effort`).
+
+### Exploit-likely (fix first — EPSS ≥ 0.10 or CISA-KEV)
+
+{{exploit_likely_list}}
 
 ### Trivial (≤1 hour)
 

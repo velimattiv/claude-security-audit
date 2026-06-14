@@ -1,11 +1,12 @@
 {
   "target": "juice-shop@v19.2.1",
-  "schema_version": 2,
-  "notes": "Each expectation must be matched by at least one row in findings.sarif OR any phase-05-<cat>-*.jsonl OR the phase-06 methodology JSONLs. Match rule (see tests/e2e/assertions.py): finding.file normalizes to repo-relative and glob-matches `file_pattern` (or any `alternate_file_patterns`) AND finding.cwe equals `cwe` (or is in `alternate_cwes`) AND finding.category equals `category` (or is in `alternate_categories`). A missing expectation fails the E2E.",
+  "schema_version": 3,
+  "notes": "Each expectation must be matched by at least one row in findings.sarif OR any phase-05-<cat>-*.jsonl OR the phase-06 methodology JSONLs. Match rule (see tests/e2e/assertions.py): finding.file normalizes to repo-relative and glob-matches `file_pattern` (or any `alternate_file_patterns`) AND finding.cwe equals `cwe` (or is in `alternate_cwes`) AND finding.category equals `category` (or is in `alternate_categories`). A missing expectation fails the E2E. v3 adds negative_expectations[] (decoys) — SAFE locations that MUST NOT produce a finding; a finding landing on one counts as a false positive in the precision/recall scorecard (tests/e2e/scorecard.{json,md}).",
 
   "schema_changelog": {
     "v1": "initial: cwe + category + file_pattern with optional alternate_file_patterns",
-    "v2": "added alternate_cwes (for CWE-precision drift across skill versions) and alternate_categories (for Phase 6 cross-category hits — e.g., a cookie secret found by cat-06 as secret_sprawl AND by §6.3 cookie-audit as config)"
+    "v2": "added alternate_cwes (for CWE-precision drift across skill versions) and alternate_categories (for Phase 6 cross-category hits — e.g., a cookie secret found by cat-06 as secret_sprawl AND by §6.3 cookie-audit as config)",
+    "v3": "added negative_expectations[] — decoys (safe locations a naive auditor might false-positive on). Each is {id, file_pattern, forbidden_cwe?|forbidden_category?, min_severity?, rationale}. A finding on a decoy that matches the forbidden tuple (and meets min_severity, default MEDIUM) is a FALSE POSITIVE. Drives the precision/recall/F1 scorer; backward compatible — a fixture with no negative_expectations[] yields precision=1.0 (no FP denominator) and the existing coverage gate is unchanged."
   },
 
   "expectations": [
@@ -126,10 +127,45 @@
     }
   ],
 
+  "negative_expectations": [
+    {
+      "id": "neg-01",
+      "description": "v19.2.1 Dockerfile is hardened (multi-stage, distroless gcr.io/distroless base, USER 65532 non-root). Flagging it as a deployment HIGH/CRITICAL is a false positive.",
+      "file_pattern": "Dockerfile",
+      "forbidden_category": "deployment",
+      "forbidden_cwes": ["CWE-250", "CWE-1188", "CWE-276", "CWE-732"],
+      "min_severity": "HIGH",
+      "rationale": "Decoy (b) from research note §1: hardened container twin. A naive auditor that flags every Dockerfile for 'runs as root' false-positives here — the image runs as USER 65532 on distroless. Only HIGH+ deployment findings on this file count as FP; an informational note does not."
+    },
+    {
+      "id": "neg-02",
+      "description": "Parameterized/ORM query path — Sequelize model finders (findByPk / findOne with where-objects) are NOT SQL injection.",
+      "file_pattern": "models/*.ts",
+      "forbidden_cwe": "CWE-89",
+      "forbidden_category": "injection",
+      "min_severity": "MEDIUM",
+      "rationale": "Decoy (c): safe handler adjacent to the e2e-06 SQLi. The model layer uses parameterized Sequelize finders; a finding tagging models/*.ts as CWE-89 is a classic ORM false-positive (the real SQLi is the raw sequelize.query template literal in routes/login.ts)."
+    },
+    {
+      "id": "neg-03",
+      "description": "bcrypt-based password verification helper — using bcrypt is correct, not a weak-hash finding.",
+      "file_pattern": "lib/insecurity.ts",
+      "forbidden_cwe": "CWE-916",
+      "forbidden_category": "crypto",
+      "min_severity": "MEDIUM",
+      "rationale": "Decoy (c): the file legitimately contains the MD5 misuse (e2e-12) AND a correct bcrypt path. A scorer that double-flags the whole file as weak-hashing on the bcrypt lines would false-positive. The forbidden tuple here is intentionally the SAME cwe/category as e2e-12; the matcher resolves the conflict by giving a TP precedence over an FP when a finding could satisfy both (see assertions.py score_findings)."
+    }
+  ],
+
   "gated_categories": {
     "token_scope": "Juice Shop has no PAT/scope system. JWT only; covered by auth expectations. No ground truth in this target; validate in a v2.1 dogfood on a different target.",
     "mitm": "Juice Shop's outbound TLS is minimal (ethers WebSocketProvider, chatbot data download). Expect non-zero cat-04 output if outbound clients are enumerated, but no fixture here.",
-    "deployment": "v19.2.1's Dockerfile is distroless + USER 65532 + multi-stage — hardened. No HIGH/CRITICAL deployment-category ground truth in this target. Supplement with DVWA/v2.1.",
-    "llm": "phase-00-profile detects no LLM SDK in Juice Shop. cat-09 will be gated off. Expected: no phase-05-llm-*.jsonl file produced; assertion suite treats this as pass-via-skip."
+    "deployment": "v19.2.1's Dockerfile is distroless + USER 65532 + multi-stage — hardened. No HIGH/CRITICAL deployment-category ground truth in this target. Supplement with DVWA/v2.1. (See negative_expectations neg-01: the hardened Dockerfile is a decoy.)",
+    "llm": "phase-00-profile detects no LLM SDK in Juice Shop. cat-09 will be gated off. Expected: no phase-05-llm-*.jsonl file produced; assertion suite treats this as pass-via-skip.",
+    "agentic": "Gated on profile.mcp_agentic.detected. Juice Shop has no MCP server / agent / tool-definition surface, so phase-00-profile sets mcp_agentic.detected=false and cat-agentic is gated off. Expected: NO phase-05-agentic-*.jsonl produced. An absent agentic JSONL is a LEGITIMATE skip, not a failure — do NOT demand agentic findings on a target with no MCP surface. (S5.x / Safeguard #6.)"
+  },
+
+  "always_on_categories": {
+    "supply_chain": "ALWAYS-ON — never gated, on every target. Documented here (NOT in gated_categories, so the empty-JSONL excuse does not apply). Juice Shop has package.json + lockfile, so cat-supply_chain is expected to execute. No specific supply_chain fixture (dependency CVEs drift with the lockfile), so this fixture neither asserts a supply_chain finding nor excuses an absent JSONL: a present, non-empty (or .done-marked) phase-05-supply_chain-*.jsonl is the contract."
   }
 }

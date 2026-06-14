@@ -10,7 +10,7 @@
 # for the E2E assertion suite. Prose files are authoritative for the
 # orchestrator model's behavior.
 #
-# Consumers as of 2.0.2:
+# Consumers (current as of 2.1.0):
 #   - tests/e2e/assertions.py — reads phases[].required_outputs and
 #     phases[].forbidden_outputs to cross-check artifact presence /
 #     absence on disk.
@@ -43,14 +43,16 @@
 
 schema_version: 1
 skill: security-audit
-skill_version: 2.0.2
+skill_version: 2.1.0
 
 description: |
   Per-phase contract. Every phase MUST produce the listed required_outputs
   on disk before advancing. A run is INVALID if it produces the human
-  report (docs/security-audit-report.md) without the .claude-audit/current/
+  report (<output_dir>/security-audit-report.md, default
+  docs/security-audit-output/) without the .claude-audit/current/
   blackboard. Downstream integrations (delta mode, GitHub Security tab,
-  CI gating, fixture-based E2E) all depend on the blackboard.
+  CI gating, fixture-based E2E) all depend on the blackboard. Output-dir
+  resolution: see lib/output-routing.md.
 
 # Glob paths are relative to the skill-user's project root.
 
@@ -167,6 +169,15 @@ phases:
         - {id: deployment,    file: steps/deepdive/cat-07-deployment.md,      gate: always}
         - {id: injection,     file: steps/deepdive/cat-08-injection-ssrf.md,  gate: always}
         - {id: llm,           file: steps/deepdive/cat-09-llm.md,             gate: "profile.llm_usage.detected == true && profile.llm_usage.kind != 'internal'"}
+        - {id: supply_chain,  file: steps/deepdive/cat-10-supply-chain.md,    gate: always}
+        - {id: agentic,       file: steps/deepdive/cat-11-mcp-agentic.md,     gate: "profile.mcp_agentic.detected == true"}
+      # 11 categories total (9 always-on incl. supply_chain; llm + agentic
+      # gated). With concurrency_cap 8, category×partition pairs queue into
+      # successive waves — the cap bounds concurrency, not total pairs. Phase 7
+      # synthesis globs phase-05-*.jsonl, so phase-05-supply_chain-*.jsonl and
+      # phase-05-agentic-*.jsonl are ingested automatically. A gated category
+      # that does not fire (e.g. agentic when mcp_agentic.detected is false)
+      # is a legitimate skip recorded in phase-05-skipped.json.
 
   - id: 6
     name: Config + Methodology Spine
@@ -182,6 +193,13 @@ phases:
       - path: .claude-audit/current/phase-06-api-top10.jsonl
       - path: .claude-audit/current/phase-06-llm-top10.jsonl
         empty_if_gated: "profile.llm_usage.detected == false || profile.llm_usage.kind == 'internal'"
+      - path: .claude-audit/current/phase-06-web-top10.jsonl
+        # OWASP Top 10:2025 (web) roll-up (§6.16). Always written — pure
+        # roll-up from existing findings' CWEs; never gated.
+      - path: .claude-audit/current/phase-06-agentic-top10.jsonl
+        # OWASP Agentic Apps 2026 lens (§6.17). Always written; zero-byte
+        # when the gate is off.
+        empty_if_gated: "profile.mcp_agentic.detected != true"
       - path: .claude-audit/current/phase-06-linddun.jsonl
         empty_if_gated: "profile.pii.detected == false"
       - path_glob: .claude-audit/current/phase-06-stride/*.md
@@ -216,7 +234,7 @@ phases:
           - security-severity   # CVSS-style numeric string, required for GitHub Security tab
           - cwe                  # e.g. "CWE-798" — required for fixture matching + baseline carryover
         per_result_recommended_properties:
-          - category             # one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, config
+          - category             # one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, supply_chain, agentic, config
       - path: .claude-audit/current/findings.cyclonedx.json
       - path: .claude-audit/current/phase-07.done
     sub_agent_fan_out: none
@@ -230,20 +248,25 @@ phases:
       - "audit.log has CRITICAL runtime-error entries"
     required_outputs:
       - path: .claude-audit/baseline.json
-      - path: docs/security-audit-baseline.json
+      - path: docs/security-audit-output/security-audit-baseline.json
+        # Default output dir; actual dir resolved per lib/output-routing.md and
+        # recorded in .claude-audit/config.json (.output_dir).
       - path: .claude-audit/current/phase-08.done
     sub_agent_fan_out: none
 
 final_outputs:
-  # Copied from .claude-audit/current/phase-07-report.md at the end of Phase 7.
-  - path_conditional:
-      if_exists: _bmad-output/
-      then: _bmad-output/implementation-artifacts/security-audit-report.md
-      else: docs/security-audit-report.md
+  # Copied from .claude-audit/current/ to <output_dir>/ at the end of Phase 7
+  # (report/sarif/cyclonedx) and Phase 8 (pruned baseline). <output_dir> is
+  # resolved per lib/output-routing.md (default docs/security-audit-output/);
+  # a non-default dir is recorded in .claude-audit/config.json (.output_dir).
+  - path: docs/security-audit-output/security-audit-report.md
+  - path: docs/security-audit-output/findings.sarif
+  - path: docs/security-audit-output/findings.cyclonedx.json
+  - path: docs/security-audit-output/security-audit-baseline.json
 
 invariants:
   - Every phase writes its .done marker AFTER its artifacts exist on disk.
-  - A run that produces only docs/security-audit-report.md without .claude-audit/current/* is INVALID.
+  - A run that produces only the user-facing report (in <output_dir>/, default docs/security-audit-output/) without .claude-audit/current/* is INVALID.
   - SARIF results without properties.cwe break the E2E regression test's fixture-matching.
   - Consolidated phase-05-<foo>.json files (v1-era shape) break Phase 7 per-category aggregation.
   - Skipping Phase 5 fan-out in favor of serial single-pass coverage regresses the E2E test (misses alg:none, 2FA, zip-slip, LFI).

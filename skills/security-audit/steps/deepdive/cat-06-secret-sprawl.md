@@ -104,6 +104,56 @@ printf\b.*(?:token|password)
 
 → **HIGH** / CWE-532.
 
+### MCP-config secret sweep
+
+MCP (Model Context Protocol) server configs are a 2026 secret-leak
+hotspot — GitGuardian's *State of Secrets Sprawl 2026* found **24,008
+secrets in MCP config files** (8.8% still valid). Secrets land in the
+`env`, `headers`, `args`, and `Authorization` fields of server
+definitions. Sweep these globs:
+
+```
+.*[\\/]?\.mcp\.json$
+.*[\\/]?mcp\.json$
+.*[\\/].cursor[\\/]mcp\.json$
+claude_desktop_config\.json$
+.*mcp.*\.(?:json|toml)$
+```
+
+Within those files, flag literal-looking secret values (not `${VAR}` /
+`{{ }}` references) under the secret-bearing keys:
+
+```
+(?i)(?:[A-Z0-9_]*(?:TOKEN|API[_-]?KEY|SECRET|PASSWORD|ACCESS[_-]?KEY))["']?\s*[:=]\s*["'][A-Za-z0-9_\-./+=]{12,}
+(?i)"Authorization"\s*:\s*"(?:Bearer\s+|Basic\s+|token\s+)?[A-Za-z0-9_\-.=]{12,}
+(?i)"(?:env|headers)"\s*:\s*\{
+sk-[A-Za-z0-9]{16,}
+(?i)(?:ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{16,}
+\b(?:AKIA|ASIA)[A-Z2-7]{16}\b
+```
+
+- A `*_TOKEN` / `*_API_KEY` / `*_SECRET` / `*_PASSWORD` key whose value is
+  a literal high-entropy string (not a `${VAR}` reference) → **HIGH**
+  (escalate to **CRITICAL** if the file is git-tracked) / CWE-798 /
+  A07:2025.
+- An `Authorization` header with an inline `Bearer` / `Basic` literal →
+  **HIGH** / CWE-522 / A04:2025.
+- Any tracked MCP config containing a literal secret (vs. an env-var
+  reference) is leaked-at-rest → **CRITICAL** / CWE-538 / A02:2025.
+
+The `"env"` / `"headers"` object-open patterns are *locators*: when one
+matches, inspect the nested values against the literal-secret patterns
+above and the Phase 4 scanner hits. Cross-ref `gitleaks` /
+`trufflehog` output (their 2026 detector additions cover GitLab
+fine-grained PATs, Cloudflare API v2, Datadog, JFrog ref-tokens, etc.)
+and reconcile per the "Vendor-specific token regexes" sweep above. See
+`cat-11-mcp-agentic.md` for the non-secret MCP attack surface (tool
+poisoning, command injection) — this sweep is the *secret-sprawl* slice
+only.
+
+*Static-only:* whether a found MCP token is currently **valid/active** is
+**out of scope: flag location, defer to human**.
+
 ### Secrets in error responses
 
 grep for:
@@ -126,6 +176,15 @@ CWE-209.
   to be public — not a finding.
 - **Logging a hashed secret** (e.g., sha256 of a token for correlation)
   is fine.
+- **MCP configs that reference env vars** (`"API_KEY": "${MY_KEY}"` /
+  `"${env:TOKEN}"` / `"{{ secrets.X }}"`) are the *correct* pattern — not
+  a finding. Only inline literal values are flagged.
+- **Example / template MCP configs** (`.mcp.json.example`,
+  `mcp.json.sample`, values literally `your-token-here` / `<TOKEN>` /
+  `replace-me`) → INFO only.
+- **Public, non-secret MCP endpoints** (a plain `"url"` with no auth
+  material, or a Bearer value that is a documented public demo token) →
+  LOW; confirm with a human rather than treating as CRITICAL.
 
 ## Output
 

@@ -37,9 +37,13 @@ hints are authoritative for `scripts/install-scanners.sh`.
 
 - **Role.** Verified-secret sweep (validates credentials against vendor APIs).
 - **Install.** `curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin` (read before running on your host).
-- **Invoke.** `trufflehog git file://. --json --only-verified > phase-04-scanners/trufflehog.json`
+- **Invoke.** `trufflehog git file://. --json --results=verified > phase-04-scanners/trufflehog.json`
+  - Flag note: `--only-verified` is soft-deprecated as of trufflehog 3.88+ in
+    favour of `--results=verified` (which also accepts `unknown`/`unverified`).
+    `--only-verified` still works on 3.95.x but emits a deprecation notice;
+    use `--results=verified`.
 - **Output.** JSONL; convert to SARIF during post-processing.
-- **Caveat.** `--only-verified` makes network calls to vendor APIs. Document this in the report's provenance section. A `--no-verification` alternative exists if outbound calls are disallowed.
+- **Caveat.** `--results=verified` makes network calls to vendor APIs. Document this in the report's provenance section. A `--no-verification` alternative exists if outbound calls are disallowed.
 
 ### trivy
 
@@ -78,10 +82,21 @@ hints are authoritative for `scripts/install-scanners.sh`.
 - **Invoke.** `kube-linter lint --format sarif ./... > phase-04-scanners/kube-linter.sarif`
 - **License.** Apache-2.0.
 
-### grype (optional — EPSS prioritization)
+### grype (optional — EPSS + KEV prioritization)
+
+Promoted in v2.1 to a first-class prioritization input. grype's vulnerability
+DB carries **EPSS** (exploit-probability) scores and **CISA KEV** (known-
+exploited) flags; Phase 7 uses them to rank findings and stamps them onto the
+matching SARIF results as `properties.epss` and `properties.kev`.
 
 - **Install.** Prebuilt binary from `anchore/grype/releases`.
-- **Invoke.** `grype dir:. -o sarif > phase-04-scanners/grype.sarif`
+- **Invoke (SARIF, for findings).** `grype dir:. -o sarif > phase-04-scanners/grype.sarif`
+- **Invoke (JSON, for EPSS/KEV).** `grype dir:. -o json > phase-04-scanners/grype.json`
+  — Phase 7 reads `.matches[].vulnerability.epss[0].epss` (probability) and
+  `.matches[].vulnerability.knownExploited` (KEV) and joins on CVE/GHSA id.
+- **Synthesis use.** EPSS ≥ 0.10 or KEV=true on an otherwise-MEDIUM finding is
+  surfaced in the report's "Exploit-likely" callout; EPSS/KEV never *lower*
+  severity (prioritization only, additive — consistent with the ±1-rung cap).
 - **License.** Apache-2.0.
 
 ### govulncheck (gate: Go detected)
@@ -94,13 +109,20 @@ hints are authoritative for `scripts/install-scanners.sh`.
 ### psalm (gate: PHP detected)
 
 - **Install.** `composer require --dev vimeo/psalm`, then `./vendor/bin/psalm --init`.
-- **Invoke.** `./vendor/bin/psalm --taint-analysis --output-format=sarif > phase-04-scanners/psalm.sarif`
+- **Invoke.** `./vendor/bin/psalm --taint-analysis --report=phase-04-scanners/psalm.sarif`
+  - Flag note: psalm writes SARIF via `--report=<file>.sarif` (format inferred
+    from the `.sarif` extension), **not** `--output-format=sarif` — `sarif` is
+    not a valid `--output-format` value (that flag controls console output).
 - **License.** MIT.
 
 ### zizmor (gate: `.github/workflows/*.yml` present)
 
-- **Install.** Prebuilt binary from `woodruffw/zizmor/releases` (Rust).
-- **Invoke.** `zizmor . --format sarif > phase-04-scanners/zizmor.sarif`
+- **Install.** Prebuilt binary from `zizmorcore/zizmor/releases` (Rust). The
+  project moved from `woodruffw/zizmor` to the `zizmorcore` org; the old repo
+  redirects but pin the new path. `cargo install zizmor` also works.
+- **Invoke.** `zizmor --format=sarif . > phase-04-scanners/zizmor.sarif`
+  - Flag note: recent zizmor expects `--format=sarif` (the `=` form). Verify
+    `zizmor --help` against the installed version if SARIF output is empty.
 - **License.** MIT.
 
 ## Excluded by default (documented in README)

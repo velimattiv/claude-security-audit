@@ -31,7 +31,7 @@ A `/security-audit` run is **only valid** when it produces, on disk, all of:
 - `.claude-audit/current/phase-NN.done` markers for every completed phase
 - `.claude-audit/current/findings.sarif` (SARIF 2.1.0)
 - `.claude-audit/current/findings.cyclonedx.json`
-- `docs/security-audit-report.md` (the human report — but NEVER as the only output)
+- `<output_dir>/security-audit-report.md` (default `docs/security-audit-output/`; the human report — but NEVER as the only output). See [lib/output-routing.md](lib/output-routing.md).
 
 **Producing only the human report is INVALID.** You will be tempted to
 short-circuit when you see Juice Shop / a small repo / a tight time
@@ -122,11 +122,12 @@ The user may pass arguments after `/security-audit`:
 | Form | Meaning |
 |---|---|
 | `/security-audit` | Full audit, default mode. |
-| `/security-audit mode: delta` | Delta mode — requires `docs/security-audit-baseline.json`. |
+| `/security-audit mode: delta` | Delta mode — requires a prior baseline (resolved per [lib/output-routing.md](lib/output-routing.md): default `docs/security-audit-output/security-audit-baseline.json`, legacy `docs/security-audit-baseline.json`). |
 | `/security-audit scope: "services/api"` | Scope all phases to the path prefix. |
 | `/security-audit categories: "crypto,mitm,secret_sprawl"` | Run only the named deep-dive categories. |
 | `/security-audit mode: report` | Re-emit the report from existing `.claude-audit/current/` artifacts. |
 | `/security-audit top_n: 12` | Override the top-N partitions that get full-depth deep dives (default: 8). |
+| `/security-audit output: reports/sec` | Where to write deliverables (report, SARIF, SBOM, pruned baseline). Default `docs/security-audit-output/`. See [lib/output-routing.md](lib/output-routing.md). |
 
 Canonical form is `key: value` separated by spaces. If the user's phrasing is
 ambiguous, ask once for clarification before starting — do not guess.
@@ -178,6 +179,14 @@ category names (applied during `categories:` parsing):
 | `deserialize` | `injection` |
 | `llm` | `llm` |
 | `ai` | `llm` |
+| `supply_chain` | `supply_chain` |
+| `supply-chain` | `supply_chain` |
+| `supplychain` | `supply_chain` |
+| `sca` | `supply_chain` |
+| `cicd` | `supply_chain` |
+| `agentic` | `agentic` |
+| `mcp` | `agentic` |
+| `agent` | `agentic` |
 
 Aliases are case-insensitive. Unknown tokens → warn and stop.
 
@@ -218,10 +227,10 @@ Before any phase runs:
 | 2 | Attack Surface Inventory | `steps/phase-02-surface.md` | `phase-02-surface.json` |
 | 3 | Keystone File Index | `steps/phase-03-keystone.md` | `cache/keystone-files.json` |
 | 4 | External Inputs (scanners) | `steps/phase-04-scanners.md` | `phase-04-scanners/*.sarif` |
-| 5 | Parallel Deep Dives (9 cat) | `steps/phase-05-deepdives.md` | `phase-05-<cat>-<partition>.jsonl` |
+| 5 | Parallel Deep Dives (11 cat) | `steps/phase-05-deepdives.md` | `phase-05-<cat>-<partition>.jsonl` |
 | 6 | Config + Methodology Spine | `steps/phase-06-config.md` | `phase-06-config.json`, `asvs.jsonl` |
 | 7 | Synthesis & Report | `steps/phase-07-synthesis.md` | `phase-07-report.md`, `findings.sarif` |
-| 8 | Baseline Persistence | `steps/phase-08-baseline.md` | `baseline.json`, `docs/security-audit-baseline.json` |
+| 8 | Baseline Persistence | `steps/phase-08-baseline.md` | `baseline.json`, `<output_dir>/security-audit-baseline.json` |
 
 Phases beyond M1 are tracked as **not yet implemented** until their
 milestone lands. When you reach an unimplemented phase in a development build,
@@ -250,6 +259,25 @@ phase N+1 without proof on disk that phase N produced what it owes.**
 This is the single most common way previous runs degraded into
 "report-only" output that broke delta mode.
 
+## 3.5 Resolve the output directory (preflight, before Phase 0)
+
+Immediately after the blackboard preflight, resolve `output_dir` following
+[lib/output-routing.md](lib/output-routing.md) (first match wins):
+
+1. `output:` arg, if given.
+2. `.claude-audit/config.json` `.output_dir`, if a prior run set it.
+3. **Ask the user** (one question) — ONLY when interactive: `[ -t 0 ]` AND `$CI`
+   unset AND not `--dangerously-skip-permissions` /
+   `$CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS`. Default offered:
+   `docs/security-audit-output/`.
+4. Otherwise default to `docs/security-audit-output/` (log it; never block).
+
+Then persist it: merge `{"output_dir": "<resolved>"}` into
+`.claude-audit/config.json`. All later references to `<output_dir>` use this
+value. Deliverables are written to `<output_dir>/` as the final step of
+Phase 7 / Phase 8, AFTER the canonical `.claude-audit/current/` copies exist
+(blackboard-first).
+
 ## 4. Mode-Specific Orchestration
 
 ### full
@@ -259,10 +287,12 @@ Run phases 0→8 in order. Fan-out Phase 5 per §5 below.
 
 Delta mode prerequisites, enforced as a preflight gate (before Phase 0 runs):
 
-1. **Baseline presence.** `docs/security-audit-baseline.json` AND
-   `.claude-audit/baseline.json` must both exist. If either is missing,
-   abort with: *"Delta mode requires a baseline. Run `/security-audit`
-   in full mode first, then retry."*
+1. **Baseline presence.** The pruned baseline (resolved per
+   [lib/output-routing.md](lib/output-routing.md): `output:` arg →
+   `.claude-audit/config.json` → `docs/security-audit-output/security-audit-baseline.json`
+   → legacy `docs/security-audit-baseline.json`) AND `.claude-audit/baseline.json`
+   must both exist. If either is missing, abort with: *"Delta mode requires a
+   baseline. Run `/security-audit` in full mode first, then retry."*
 
 2. **Baseline age — MUST enforce in code, not prose.** Compute:
    ```bash
@@ -415,17 +445,18 @@ artifact; everything else stays on disk.
 
 ## 8. Final Output
 
-Save the human report to:
-- `_bmad-output/implementation-artifacts/security-audit-report.md` if
-  `_bmad-output/` already exists in the project (BMAD compatibility).
-- Otherwise `docs/security-audit-report.md`.
-
-Always also write:
+Canonical machine state is always written to the blackboard FIRST:
 - `.claude-audit/current/findings.sarif` (SARIF 2.1.0)
 - `.claude-audit/current/findings.cyclonedx.json` (SBOM, when scanners can
   produce one).
-- `docs/security-audit-baseline.json` (pruned; checked in)
 - `.claude-audit/baseline.json` (full; gitignored)
+
+Then copy the deliverables to the resolved `<output_dir>` (default
+`docs/security-audit-output/`, see [lib/output-routing.md](lib/output-routing.md)):
+- `<output_dir>/security-audit-report.md` (the human report)
+- `<output_dir>/findings.sarif`
+- `<output_dir>/findings.cyclonedx.json`
+- `<output_dir>/security-audit-baseline.json` (pruned; checked in)
 
 Present a short summary to the user with counts by severity, a pointer to the
 report path, and the three next-step options from v1:

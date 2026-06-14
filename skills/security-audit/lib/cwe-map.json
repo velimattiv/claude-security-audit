@@ -79,6 +79,24 @@
     "CWE-1007": { "name": "Insufficient Visual Distinction of Homoglyphs Presenting to User (generic fallback)", "category": "config" },
     "CWE-1035": { "name": "OWASP Top Ten 2017 Category A6 — Security Misconfiguration", "category": "config" },
     "CWE-1059": { "name": "Incomplete Comments",                       "category": "config" },
-    "CWE-1275": { "name": "Sensitive Cookie with Improper SameSite Attribute", "category": "config" }
+    "CWE-1275": { "name": "Sensitive Cookie with Improper SameSite Attribute", "category": "config" },
+    "CWE-250":  { "name": "Execution with Unnecessary Privileges",            "category": "deployment" },
+    "CWE-269":  { "name": "Improper Privilege Management",                    "category": "agentic" },
+    "CWE-444":  { "name": "Inconsistent Interpretation of HTTP Requests ('HTTP Request/Response Smuggling')", "category": "mitm" },
+    "CWE-494":  { "name": "Download of Code Without Integrity Check",         "category": "supply_chain" },
+    "CWE-506":  { "name": "Embedded Malicious Code",                          "category": "supply_chain" },
+    "CWE-636":  { "name": "Not Failing Securely ('Failing Open')",            "category": "auth" },
+    "CWE-668":  { "name": "Exposure of Resource to Wrong Sphere",             "category": "agentic" },
+    "CWE-1104": { "name": "Use of Unmaintained Third Party Components",       "category": "supply_chain" },
+    "CWE-1321": { "name": "Improperly Controlled Modification of Object Prototype Attributes ('Prototype Pollution')", "category": "injection" },
+    "CWE-1357": { "name": "Reliance on Insufficiently Trustworthy Component", "category": "supply_chain" },
+    "CWE-1395": { "name": "Dependency on Vulnerable Third-Party Component",   "category": "supply_chain" },
+    "CWE-1426": { "name": "Improper Validation of Generative AI Output",      "category": "agentic" },
+    "CWE-1427": { "name": "Improper Neutralization of Input Used for LLM Prompting ('Prompt Injection')", "category": "agentic" },
+    "CWE-16":   { "name": "Configuration",                                    "category": "config" },
+    "CWE-73":   { "name": "External Control of File Name or Path",            "category": "injection" },
+    "CWE-98":   { "name": "Improper Control of Filename for Include/Require Statement in PHP Program ('PHP Remote File Inclusion')", "category": "injection" },
+    "CWE-646":  { "name": "Reliance on File Name or Extension of Externally-Supplied File", "category": "injection" },
+    "CWE-1188": { "name": "Initialization of a Resource with an Insecure Default", "category": "deployment" }
   }
 }
