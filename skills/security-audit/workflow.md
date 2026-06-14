@@ -219,7 +219,7 @@ Before any phase runs:
 | 2 | Attack Surface Inventory | `steps/phase-02-surface.md` | `phase-02-surface.json` |
 | 3 | Keystone File Index | `steps/phase-03-keystone.md` | `cache/keystone-files.json` |
 | 4 | External Inputs (scanners) | `steps/phase-04-scanners.md` | `phase-04-scanners/*.sarif` |
-| 5 | Parallel Deep Dives (9 cat) | `steps/phase-05-deepdives.md` | `phase-05-<cat>-<partition>.jsonl` |
+| 5 | Parallel Deep Dives (11 cat) | `steps/phase-05-deepdives.md` | `phase-05-<cat>-<partition>.jsonl` |
 | 6 | Config + Methodology Spine | `steps/phase-06-config.md` | `phase-06-config.json`, `asvs.jsonl` |
 | 7 | Synthesis & Report | `steps/phase-07-synthesis.md` | `phase-07-report.md`, `findings.sarif` |
 | 8 | Baseline Persistence | `steps/phase-08-baseline.md` | `baseline.json`, `<output_dir>/security-audit-baseline.json` |

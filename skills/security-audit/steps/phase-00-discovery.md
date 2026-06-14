@@ -255,6 +255,56 @@ Emit:
 
 The LLM deep-dive category (Phase 5 #9) is gated on `detected && kind != "internal"`.
 
+## 0.11b — MCP / agentic surface
+
+SEPARATE from §0.11. An MCP server, MCP client, or agent tool-loop is a distinct
+attack surface (tool poisoning, prompt-injection-via-tool-output, confused
+deputy) that the LLM gate above would wrongly skip. Detect:
+
+- **MCP**: files `*.mcp.json` / `.mcp.json` / `mcp.json`; deps
+  `@modelcontextprotocol/sdk`, `modelcontextprotocol`, `fastmcp`, `mcp`
+  (PyPI); code `from mcp.server`, `FastMCP(`, `@mcp.tool`, `server.tool(`,
+  `setRequestHandler(`, `registerTool(`; STDIO/transport config.
+- **Agent frameworks / tool loops**: `langgraph`, `@langchain/langgraph`,
+  `crewai`, `autogen`, `llama_index.*agent`, OpenAI/Anthropic tool-calling
+  loops (`tools=[`, `tool_use`, `function_call`) that feed results back to
+  the model.
+- **This-repo dogfood**: `.claude/agents/*`, `.claude/settings*.json`
+  permission scopes, sub-agent prompt interpolation.
+
+Emit:
+```json
+{
+  "detected": true,
+  "kind": "mcp-server" | "mcp-client" | "agent-framework" | "mixed",
+  "servers": ["src/mcp/server.py"],
+  "evidence": ["package.json:@modelcontextprotocol/sdk", ".mcp.json"]
+}
+```
+into `mcp_agentic`. The MCP/agentic deep-dive (Phase 5 cat-11) is gated on
+`mcp_agentic.detected == true`. Absent ⇒ not detected ⇒ cat-11 skipped.
+
+## 0.11c — Supply-chain surface
+
+Always informs cat-10 (which runs regardless), scoping it to what's present:
+
+- **ecosystems**: from manifests (npm/pypi/go/cargo/rubygems/composer/nuget…).
+- **lockfiles**: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`,
+  `poetry.lock`, `Cargo.lock`, `go.sum`, `Gemfile.lock`, `composer.lock`.
+- **ci_systems**: `.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`,
+  `.circleci/`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`.
+
+Emit into `supply_chain`:
+```json
+{
+  "detected": true,
+  "ecosystems": ["npm"],
+  "lockfiles": ["package-lock.json"],
+  "ci_systems": [".github/workflows"],
+  "evidence": ["package.json", ".github/workflows/ci.yml"]
+}
+```
+
 ## 0.12 — PII classification
 
 From Phase 0.8, if any entity has PII columns, mark `pii.detected: true` and

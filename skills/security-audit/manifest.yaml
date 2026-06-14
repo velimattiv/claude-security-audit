@@ -169,6 +169,15 @@ phases:
         - {id: deployment,    file: steps/deepdive/cat-07-deployment.md,      gate: always}
         - {id: injection,     file: steps/deepdive/cat-08-injection-ssrf.md,  gate: always}
         - {id: llm,           file: steps/deepdive/cat-09-llm.md,             gate: "profile.llm_usage.detected == true && profile.llm_usage.kind != 'internal'"}
+        - {id: supply_chain,  file: steps/deepdive/cat-10-supply-chain.md,    gate: always}
+        - {id: agentic,       file: steps/deepdive/cat-11-mcp-agentic.md,     gate: "profile.mcp_agentic.detected == true"}
+      # 11 categories total (9 always-on incl. supply_chain; llm + agentic
+      # gated). With concurrency_cap 8, category×partition pairs queue into
+      # successive waves — the cap bounds concurrency, not total pairs. Phase 7
+      # synthesis globs phase-05-*.jsonl, so phase-05-supply_chain-*.jsonl and
+      # phase-05-agentic-*.jsonl are ingested automatically. A gated category
+      # that does not fire (e.g. agentic when mcp_agentic.detected is false)
+      # is a legitimate skip recorded in phase-05-skipped.json.
 
   - id: 6
     name: Config + Methodology Spine
