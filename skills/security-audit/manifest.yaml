@@ -227,7 +227,7 @@ phases:
           - security-severity   # CVSS-style numeric string, required for GitHub Security tab
           - cwe                  # e.g. "CWE-798" — required for fixture matching + baseline carryover
         per_result_recommended_properties:
-          - category             # one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, config
+          - category             # one of: auth, idor, token_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, supply_chain, agentic, config
       - path: .claude-audit/current/findings.cyclonedx.json
       - path: .claude-audit/current/phase-07.done
     sub_agent_fan_out: none

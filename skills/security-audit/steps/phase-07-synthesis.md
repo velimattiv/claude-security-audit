@@ -11,7 +11,7 @@
 ⚠ **EVERY `results[]` row in the synthetic `security-audit-skill` SARIF run MUST carry these properties:**
 - `properties.security-severity`: CVSS-style numeric string. CRITICAL→`"9.0"`, HIGH→`"7.0"`, MEDIUM→`"5.0"`, LOW→`"3.0"`, INFO→`"1.0"`. Required for the GitHub Security tab.
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required for fixture matching, baseline delta, and GitHub Security tab grouping. Look up the CWE in `lib/cwe-map.json`; if absent, use your best judgement and add an entry in a follow-up.
-- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `config`.
+- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`.
 
 Per-scanner SARIF runs are copied through verbatim — do NOT rewrite
 scanner results. Scanner CWE lives in `tags[]` / `rule.properties.tags` /
@@ -287,7 +287,7 @@ Every `results[]` item in the synthetic `security-audit-skill` run:
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required
   for fixture matching, baseline carryover, and GitHub Security tab
   grouping. Look up in `lib/cwe-map.json`.
-- `properties.category`: one of the 10 category slugs. Recommended.
+- `properties.category`: one of the 12 category slugs (`auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`). Recommended.
 - `properties.cwe_top25_2025_rank` (optional): integer 1–25 when the
   finding's CWE is in the 2025 CWE Top 25 (§7.13).
 - `properties.epss` / `properties.kev` (optional): EPSS probability and

@@ -8,9 +8,9 @@ A thorough, multi-phase security audit skill for [Claude Code](https://code.clau
 Goes beyond generic vulnerability scanning by enumerating every attack
 surface (HTTP, gRPC, GraphQL, WebSocket, queue consumers, serverless
 handlers, mobile/desktop IPC — polyglot across 60+ frameworks), running an
-OWASP-methodology-tagged scanner bundle, and executing 9 parallel deep-dive
+OWASP-methodology-tagged scanner bundle, and executing 11 parallel deep-dive
 categories (Auth/Authz, IDOR/BOLA, Token Scope, MITM, Crypto, Secrets,
-Deployment, Injection/SSRF, LLM-specific).
+Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD, MCP/Agentic).
 
 **Supported runtime:** Claude Code only. Other harnesses are not supported.
 
@@ -58,8 +58,8 @@ Deployment, Injection/SSRF, LLM-specific).
    gitleaks, trufflehog, trivy, hadolint; optional brakeman, checkov,
    kube-linter, govulncheck, psalm, zizmor by detected context. All
    SARIF (Phase 4).
-6. **Deep-dive 9 categories** — each as a Claude Opus 4.7 sub-agent,
-   fanned out per partition × category (Phase 5).
+6. **Deep-dive 11 categories** — each as a Claude Opus sub-agent,
+   fanned out per partition × category, 8 in flight (Phase 5).
 7. **Config audit + methodology spine** — CORS/CSP/cookies/headers plus
    ASVS L2 / API Top 10 / LLM Top 10 / LINDDUN / STRIDE (Phase 6).
 8. **Synthesize** — dedupe, cross-reference, rank, tag with OWASP /

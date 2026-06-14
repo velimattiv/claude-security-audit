@@ -204,8 +204,11 @@ Every finding gets at least one OWASP identifier:
 - **ASVS 5.0** category id, e.g., `ASVS-V6.2.1`
 - **API Top 10 (2023)**: `API1:2023` … `API10:2023`
 - **LLM Top 10 (2025)**: `LLM01:2025` … `LLM10:2025`
+- **Web Top 10 (2025)**: `A01:2025` … `A10:2025` (cat-08/10 and the §6.16 roll-up)
+- **Agentic Apps (2026)**: `ASI01:2026` … `ASI10:2026` (cat-11 and the §6.17 lens)
 
-Category-specific mapping guidance lives inside each `cat-<NN>` file.
+All five forms are accepted by `lib/finding-schema.json`. Category-specific
+mapping guidance lives inside each `cat-<NN>` file.
 
 ## 5.5 — Confidence calibration
 

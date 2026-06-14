@@ -179,6 +179,14 @@ category names (applied during `categories:` parsing):
 | `deserialize` | `injection` |
 | `llm` | `llm` |
 | `ai` | `llm` |
+| `supply_chain` | `supply_chain` |
+| `supply-chain` | `supply_chain` |
+| `supplychain` | `supply_chain` |
+| `sca` | `supply_chain` |
+| `cicd` | `supply_chain` |
+| `agentic` | `agentic` |
+| `mcp` | `agentic` |
+| `agent` | `agentic` |
 
 Aliases are case-insensitive. Unknown tokens → warn and stop.
 

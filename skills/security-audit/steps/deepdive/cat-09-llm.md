@@ -161,6 +161,12 @@ formats execute arbitrary code on load, and `weights_only=True` /
 a supply-chain leg (LLM03); the deserialization itself is data/model
 poisoning (LLM04).
 
+> Single source of truth: the generic deserialization call-site mechanics
+> live in `cat-08-injection-ssrf.md`, and the `torch < 2.10` `weights_only`
+> bypass threshold lives in `lib/known-vuln-versions.md`. This section adds
+> only the LLM/model-file framing (untrusted-hub repo ids, `from_pretrained`,
+> `trust_remote_code`); keep version numbers out of here to avoid drift.
+
 ```
 # Pickle-family loaders on model / weight files (always unsafe on untrusted)
 (pickle|joblib|dill)\.loads?\s*\(
