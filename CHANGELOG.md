@@ -7,6 +7,29 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.3.0] — 2026-06-14
+
+SAST-engine licensing decision resolved + an offline-rules escape hatch.
+
+### Decided
+- **Keep Semgrep; decline Opengrep.** With the project committed to staying
+  **free OSS forever**, the Semgrep Rules License (commercial/SaaS/competing-use
+  only) does not bind this **invoke-only, non-redistributing** tool — it fetches
+  `p/...` community packs at runtime and never bundles them. Opengrep's only
+  free ruleset (`opengrep-rules`) is archived/frozen at Dec-2024, so switching
+  would downgrade rule freshness for a licensing benefit we don't need. The
+  "latent redistribution exposure" framing from earlier research was inaccurate.
+  Resolution recorded in `docs/EPIC-v2.1-refresh.md §4`, `docs/ROADMAP.md`
+  ("Resolved decision"), `docs/KNOWN-GAPS.md`.
+
+### Added
+- **`AUDIT_SAST_RULES` offline / air-gapped override.** Point it at a local
+  rules directory (a checkout of `semgrep-rules`, `opengrep-rules`, or your own)
+  and the SAST pass scans `--config "$AUDIT_SAST_RULES"` instead of fetching
+  registry packs — fully offline, no telemetry. Honored on the host path
+  (`lib/scanner-bundle.md`, `steps/phase-04-scanners.md`) and by
+  `scripts/run-audit-in-container.sh`, which bind-mounts the dir read-only.
+
 ## [2.2.0] — 2026-06-14
 
 Quality hardening from a read of **CyberGym-E2E** (arXiv 2606.04460v1,

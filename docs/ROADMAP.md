@@ -20,14 +20,15 @@ Bracketed `[NN]` tags cite the source report in `research/`.
 > semantic-correctness scorecard check (S3↔S4 gap → KNOWN-GAPS #1), the
 > patched-commit-as-decoy fixture method, a budget calibration note, and the
 > CWE↔OWASP pair validator deferred from v2.1 Gate-C. Plan:
-> `docs/EPIC-v2.2-cybergym.md`. Still deferred beyond v2.2: Opengrep swap
-> (owner decision), full CVEfixes corpus, PCI/CRA modes, live-container E2E.
+> `docs/EPIC-v2.2-cybergym.md`. Deferred beyond v2.2: full CVEfixes corpus,
+> PCI/CRA modes, live-container E2E. (Opengrep was resolved in v2.3 — see the
+> "Resolved decision" section below: kept Semgrep.)
 
 > **Shipped in v2.1 (2026-06-14):** the Fix-now item, all P0s, and most P1s
 > below are implemented on `epic/v2.1-security-refresh` — see CHANGELOG
-> [2.1.0] and `docs/EPIC-v2.1-refresh.md` for the exact set. **Still open
-> (v2.2):** Opengrep engine swap + rule-licensing (owner decision, §"Needs a
-> user decision"); P2 items (PCI DSS mode, CRA/SBOM note, CVEfixes
+> [2.1.0] and `docs/EPIC-v2.1-refresh.md` for the exact set. **Still open:**
+> Opengrep was resolved in v2.3 (kept Semgrep — see the "Resolved decision"
+> section); P2 items (PCI DSS mode, CRA/SBOM note, CVEfixes
 > micro-benchmark, CyberSecEval ICD rule mining); live-container E2E run.
 
 > **Verify-before-ship caveat.** Several 2026 CVE IDs in the source reports
@@ -119,14 +120,16 @@ Bracketed `[NN]` tags cite the source report in `research/`.
   of this is **NOT statically detectable** (CDN cache-key composition, proxy
   chains); flag-location-and-defer only. [01]
 
-## ⚠️ Needs a user decision before implementing
+## ✅ Resolved decision (2026-06-14, v2.3)
 
-- **Opengrep migration + rule-licensing.** The Semgrep Rules License (Dec 2024)
-  forbids redistributing the `p/...` rule packs the skill currently bundles —
-  a latent licensing exposure *today*, independent of engine choice. Opengrep
-  (v1.22, LGPL-2.1, SARIF, Semgrep-rule-compatible) is the OSS path, but
-  Commons Clause / non-OSI concerns apply if the skill ever becomes part of a
-  paid offering. Decide engine + rule-distribution posture. [04]
+- **Opengrep migration + rule-licensing — keep Semgrep, decline Opengrep.**
+  The project is **free OSS forever**, and the skill *invokes* Semgrep — it does
+  NOT bundle/redistribute the `p/...` packs (they're fetched at runtime). So the
+  Semgrep Rules License (commercial/SaaS/competing-use only) does not bind us,
+  and the original "latent exposure" framing was inaccurate. Opengrep's only
+  free ruleset (`opengrep-rules`) is archived/frozen at Dec-2024 → a rule-
+  freshness downgrade for a benefit we don't need. **Kept Semgrep** + shipped an
+  `AUDIT_SAST_RULES` offline/BYO-rules override (v2.3). [04]
 - **Prototype pollution placement** — new Phase-5 category vs. a sub-area of
   cat-08 (injection). [01]
 - **Fan-out width.** Adding cat-10 + cat-11 takes Phase-5 categories 9 → 11

@@ -119,6 +119,12 @@ fi
 #   run-audit-in-container.sh scan semgrep --config p/python
 EXTRA_ARGS=("$@")
 
+# Optional offline / air-gapped SAST rules. When AUDIT_SAST_RULES points at a
+# local rules dir, semgrep scans against it instead of fetching p/... registry
+# packs (fully offline). The dir is bind-mounted read-only at the SAME path
+# inside the container so the --config path resolves. Empty => default packs.
+RULES_MOUNT=""
+
 # Shell-quote each extra arg for safe passthrough into the inner
 # /bin/bash -lc "<string>" invocation.
 EXTRA_JOINED=""
@@ -143,7 +149,14 @@ case "$CMD" in
       EXTRA_JOINED+=" $(printf '%q' "$a")"
     done
     case "$SCANNER" in
-      semgrep)    INNER="semgrep scan --config p/security-audit --config p/owasp-top-ten --sarif -o /target/.claude-audit/current/phase-04-scanners/semgrep.sarif --metrics=off --timeout 600$EXTRA_JOINED /target" ;;
+      semgrep)
+        if [ -n "${AUDIT_SAST_RULES:-}" ]; then
+          SAST_CFG="--config ${AUDIT_SAST_RULES}"
+          RULES_MOUNT="-v ${AUDIT_SAST_RULES}:${AUDIT_SAST_RULES}:ro,Z"
+        else
+          SAST_CFG="--config p/security-audit --config p/owasp-top-ten"
+        fi
+        INNER="semgrep scan ${SAST_CFG} --sarif -o /target/.claude-audit/current/phase-04-scanners/semgrep.sarif --metrics=off --timeout 600$EXTRA_JOINED /target" ;;
       osv-scanner) INNER="osv-scanner scan --recursive --format sarif --output /target/.claude-audit/current/phase-04-scanners/osv.sarif$EXTRA_JOINED /target" ;;
       gitleaks)   INNER="gitleaks detect --no-git --source /target --report-format sarif --report-path /target/.claude-audit/current/phase-04-scanners/gitleaks.sarif$EXTRA_JOINED" ;;
       trufflehog) INNER="trufflehog git file:///target --json --results=verified$EXTRA_JOINED > /target/.claude-audit/current/phase-04-scanners/trufflehog.jsonl" ;;
@@ -178,6 +191,7 @@ mkdir -p "$ARTIFACT_DIR/current/phase-04-scanners"
   --tmpfs /home/audit/.cache:rw,size=512m,mode=0700 \
   -v "$REPO_ROOT":/target:ro,Z \
   -v "$ARTIFACT_DIR":/target/.claude-audit:rw,Z \
+  $RULES_MOUNT \
   "$IMAGE" \
   /bin/bash -lc "$INNER"
 

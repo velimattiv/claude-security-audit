@@ -16,7 +16,11 @@ Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD, MCP/Agentic).
 
 ## Version
 
-- **v2.2.0** (current) — CyberGym-E2E-derived quality round: sub-agent
+- **v2.3.0** (current) — kept Semgrep (evaluated and declined Opengrep: its
+  only free ruleset is archived/frozen at Dec-2024, and free-OSS invoke-only
+  use of Semgrep is unrestricted); added an `AUDIT_SAST_RULES` offline /
+  BYO-rules override. See CHANGELOG.
+- **v2.2.0** — CyberGym-E2E-derived quality round: sub-agent
   repo-navigation discipline + explicit source→sink taint tracing,
   semantic-correctness scorecard check (`--semantic-floor`), patched-commit
   decoy method, and a CWE↔OWASP tag-pair validator. See CHANGELOG +
@@ -85,7 +89,7 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.2.0 \
+git clone --depth 1 --branch v2.3.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
 cat ~/.claude/skills/security-audit/VERSION   # → 2.2.0
@@ -94,7 +98,7 @@ cat ~/.claude/skills/security-audit/VERSION   # → 2.2.0
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.2.0 \
+git clone --depth 1 --branch v2.3.0 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -139,7 +143,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.2.0 \
+git clone --depth 1 --branch v2.3.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
