@@ -34,7 +34,9 @@
 #                                        # AUDIT_FORCE_PATH_B=1
 #   scripts/run-e2e-test.sh --dry-run    # skip `claude` invocation; validate existing artifacts
 #   scripts/run-e2e-test.sh --keep       # do NOT wipe the target dir (preserve baseline for delta-mode testing)
-#   scripts/run-e2e-test.sh --min-recall N --min-precision N  # opt-in scorecard floors
+#   scripts/run-e2e-test.sh --min-recall N --min-precision N --semantic-floor N
+#                                        # opt-in scorecard floors (precision/recall/
+#                                        # semantic-match; default 0.0 = report-only)
 #   scripts/run-e2e-test.sh --help
 #
 # Cost: expect $5-$20 per run on an API key, or no marginal cost on
@@ -59,6 +61,7 @@ PATH_B=0
 TARGET="${TARGET_NAME:-juice-shop}"   # default from config.env
 MIN_RECALL=""
 MIN_PRECISION=""
+SEMANTIC_FLOOR=""
 while [ $# -gt 0 ]; do
   case "${1:-}" in
     --dry-run) DRY_RUN=1; shift ;;
@@ -70,7 +73,9 @@ while [ $# -gt 0 ]; do
     --min-recall=*)  MIN_RECALL="${1#*=}"; shift ;;
     --min-precision)    MIN_PRECISION="${2:?--min-precision needs a value}"; shift 2 ;;
     --min-precision=*)  MIN_PRECISION="${1#*=}"; shift ;;
-    --help|-h) sed -n '2,52p' "$0"; exit 0 ;;
+    --semantic-floor)    SEMANTIC_FLOOR="${2:?--semantic-floor needs a value}"; shift 2 ;;
+    --semantic-floor=*)  SEMANTIC_FLOOR="${1#*=}"; shift ;;
+    --help|-h) sed -n '2,43p' "$0"; exit 0 ;;
     "")        break ;;
     *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
   esac
@@ -330,8 +335,9 @@ ASSERT_ARGS=(
   --scorecard-dir "$SCORECARD_DIR"
   --require-jsonschema-backend
 )
-[ -n "$MIN_RECALL" ]    && ASSERT_ARGS+=( --min-recall "$MIN_RECALL" )
-[ -n "$MIN_PRECISION" ] && ASSERT_ARGS+=( --min-precision "$MIN_PRECISION" )
+[ -n "$MIN_RECALL" ]     && ASSERT_ARGS+=( --min-recall "$MIN_RECALL" )
+[ -n "$MIN_PRECISION" ]  && ASSERT_ARGS+=( --min-precision "$MIN_PRECISION" )
+[ -n "$SEMANTIC_FLOOR" ] && ASSERT_ARGS+=( --semantic-floor "$SEMANTIC_FLOOR" )
 set +e
 python3 "$REPO_ROOT/tests/e2e/assertions.py" "${ASSERT_ARGS[@]}"
 RC=$?

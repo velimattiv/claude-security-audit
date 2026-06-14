@@ -429,6 +429,49 @@ def finding_matches_negative(finding: dict, neg: dict) -> bool:
     return cwe_hit or cat_hit
 
 
+def finding_mechanism_matches(finding: dict, mechanism_keywords: list) -> bool:
+    """Semantic-correctness check (CyberGym-E2E S3↔S4 gap: "found A bug
+    here" != "found THE bug"). A finding that already MATCHES an
+    expectation by file+cwe+category is *semantically correct* only if its
+    `title`+`description` text (case-insensitive) names the actual
+    mechanism the fixture expects.
+
+    `mechanism_keywords` is a list of REQUIRED keyword groups; the finding
+    must satisfy EVERY group (AND across groups). A group is satisfied if
+    the text contains the group keyword OR any of its `alternate` synonyms
+    (OR within a group). A group is either:
+      - a plain string  →  one keyword, no synonyms; or
+      - an object {"keyword": "...", "alternate": ["syn1", "syn2"]}.
+
+    An empty / absent keyword list returns True (nothing required)."""
+    if not mechanism_keywords:
+        return True
+    # The finding's searchable text: title + description, case-folded.
+    # SARIF-sourced findings carry a `title` (the message text) but no
+    # `description`; JSONL findings may carry both. Concatenate whatever
+    # is present so either source can satisfy a keyword group.
+    parts = []
+    for field in ("title", "description"):
+        val = finding.get(field)
+        if isinstance(val, str):
+            parts.append(val)
+    haystack = " ".join(parts).lower()
+    if not haystack:
+        return False  # no text to match against → cannot confirm mechanism
+
+    for group in mechanism_keywords:
+        if isinstance(group, dict):
+            terms = [group.get("keyword", "")] + list(group.get("alternate", []))
+        else:
+            terms = [group]
+        terms = [t.lower() for t in terms if isinstance(t, str) and t]
+        if not terms:
+            continue  # malformed/empty group → not a constraint
+        if not any(t in haystack for t in terms):
+            return False  # this required group is unsatisfied → not semantic
+    return True
+
+
 def score_findings(findings: list[dict], expected: dict) -> dict:
     """Compute the precision/recall scorecard. Returns a dict with overall
     and per-category P/R/F1 + TP/FP/FN counts and the labeled detail.
@@ -436,7 +479,14 @@ def score_findings(findings: list[dict], expected: dict) -> dict:
     TP/FN are computed over HARD positive expectations (must_match!=false)
     — the gated contract. Soft expectations are reported separately and do
     NOT drag recall down (they are orchestrator-depth-dependent, see the
-    existing check_expectations rationale). FP is computed over decoys."""
+    existing check_expectations rationale). FP is computed over decoys.
+
+    A semantic-correctness rate is also computed over the TPs that define a
+    `mechanism_keywords` group: a TP is semantically correct only if at
+    least one of the findings that matched it also names the expected
+    mechanism (see finding_mechanism_matches). Expectations without
+    `mechanism_keywords` are excluded from the denominator — not
+    penalised. This is additive: it never affects TP/FP/FN/precision/recall."""
     positives = expected.get("expectations", [])
     negatives = expected.get("negative_expectations", [])
 
@@ -446,6 +496,14 @@ def score_findings(findings: list[dict], expected: dict) -> dict:
     fn_hard: list[dict] = []
     soft_missed: list[dict] = []
     per_cat: dict[str, dict] = {}
+
+    # Semantic-correctness accounting (additive — does NOT touch TP/FP/FN).
+    # Denominator = TP expectations that declare mechanism_keywords;
+    # numerator = those whose mechanism was actually named by >=1 matching
+    # finding. semantic_detail records each so scorecard.md can list misses.
+    semantic_total = 0
+    semantic_ok = 0
+    semantic_detail: list[dict] = []
 
     def _cat_bucket(cat: str) -> dict:
         return per_cat.setdefault(
@@ -462,6 +520,22 @@ def score_findings(findings: list[dict], expected: dict) -> dict:
             if is_hard:
                 tp_exps.append(exp)
                 _cat_bucket(cat)["tp"] += 1
+                # Semantic check: only TPs that declare mechanism_keywords
+                # are in the denominator. A TP is semantically correct if
+                # ANY of its matching findings names the mechanism.
+                mech = exp.get("mechanism_keywords")
+                if mech:
+                    semantic_total += 1
+                    ok = any(finding_mechanism_matches(f, mech) for f in matches)
+                    if ok:
+                        semantic_ok += 1
+                    semantic_detail.append({
+                        "id": exp.get("id"),
+                        "cwe": exp.get("cwe"),
+                        "category": cat,
+                        "file_pattern": exp.get("file_pattern"),
+                        "semantic_match": ok,
+                    })
         else:
             if is_hard:
                 fn_hard.append(exp)
@@ -519,6 +593,13 @@ def score_findings(findings: list[dict], expected: dict) -> dict:
         cat: _metrics(b["tp"], b["fp"], b["fn"]) for cat, b in sorted(per_cat.items())
     }
 
+    # Semantic-match rate. Guard empty denominator -> 1.0, exactly the
+    # same convention as precision/recall in _metrics (a fixture that
+    # declares no mechanism_keywords is "vacuously semantically correct"
+    # and must never fail a --semantic-floor gate). Additive: independent
+    # of TP/FP/FN.
+    semantic_rate = (semantic_ok / semantic_total) if semantic_total else 1.0
+
     return {
         "target": expected.get("target"),
         "schema_version": expected.get("schema_version"),
@@ -528,6 +609,12 @@ def score_findings(findings: list[dict], expected: dict) -> dict:
         "n_decoys": len(negatives),
         "overall": overall,
         "per_category": per_category,
+        "semantic": {
+            "checked": semantic_total,
+            "matched": semantic_ok,
+            "rate": round(semantic_rate, 4),
+            "detail": semantic_detail,
+        },
         "soft_missed": [
             {"id": e.get("id"), "cwe": e.get("cwe"), "category": e.get("category"),
              "file_pattern": e.get("file_pattern")}
@@ -554,6 +641,10 @@ def write_scorecard(scorecard: dict, scorecard_dir: Path) -> tuple[Path, Path]:
         f.write("\n")
 
     o = scorecard["overall"]
+    # Semantic block is additive (v3.1); guard for scorecards produced by
+    # an older scorer that predate the field.
+    sem = scorecard.get("semantic", {"checked": 0, "matched": 0, "rate": 1.0,
+                                      "detail": []})
     lines = [
         f"# Precision/Recall Scorecard — {scorecard.get('target')}",
         "",
@@ -573,12 +664,22 @@ def write_scorecard(scorecard: dict, scorecard_dir: Path) -> tuple[Path, Path]:
         f"| **Precision** | **{o['precision']:.3f}** |",
         f"| **Recall** | **{o['recall']:.3f}** |",
         f"| **F1** | **{o['f1']:.3f}** |",
+        f"| **Semantic match** | **{sem['rate']:.3f}** "
+        f"({sem['matched']}/{sem['checked']} mechanism-checked TPs) |",
         "",
         "> Recall is computed over HARD fixtures only (the gated contract). "
         "Soft fixtures are orchestrator-depth-dependent and reported "
         "separately; they do not lower recall. Precision is computed only "
         "over labeled territory (positives + decoys); unlabeled extra "
         "finds are neither rewarded nor penalised.",
+        "",
+        "> **Semantic match** (CyberGym-E2E S3↔S4 gap: \"found A bug here\" "
+        "≠ \"found THE bug\") = TPs whose finding text named the expected "
+        "mechanism ÷ TPs that declare `mechanism_keywords`. Expectations "
+        "without `mechanism_keywords` are excluded from the denominator "
+        "(not penalised); an empty denominator yields 1.0 by convention. "
+        "Report-only by default (`--semantic-floor 0.0`); additive — it "
+        "does not affect precision/recall/F1.",
         "",
         "## Per-category",
         "",
@@ -592,6 +693,20 @@ def write_scorecard(scorecard: dict, scorecard_dir: Path) -> tuple[Path, Path]:
         )
     if not scorecard["per_category"]:
         lines.append("| _(none)_ | | | | | | |")
+
+    if sem["detail"]:
+        lines += [
+            "",
+            "## Semantic-correctness check (mechanism vs fixture)",
+            "",
+            "| Fixture | CWE | Category | Mechanism named? |",
+            "|---|---|---|---|",
+        ]
+        for d in sem["detail"]:
+            lines.append(
+                f"| `{d['id']}` | {d.get('cwe')} | {d.get('category')} | "
+                f"{'yes' if d['semantic_match'] else 'NO — found-A-bug-not-THE-bug'} |"
+            )
 
     if scorecard["false_positives"]:
         lines += ["", "## False positives (findings on safe decoys)", ""]
@@ -885,11 +1000,18 @@ def run_scorecard(args, expected: dict, failures: list[str]) -> None:
         wrote = "(write failed)"
 
     o = scorecard["overall"]
+    sem = scorecard["semantic"]
     print(
         f"  scorecard: TP={o['tp']} FP={o['fp']} FN={o['fn']} | "
         f"precision={o['precision']:.3f} recall={o['recall']:.3f} "
         f"f1={o['f1']:.3f} | decoys={scorecard['n_decoys']} "
         f"({'with FP denominator' if scorecard['has_decoys'] else 'no FP denominator'})",
+        flush=True,
+    )
+    print(
+        f"  semantic-match: {sem['rate']:.3f} "
+        f"({sem['matched']}/{sem['checked']} mechanism-checked TPs)"
+        f"{' — no mechanism_keywords defined' if not sem['checked'] else ''}",
         flush=True,
     )
     print(f"  wrote: {wrote}", flush=True)
@@ -914,6 +1036,25 @@ def run_scorecard(args, expected: dict, failures: list[str]) -> None:
                 f"scorecard precision {o['precision']:.3f} < floor "
                 f"{args.min_precision:.3f} (--min-precision): {o['fp']} "
                 f"false positive(s) on safe decoys."
+            )
+    # Semantic floor — mirrors --min-precision: empty denominator means the
+    # rate is 1.0 by convention, so warn (gate is a no-op) rather than fire.
+    if args.semantic_floor > 0.0:
+        if not sem["checked"]:
+            print(
+                "  NOTE: --semantic-floor set but no fixture declares "
+                "mechanism_keywords; semantic rate is 1.0 by convention "
+                "(empty denominator). Gate is a no-op until a fixture "
+                "defines mechanism_keywords.",
+                file=sys.stderr,
+            )
+        elif sem["rate"] < args.semantic_floor:
+            misses = [d["id"] for d in sem["detail"] if not d["semantic_match"]]
+            failures.append(
+                f"scorecard semantic-match {sem['rate']:.3f} < floor "
+                f"{args.semantic_floor:.3f} (--semantic-floor): "
+                f"{len(misses)} TP(s) matched the file+cwe but not the "
+                f"expected mechanism ({', '.join(misses)})."
             )
 
 
@@ -949,6 +1090,16 @@ def main():
                              "fixtures) < this floor (default 0.0 = no-op; the "
                              "existing hard-fixture coverage gate already enforces "
                              "recall=1.0). Opt-in tightening.")
+    parser.add_argument("--semantic-floor", type=float, default=0.0,
+                        help="Fail the suite if the semantic-match rate "
+                             "(TPs whose finding text named the expected "
+                             "mechanism / TPs that declare mechanism_keywords) "
+                             "< this floor (default 0.0 = report-only no-op; "
+                             "only meaningful once a fixture defines "
+                             "mechanism_keywords). Mirrors --min-precision: a "
+                             "fixture with no mechanism_keywords yields rate "
+                             "1.0 by convention and the gate is a no-op. "
+                             "Addresses the CyberGym-E2E S3↔S4 gap.")
     args = parser.parse_args()
 
     if not args.artifact_dir.exists():

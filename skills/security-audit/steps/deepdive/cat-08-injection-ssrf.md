@@ -25,6 +25,30 @@
    EXIF / dangerous metadata.
 9. Redirect `Location` headers target allowlisted hosts.
 
+## Data-flow / taint trace (do this before asserting an injection / SSRF)
+
+CyberGym-E2E's #1 analysis failure is incomplete data-flow tracing
+(basis: `docs/research/08-cybergym-e2e.md`). Every category here is a
+taint bug: user input is the source, the dangerous call (SQL / NoSQL /
+command / template / deserialize / outbound HTTP / redirect) is the sink.
+A grep match locates a candidate sink; it does NOT prove the sink is fed
+attacker-controlled data. Before flagging, trace the **user-controlled
+source -> sink** — from where the value enters (request body / query /
+params / header / uploaded file / external message) to the sink call —
+across files if validation, the handler, and the sink live apart. Confirm
+nothing canonicalizes / parameterizes / allowlists the value on that path.
+
+Calibrate confidence to trace completeness:
+- `CONFIRMED` only when the full source->sink path is established (a
+  user-controlled value is shown reaching the sink unsanitized), or a
+  second source (e.g. a scanner — see "Cross-reference with scanners")
+  independently agrees.
+- `POSSIBLE` when a sink is found but the taint / source cannot be
+  confirmed from the read region (e.g. the argument is a variable whose
+  origin lies outside the handler ± ~40 lines you read, or sanitization
+  may exist upstream). This matches the locator -> POSSIBLE handling
+  already called out for redirect-following SSRF below.
+
 ## Detection patterns
 
 ### SQL injection

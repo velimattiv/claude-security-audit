@@ -32,6 +32,25 @@
    `role`, `isAdmin`, `permissions`, `orgId`, etc. (See also cat-01
    §"Mass assignment".)
 
+## Data-flow / taint trace (do this before asserting an IDOR)
+
+CyberGym-E2E's #1 analysis failure is incomplete data-flow tracing
+(basis: `docs/research/08-cybergym-e2e.md`). IDOR is a taint bug: the
+object id is the user-controlled source and the entity query is the sink.
+Before flagging, trace the **source -> sink** path — from where the id
+enters (path / query / body param) to the query that uses it — across
+files if the route, handler, and data-access layer are separate. Confirm
+the id reaches the query with no ownership / tenant / org scope applied
+anywhere on that path.
+
+Calibrate confidence to trace completeness:
+- `CONFIRMED` only when the full source->sink path is established (the
+  user-controlled id is shown reaching an unscoped query), or a second
+  source (e.g. a scanner) independently agrees.
+- `POSSIBLE` when an unscoped sink is found but the taint / source cannot
+  be confirmed from the read region (e.g. the id's origin or a scoping
+  middleware lies outside the handler ± ~40 lines you read).
+
 ## Candidate surfaces
 
 From `phase-02-surface.json`, filter to surfaces where:
@@ -46,9 +65,9 @@ Every candidate must be verified — do not sample.
 
 ### Query without ownership filter
 
-Read the handler file. Look for database queries against an owned entity
-where the `WHERE` clause references **only** the ID param, not the
-user / tenant / org scope.
+Read the handler ± ~40 lines (not the whole file). Look for database
+queries against an owned entity where the `WHERE` clause references
+**only** the ID param, not the user / tenant / org scope.
 
 Examples of the **vulnerable** pattern:
 
@@ -87,7 +106,7 @@ surfaces.
 ### Nested resource access
 
 For surfaces with `path` matching `:parentId.*:childId` or similar, read
-the handler: does the query chain through parent ownership?
+the handler ± ~40 lines: does the query chain through parent ownership?
 
 Safe: `parent.children.find(childId)` where `parent` was fetched via an
 ownership-filtered query.

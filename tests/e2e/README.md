@@ -23,7 +23,7 @@ scripts/run-e2e-test.sh --target dvwa        # DVWA (PHP)
 scripts/run-e2e-test.sh --target crapi       # OWASP crAPI (polyglot)
 
 # Opt-in scorecard floors (default floors are 0.0 = no-op):
-scripts/run-e2e-test.sh --min-recall 0.9 --min-precision 0.8
+scripts/run-e2e-test.sh --min-recall 0.9 --min-precision 0.8 --semantic-floor 0.7
 ```
 
 > **Live runs need Claude auth.** `run-e2e-test.sh` invokes the host's
@@ -83,10 +83,14 @@ Code usage (Max subscription or pay-per-token, whichever your local
   `negative_expectations[]` decoys, then writes `scorecard.json` +
   `scorecard.md` (next to the run artifacts; the manual default is the
   fixture's directory).
+- It also computes a **semantic-match rate** (schema v3.1) over the TPs
+  that declare `mechanism_keywords` — see "Semantic-correctness check"
+  below.
 - **The scorecard is additive.** With the default floors
-  (`--min-precision 0.0`, `--min-recall 0.0`) it never changes the
-  exit code — the existing coverage gate and all structural checks are
-  unchanged. Use `--no-scorecard` to skip it entirely.
+  (`--min-precision 0.0`, `--min-recall 0.0`, `--semantic-floor 0.0`) it
+  never changes the exit code — the existing coverage gate and all
+  structural checks are unchanged. Use `--no-scorecard` to skip it
+  entirely.
 
 ## Fixture schema v3 — `negative_expectations[]` (decoys)
 
@@ -148,6 +152,109 @@ flagging it `deployment HIGH` is an FP), the Sequelize ORM model layer
 SQLi), and the bcrypt path in `lib/insecurity.ts`. DVWA's graded
 `impossible.php` files and crAPI's BCrypt/ORM/JPA layers are the decoys
 for those targets.
+
+## Semantic-correctness check (schema v3.1) — `mechanism_keywords`
+
+Coverage (`check_expectations`) answers *"did we find a bug here?"*;
+precision adds *"did we avoid flagging safe code?"*. Neither answers the
+**CyberGym-E2E S3↔S4 question**: *"found A bug here" ≠ "found THE bug."*
+(See `docs/research/08-cybergym-e2e.md` — their S3↔S4 gap, Opus 4.5
+19.2% → 7.6%, is agents fixing a *different* real bug than the intended
+one.) A finding can match a fixture's `file + cwe + category` and still
+describe the wrong mechanism.
+
+v3.1 adds an **optional** `mechanism_keywords` array to any positive
+expectation. A finding that already matches an expectation is judged
+**semantically correct** only if its `title` + `description` text
+(case-insensitive) satisfies **every** keyword group — AND across
+groups, OR within a group:
+
+```jsonc
+"mechanism_keywords": [
+  "md5",                                              // plain string: one keyword, no synonyms
+  {"keyword": "password", "alternate": ["hash", "hashing"]}  // group: keyword OR any alternate
+]
+```
+
+- Each list entry is a **required group**. A group is satisfied if the
+  text contains its keyword **or** any of its `alternate` synonyms.
+- A finding is semantically correct only when **all** groups are
+  satisfied (so you can demand both the bug *class* and the specific
+  *sink/mechanism* — e.g. e2e-06 requires both "SQL injection" **and**
+  one of "template literal / unparameterized / raw query").
+- A group may be a plain string (one keyword, no synonyms) or an object
+  `{keyword, alternate:[...]}`.
+
+**Scoring & rate.** For every TP that declares `mechanism_keywords`, the
+TP counts as semantically matched if **≥1** of its matching findings
+satisfies the groups. The rate is:
+
+```
+semantic_match = (mechanism-matched TPs) / (TPs that declare mechanism_keywords)
+```
+
+Expectations **without** `mechanism_keywords` are excluded from the
+denominator — they are not penalised. An empty denominator yields
+`1.0` by convention (same as precision/recall). The rate is written to
+both `scorecard.json` (`semantic: {checked, matched, rate, detail[]}`)
+and `scorecard.md` (Overall table + a per-fixture "Semantic-correctness
+check" table marking each as `yes` or `NO — found-A-bug-not-THE-bug`).
+
+**Gate.** `--semantic-floor N` mirrors `--min-precision`/`--min-recall`:
+default `0.0` is a report-only no-op; `>0` fails the suite if the rate
+is below `N`. Like `--min-precision`, it warns and stays a no-op when no
+fixture declares `mechanism_keywords` (empty denominator → rate 1.0).
+It is **additive**: it never changes TP/FP/FN/precision/recall/F1,
+coverage, or the structural exit code.
+
+**Seeded fixtures.** The Juice Shop fixture seeds three:
+`e2e-01` (hard-coded RSA private key — requires the secret *type* AND
+"hard-coded/inline"), `e2e-06` (SQLi — requires the class AND the
+template-literal/raw-query sink), and `e2e-12` (MD5 password hashing —
+the plain-string `"md5"` keyword guards against the neg-03 bcrypt twin
+in the same file being mistaken for THE finding). `e2e-01` and `e2e-06`
+each carry an `alternate` synonym set.
+
+## Patched-commit-as-decoy method (minting precision fixture pairs)
+
+The v3 `negative_expectations[]` mechanism maps directly onto
+CyberGym-E2E's labeling, which is built by **binary-searching OSS-Fuzz
+for the fix commit** and validating that the PoC reproduces *pre-patch*
+and fails *post-patch* (research note §"What it is"). The same idea
+mints precision fixtures for this skill:
+
+> **Pre-patch code at a fix site = a labeled true-positive.
+> Post-patch (fixed) code at the same site = a labeled true-negative —
+> a decoy.**
+
+A real CVE fix commit gives you a *matched pair* on (often) the same
+file and CWE: the vulnerable lines you want the auditor to flag, and the
+fixed lines a naive auditor might *still* flag (the classic false
+positive — "this file had a CVE, so it must be vulnerable").
+
+**Recipe:**
+
+1. Pick a CVE fix commit for the target (or a framework it uses).
+2. The **vulnerable pre-fix lines** become a positive `expectations[]`
+   entry: set `cwe` + `category` + `file_pattern` to the bug, and
+   (optionally) `mechanism_keywords` to the specific sink so a vague hit
+   doesn't pass the semantic check.
+3. The **fixed post-fix lines** become a `negative_expectations[]`
+   entry: same `file_pattern`, `forbidden_cwe` (and/or
+   `forbidden_category`) equal to the *now-fixed* class, with a
+   `min_severity` floor so an informational note doesn't count. A
+   MEDIUM+ finding re-flagging the patched code is a false positive.
+4. Commit the pin + both fixture edits **atomically** (a mismatched pair
+   makes the test flaky — same rule as a version bump).
+
+**Stack note.** CyberGym-E2E's own corpus is **C/C++ memory-safety**
+(off this skill's web/app-sec axis), so borrow the *method*, not the
+corpus: seed with **web-framework CVE fix pairs** (Express / Sequelize /
+Spring / Django / etc.) whose pre/post-fix diffs map onto this skill's
+categories (`injection`, `auth`, `idor`, `secret_sprawl`, `crypto`, …).
+The three Juice Shop seed decoys already follow the *shape* of this
+method (hardened-twin Dockerfile, ORM-safe model layer, bcrypt path);
+the patched-commit recipe is how you generate *new* pairs at scale.
 
 ## Gated vs always-on categories
 
