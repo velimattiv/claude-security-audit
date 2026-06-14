@@ -95,8 +95,8 @@ hold; every change must preserve them. New code must keep the scorecard
 
 - Adopting CyberGym-E2E as a scored benchmark (it's exploit/patch, not static
   detection). Opver patch-with-functional-tests auto-fix flow (future).
-  Opengrep engine swap (still held for owner sign-off). A full CVEfixes corpus
-  (A2 ships the method + a seed, not 100s of tasks).
+  Opengrep engine swap (resolved in v2.3 — kept Semgrep; see CHANGELOG). A
+  full CVEfixes corpus (A2 ships the method + a seed, not 100s of tasks).
 
 ## 5. Sequencing
 

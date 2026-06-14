@@ -53,9 +53,11 @@ Tracked in `docs/ROADMAP.md`:
 - **Non-English codebase framework detection** — still deferred.
 
 New v2.1 deferrals (see `docs/EPIC-v2.1-refresh.md` §4 + `docs/ROADMAP.md`):
-- **Opengrep engine swap + rule-licensing posture** — held for owner sign-off
-  (legal one-way door; the skill does not vendor Semgrep rule packs, which
-  lowers urgency).
+- ~~**Opengrep engine swap + rule-licensing posture**~~ — **RESOLVED (v2.3):**
+  project is free OSS forever → Semgrep invoke-only is unrestricted; **kept
+  Semgrep** (fresher community rules), **declined Opengrep** (archived/frozen
+  `opengrep-rules`). Added an `AUDIT_SAST_RULES` offline/BYO-rules override.
+  See CHANGELOG [2.3.0].
 - **Live-container E2E** — not run in-session (pre-existing Max-auth blocker).
   The static assertion suite + scorecard logic are updated and internally
   consistent; a host run with Claude auth is still required to exercise the

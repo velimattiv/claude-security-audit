@@ -11,8 +11,9 @@ hints are authoritative for `scripts/install-scanners.sh`.
 - **Install.** `pip install semgrep` (any OS with Python ≥3.8). Pin version in CI.
 - **Invoke (default, no telemetry).** `semgrep scan --config p/security-audit --config p/owasp-top-ten --config p/jwt --sarif -o phase-04-scanners/semgrep.sarif --timeout 600 --metrics=off`
 - **Invoke (alternate, broader coverage).** `semgrep scan --config auto --sarif -o ... --timeout 600` — requires `--metrics=on` (semgrep's `auto` ruleset resolution sends telemetry). Opt-in only.
+- **Invoke (offline / air-gapped — `AUDIT_SAST_RULES`).** If `AUDIT_SAST_RULES` is set to a local rules directory, scan against it instead of fetching `p/...` registry packs: `semgrep scan --config "$AUDIT_SAST_RULES" --sarif -o phase-04-scanners/semgrep.sarif --timeout 600 --metrics=off`. Stage any ruleset there — a checkout of `semgrep-rules` (LGPL-2.1) / `opengrep-rules` / your own. Fully offline, no registry dependency. `run-audit-in-container.sh` honors the same var and bind-mounts the dir read-only.
 - **Key rules.** `p/ci`, `p/security-audit`, `p/owasp-top-ten`, `p/jwt`, `p/cryptography`, `p/ssrf`. Use `--config <pack>` to stack multiple.
-- **License.** LGPL-2.1 CLI. Community rules are free; Pro ruleset requires account.
+- **License.** LGPL-2.1 CLI; community rule packs are free. For a **free, OSS, invoke-only** tool like this one, using the Semgrep CLI + community registry is unrestricted (the Semgrep Rules License only limits commercial/SaaS/competing use). **Opengrep** (the LGPL fork) was evaluated and **not adopted**: its only free ruleset (`opengrep-rules`) is archived/frozen at Dec-2024, so Semgrep's continuously-maintained community packs are the better default. See `AUDIT_SAST_RULES` above for offline/BYO-rules.
 - **Exit.** Non-zero when findings exist; SARIF still written.
 
 ### osv-scanner

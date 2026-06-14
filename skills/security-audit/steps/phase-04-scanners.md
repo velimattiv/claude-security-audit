@@ -105,7 +105,7 @@ Run these six in parallel (max 4 concurrent — scanners are heavy I/O):
 
 | Tool | Invocation | Notes |
 |---|---|---|
-| **semgrep** | `semgrep scan --config p/security-audit --config p/owasp-top-ten --config p/jwt --sarif --output phase-04-scanners/semgrep.sarif --timeout 600 --metrics=off` | Uses named community rulesets (no telemetry). `--config auto` is the alternate path — it gives broader coverage but requires `--metrics=on`. The skill opts out of metrics by default (per Q4 no-telemetry decision); document as a trade-off. |
+| **semgrep** | `semgrep scan --config p/security-audit --config p/owasp-top-ten --config p/jwt --sarif --output phase-04-scanners/semgrep.sarif --timeout 600 --metrics=off` | Uses named community rulesets (no telemetry). `--config auto` is the alternate path — it gives broader coverage but requires `--metrics=on`. The skill opts out of metrics by default (per Q4 no-telemetry decision). **Offline / air-gapped:** if `AUDIT_SAST_RULES` is set, replace the `--config p/...` packs with `--config "$AUDIT_SAST_RULES"` (a locally-staged rules dir) — fully offline, no registry fetch (see `lib/scanner-bundle.md`). |
 | **osv-scanner** | `osv-scanner scan --recursive --format sarif --output phase-04-scanners/osv.sarif .` | Ecosystem auto-detected from manifests. Skipped if no lockfiles present — warn, do not fail. |
 | **gitleaks (working tree)** | `gitleaks detect --no-git --report-format sarif --report-path phase-04-scanners/gitleaks.sarif` | Fast — scans the checked-out tree only. |
 | **gitleaks (git history)** | `gitleaks git . --report-format sarif --report-path phase-04-scanners/gitleaks-history.sarif` | Slow; separate sub-agent with 20 min timeout. Non-blocking for Phase 7 synthesis. |

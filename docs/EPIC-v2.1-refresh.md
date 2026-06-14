@@ -1,8 +1,8 @@
 # EPIC — v2.1 Security-Audit Capability Refresh
 
 Status: **COMPLETE** (autonomous build, 2026-06-14) — all waves landed on
-`epic/v2.1-security-refresh`; Opengrep deferred to v2.2 per §4. See CHANGELOG
-[2.1.0] for the shipped set.
+`epic/v2.1-security-refresh`; Opengrep was deferred here and **resolved in
+v2.3** (kept Semgrep — see §4). See CHANGELOG [2.1.0] for the shipped set.
 Owner: Tech Lead (autonomous).
 Source of truth for scope: `docs/research/` (7 reports) → `docs/ROADMAP.md`
 ("Research round — 2026-06-14") → this epic.
@@ -66,14 +66,15 @@ Threaded into every story's acceptance criteria. Sourced from `manifest.yaml`:
 - **NHI secrets** → cross-cutting additions to `cat-06`/`cat-07`, not a 10th
   category (per report 06's own recommendation).
 
-**Deferred — needs owner sign-off (NOT built this epic):**
-- **Opengrep migration + rule-licensing posture.** Investigation correction:
-  the skill invokes semgrep via runtime `--config p/...` registry packs and
-  does **not** vendor/redistribute rule packs (only `vendored/adversarial-review/`
-  is vendored). Report 04's "we redistribute rule packs" premise is therefore
-  **not accurate for current usage**, which lowers urgency. The engine swap is
-  a one-way-door distribution/legal decision → held for v2.2 with a written
-  note in ROADMAP. No code change this epic.
+**Opengrep migration + rule-licensing posture — RESOLVED (2026-06-14, in v2.3).**
+The owner confirmed the project stays **free OSS forever**, so the Semgrep Rules
+License (which only restricts commercial / SaaS / competing-product use) does
+not bind this invoke-only, non-redistributing tool — the skill fetches `p/...`
+packs at runtime and never bundles them. **Decision: keep Semgrep** (its
+continuously-maintained community packs) and **decline Opengrep** — its only
+free ruleset (`opengrep-rules`) is archived/frozen at Dec-2024, a rule-freshness
+downgrade for a licensing benefit we don't need. Shipped an `AUDIT_SAST_RULES`
+offline/BYO-rules override instead. See CHANGELOG [2.3.0].
 
 ## 5. Methodology & gates
 
