@@ -45,7 +45,7 @@ else
     else
       fail "JSON parse error in $f"
     fi
-  done < <(find . -name "*.json" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./_bmad*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*")
+  done < <(find . -name "*.json" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./docs/security-audit-output/*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*")
 fi
 note "$checks JSON files parsed cleanly so far"
 
@@ -115,7 +115,7 @@ while IFS= read -r md; do
       broken=$((broken + 1))
     fi
   done < <(grep -oE '\]\(([^)]+\.md[^)]*)\)' "$md" 2>/dev/null | sed 's/^](//' | sed 's/)$//')
-done < <(find . -name "*.md" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./_bmad*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*" -not -path "./docs/test-runs/*")
+done < <(find . -name "*.md" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./docs/security-audit-output/*" -not -path "./.claude-audit/*" -not -path "./.claude/*" -not -path "./tests/*" -not -path "./docs/test-runs/*")
 if [ $broken -eq 0 ]; then
   pass
   note "all markdown refs resolve"

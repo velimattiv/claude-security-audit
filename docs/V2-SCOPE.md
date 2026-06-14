@@ -1,5 +1,11 @@
 # /security-audit v2 — Comprehensive Scope & Plan
 
+> **Historical (v2.0).** This is the original v2.0 scope/design. It remains the
+> architectural reference, but specifics evolve: **output routing** is now
+> defined by `skills/security-audit/lib/output-routing.md` (v2.1 removed the
+> `_bmad-output/` auto-detect), and the v2.1 capability backlog lives in
+> `docs/EPIC-v2.1-refresh.md`. Where this doc and those disagree, they win.
+
 Status: **DRAFT — awaiting review before implementation**.
 Target runtime: Claude Code only.
 Source material: 5 parallel research reports (language coverage, scanner tooling, threat modeling, orchestration, cross-language patterns) run 2026-04-24.
@@ -212,7 +218,7 @@ Sub-agents return JSON summaries only (counts by severity + artifact path). Raw 
    - **`phase-07-report.md`** — human report with executive summary, findings tables by severity, attack surface summary, ASVS/API/LLM/LINDDUN coverage matrix, STRIDE tables, route inventory, risk-ranked partition scores.
    - **`findings.sarif`** — consolidated SARIF 2.1.0 for ingestion into GitHub Security tab, DefectDojo, Jira security projects.
    - **`findings.cyclonedx.json`** — SBOM (from trivy or syft) for VEX attachment.
-7. Save final report to `docs/security-audit-report.md` (or `_bmad-output/implementation-artifacts/security-audit-report.md` if `_bmad-output/` exists — BMAD compatibility).
+7. Save final report to the resolved output dir (default `docs/security-audit-output/security-audit-report.md`; see `skills/security-audit/lib/output-routing.md`). [v2.0 wrote `docs/security-audit-report.md` with a `_bmad-output/` fallback; the BMAD auto-detect was removed in v2.1.]
 
 ---
 

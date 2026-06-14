@@ -8,6 +8,12 @@ TODO.md
 # so dogfooding runs against this repo don't leave artifacts behind)
 .claude-audit/
 
+# Generated audit deliverables (default output dir). Keep the human report +
+# pruned baseline trackable; ignore the bulky machine artifacts. Consumer
+# guidance: skills/security-audit/lib/output-routing.md
+docs/security-audit-output/*.sarif
+docs/security-audit-output/*.cyclonedx.json
+
 # Dogfood targets (cloned into /tmp, not this workspace — listed here for
 # completeness in case an operator clones into /workspace by accident)
 /tmp/audit-targets/

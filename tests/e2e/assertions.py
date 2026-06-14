@@ -182,9 +182,19 @@ def check_report_sections(artifact_dir: Path, failures: list[str]) -> None:
     Emits warnings (non-fatal) for missing template-recommended sections
     so the orchestrator's free-form report shape doesn't block the E2E.
     """
+    # Resolve the output dir the run actually used (lib/output-routing.md):
+    # persisted in .claude-audit/config.json, default docs/security-audit-output/.
+    out_dir = "docs/security-audit-output"
+    cfg = artifact_dir / ".claude-audit" / "config.json"
+    if cfg.exists():
+        try:
+            out_dir = json.loads(cfg.read_text()).get("output_dir", out_dir)
+        except (ValueError, OSError):
+            pass
     candidates = [
-        artifact_dir / "docs" / "security-audit-report.md",
-        artifact_dir / "_bmad-output" / "implementation-artifacts" / "security-audit-report.md",
+        artifact_dir / out_dir / "security-audit-report.md",
+        artifact_dir / "docs" / "security-audit-output" / "security-audit-report.md",
+        artifact_dir / "docs" / "security-audit-report.md",  # pre-v2.1 legacy
         artifact_dir / ".claude-audit" / "current" / "phase-07-report.md",
     ]
     report = next((c for c in candidates if c.exists()), None)

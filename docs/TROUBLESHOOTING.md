@@ -122,12 +122,14 @@ findings the scanner bundle didn't already flag.
 
 ## Synthesis (Phase 7)
 
-### Report fails to save to `docs/security-audit-report.md`
+### Report fails to save to the output directory
 
-Check whether `_bmad-output/implementation-artifacts/` exists. If it
-does, the report goes there instead (BMAD compatibility). If neither
-path is writable, the report stays in `.claude-audit/current/phase-07-report.md`
-and the skill prints a warning.
+Deliverables go to the resolved output directory (default
+`docs/security-audit-output/`; see
+`skills/security-audit/lib/output-routing.md`). If that directory is not
+writable, the report stays in `.claude-audit/current/phase-07-report.md` and
+the skill prints a warning. Pass `output: <writable-dir>` to relocate, or
+check `.claude-audit/config.json` for the persisted `output_dir`.
 
 ### SARIF upload to GitHub rejected
 

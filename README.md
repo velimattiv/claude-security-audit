@@ -227,9 +227,12 @@ In Claude Code, invoke with:
 /security-audit top_n: 12                         # override partition cap
 ```
 
-Reports land in `docs/security-audit-report.md` (or
-`_bmad-output/implementation-artifacts/security-audit-report.md` if a
-BMAD output directory is already present in the project).
+Deliverables land in the output directory (default
+`docs/security-audit-output/`): the human `security-audit-report.md`,
+`findings.sarif`, `findings.cyclonedx.json`, and the pruned
+`security-audit-baseline.json`. On first run the skill asks where to write
+them (or pass `output: <dir>`); the choice is remembered for `mode: delta` /
+`mode: report`. See `skills/security-audit/lib/output-routing.md`.
 
 ## CI integration
 
@@ -243,8 +246,8 @@ CircleCI are mechanically similar; PRs welcome.
 The skill writes its working state under `.claude-audit/` at the project
 root. Add `.claude-audit/` to the project's `.gitignore` (the skill will
 offer to do this on first run). The baseline for delta mode is stored in
-two places: the pruned `docs/security-audit-baseline.json` (checked in)
-and the full `.claude-audit/baseline.json` (gitignored).
+two places: the pruned `docs/security-audit-output/security-audit-baseline.json`
+(checked in) and the full `.claude-audit/baseline.json` (gitignored).
 
 ## Troubleshooting
 

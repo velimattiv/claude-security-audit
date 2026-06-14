@@ -4,7 +4,7 @@
 
 📋 **This phase MUST produce, on disk, before exit (full-mode only):**
 - `.claude-audit/baseline.json` (full baseline; gitignored)
-- `docs/security-audit-baseline.json` (pruned baseline; checked in)
+- `<output_dir>/security-audit-baseline.json` (pruned baseline; checked in)
 - `.claude-audit/current/phase-08.done`
 
 ⛔ **SKIP Phase 8 ONLY IF** mode=delta OR `phase-07.done` is absent OR `audit.log` has CRITICAL runtime errors (`findings` CRITICAL-severity is fine and expected — that's the audit's job; the gate is on runtime errors, not findings severity).
@@ -20,7 +20,7 @@
 
 **Outputs.**
 - `.claude-audit/baseline.json` — full baseline (gitignored, detailed).
-- `docs/security-audit-baseline.json` — pruned baseline (checked in).
+- `<output_dir>/security-audit-baseline.json` — pruned baseline (checked in).
 - `.claude-audit/history/<ISO-timestamp>/` — previous `current/` archived
   (rotation happens at the next run's preflight, not here).
 - `.claude-audit/current/phase-08.done`
@@ -89,7 +89,7 @@ Gitignored. Contains **all** findings with full descriptions, attack
 scenarios, suggested fixes. Delta mode reads this to restore context
 cheaply without re-running Phase 5.
 
-### `docs/security-audit-baseline.json` (pruned, checked in)
+### `<output_dir>/security-audit-baseline.json` (pruned, checked in)
 
 Committed to the user's repo. Keeps only:
 - `schema_version`, `skill_version`, `audit_id`
@@ -114,8 +114,11 @@ multi-MB; the pruned file is lightweight enough to diff in PRs.
 4. Write `.claude-audit/baseline.json`.
 5. Produce the pruned form by walking the full struct and copying only
    the fields listed in §8.3.
-6. Ensure the output directory exists: `mkdir -p docs`.
-7. Write `docs/security-audit-baseline.json`.
+6. Resolve `<output_dir>` from `.claude-audit/config.json` (default
+   `docs/security-audit-output/`, see [../lib/output-routing.md](../lib/output-routing.md))
+   and ensure it exists:
+   `OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output); mkdir -p "$OUT"`.
+7. Write the pruned baseline to `$OUT/security-audit-baseline.json`.
 8. Write `.claude-audit/current/phase-08.done`.
 
 ## 8.5 — Rotation of previous runs
@@ -134,7 +137,7 @@ previous run is still intact under `history/`.
 (Reminder of how the baseline is consumed — full procedure in
 `workflow.md §4 "mode: delta"`.)
 
-1. `mode: delta` requires `docs/security-audit-baseline.json`.
+1. `mode: delta` requires `<output_dir>/security-audit-baseline.json`.
 2. Preflight computes `git diff --name-only <baseline.git_head> HEAD`
    (the set of changed files).
 3. Invalidation rules (`docs/V2-SCOPE.md §5`):
@@ -169,7 +172,7 @@ updates land continuously; 90 days is the conservative outer bound.
 
 > Phase 8 complete — baseline written.
 >   - Full: `.claude-audit/baseline.json` ({{full_size}})
->   - Pruned (check in): `docs/security-audit-baseline.json` ({{pruned_size}})
+>   - Pruned (check in): `<output_dir>/security-audit-baseline.json` ({{pruned_size}})
 >
 > Future runs: `/security-audit mode: delta` to re-audit only changed
 > surfaces (typical <5 min after baseline exists).
@@ -198,7 +201,7 @@ updates land continuously; 90 days is the conservative outer bound.
 Before declaring this phase complete and proceeding, run:
 
 ```bash
-test -f .claude-audit/current/../baseline.json # (plus pruned docs/security-audit-baseline.json) \
+test -f .claude-audit/current/../baseline.json # (plus pruned <output_dir>/security-audit-baseline.json) \
   && test -f .claude-audit/current/phase-08.done \
   && echo "phase-08 verified" \
   || { echo "phase-08 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }

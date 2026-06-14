@@ -269,9 +269,9 @@ set -e
 echo
 if [ "$RC" -eq 0 ]; then
   echo "=== E2E PASS ==="
-  echo "Report:    $TARGET_DIR/docs/security-audit-report.md  (or .claude-audit/current/phase-07-report.md)"
-  echo "SARIF:     $TARGET_DIR/.claude-audit/current/findings.sarif"
-  echo "Baseline:  $TARGET_DIR/docs/security-audit-baseline.json"
+  echo "Report:    $TARGET_DIR/docs/security-audit-output/security-audit-report.md  (or .claude-audit/current/phase-07-report.md)"
+  echo "SARIF:     $TARGET_DIR/docs/security-audit-output/findings.sarif  (also .claude-audit/current/findings.sarif)"
+  echo "Baseline:  $TARGET_DIR/docs/security-audit-output/security-audit-baseline.json"
 else
   echo "=== E2E FAIL (exit $RC) — see diff above ==="
 fi

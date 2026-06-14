@@ -39,10 +39,11 @@ consolidated SARIF 2.1.0 document, and a CycloneDX SBOM.
 - `.claude-audit/current/findings.sarif` — SARIF 2.1.0 consolidated.
 - `.claude-audit/current/findings.cyclonedx.json` — SBOM (from trivy
   output if present; otherwise produced by syft if installed).
-- The report is ALSO copied to:
-  - `_bmad-output/implementation-artifacts/security-audit-report.md`
-    if `_bmad-output/` exists in the project,
-  - else `docs/security-audit-report.md`.
+- Deliverable copies under the resolved `<output_dir>` (default
+  `docs/security-audit-output/`, see [../lib/output-routing.md](../lib/output-routing.md)):
+  `<output_dir>/security-audit-report.md`, `<output_dir>/findings.sarif`,
+  `<output_dir>/findings.cyclonedx.json`. Copy AFTER the blackboard files
+  above exist (blackboard-first).
 - `.claude-audit/current/phase-07.done`
 
 **Execution.** Single orchestrator pass. No sub-agent fan-out (synthesis
@@ -241,15 +242,23 @@ If no SBOM is available, emit a minimal CycloneDX skeleton with the
 detected languages / frameworks from Phase 0 and note "SBOM
 incomplete — install trivy or syft for full coverage".
 
-## 7.10 — Save user-facing report
+## 7.10 — Save user-facing deliverables
 
-Check for `_bmad-output/` directory in the project root. If present:
-- Write to `_bmad-output/implementation-artifacts/security-audit-report.md`.
+Resolve `<output_dir>` per [../lib/output-routing.md](../lib/output-routing.md)
+(already resolved + persisted in `.claude-audit/config.json` during preflight;
+read it from there, default `docs/security-audit-output/`). Then, AFTER the
+blackboard files exist:
 
-Else:
-- Write to `docs/security-audit-report.md`.
+```bash
+OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output)
+mkdir -p "$OUT"
+cp .claude-audit/current/phase-07-report.md      "$OUT/security-audit-report.md"
+cp .claude-audit/current/findings.sarif          "$OUT/findings.sarif"
+cp .claude-audit/current/findings.cyclonedx.json "$OUT/findings.cyclonedx.json"
+```
 
-Echo the path to the user.
+Echo `$OUT/security-audit-report.md` to the user. (The pruned baseline is
+copied to `$OUT/` by Phase 8.)
 
 ## 7.11 — Report summary to user
 
@@ -259,9 +268,10 @@ Echo the path to the user.
 > - **Partitions audited:** <N> at full depth, <K> inventory-only
 > - **Confidence mix:** <X> CONFIRMED, <Y> LIKELY, <Z> POSSIBLE
 > - **Unique-to-skill findings:** <U>
-> - **Report:** `<report_path>`
-> - **SARIF:** `.claude-audit/current/findings.sarif` (upload to GitHub
->   Security tab via `gh security-advisory` or CI integration)
+> - **Report:** `<output_dir>/security-audit-report.md`
+> - **SARIF:** `<output_dir>/findings.sarif` (also in
+>   `.claude-audit/current/findings.sarif`; upload to GitHub Security tab via
+>   `gh security-advisory` or CI integration)
 >
 > **Next steps:**
 > 1. "fix finding <id>" — fix a specific finding
