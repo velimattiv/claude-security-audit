@@ -46,7 +46,7 @@ git clone --depth 1 --branch v2.2.0 \
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
 # 4. Verify
-cat ~/.claude/skills/security-audit/VERSION                  # 2.0.6
+cat ~/.claude/skills/security-audit/VERSION                  # 2.2.0
 ls  ~/.claude/skills/security-audit/manifest.yaml            # must exist
 ls  ~/.claude/skills/security-audit/lib/validate-findings.py # must exist
 

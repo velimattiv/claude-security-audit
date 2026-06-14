@@ -16,7 +16,16 @@ Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD, MCP/Agentic).
 
 ## Version
 
-- **v2.0.6** (current) — DinD probe `:ro,z` SELinux fix in the
+- **v2.2.0** (current) — CyberGym-E2E-derived quality round: sub-agent
+  repo-navigation discipline + explicit source→sink taint tracing,
+  semantic-correctness scorecard check (`--semantic-floor`), patched-commit
+  decoy method, and a CWE↔OWASP tag-pair validator. See CHANGELOG +
+  `docs/EPIC-v2.2-cybergym.md`.
+- **v2.1.0** — capability refresh: supply-chain (cat-10) + MCP/agentic
+  (cat-11) deep-dives, methodology spine (OWASP Top 10:2025, CWE Top 25,
+  Agentic 2026), unified configurable output dir (de-BMAD), grype EPSS/KEV,
+  precision/recall scorecard. See CHANGELOG + `docs/EPIC-v2.1-refresh.md`.
+- **v2.0.6** — DinD probe `:ro,z` SELinux fix in the
   Path B smoke test (probe was misclassifying SELinux confinement
   as DinD blockage, pushing every Fedora / RHEL / CentOS contributor
   to a misleading PASS-WITH-LIMITATIONS exit).
