@@ -7,6 +7,8 @@
 - `.claude-audit/current/phase-06-asvs.jsonl` (one row per ASVS L2 sub-item where relevant)
 - `.claude-audit/current/phase-06-api-top10.jsonl` (per-surface mapping to API Top 10 2023)
 - `.claude-audit/current/phase-06-llm-top10.jsonl` — ALWAYS written. If `profile.llm_usage.detected == false` or `kind == "internal"`, write a zero-byte file (the file's presence is the signal that the gate ran).
+- `.claude-audit/current/phase-06-web-top10.jsonl` — ALWAYS written. One row per OWASP Top 10:2025 (web) category (A01..A10) with counts + pointers (§6.16). A pure roll-up from existing findings' CWEs; never gated.
+- `.claude-audit/current/phase-06-agentic-top10.jsonl` — ALWAYS written. If `profile.mcp_agentic.detected != true`, write a zero-byte file (the file's presence is the signal that the gate ran). Otherwise one row per ASI01..ASI10 (§6.17).
 - `.claude-audit/current/phase-06-linddun.jsonl` — ALWAYS written. If `profile.pii.detected == false`, write a zero-byte file.
 - `.claude-audit/current/phase-06-stride/*.md` — one Markdown file per top-N partition (filename uses the partition id, e.g. `services-api.md`)
 - `.claude-audit/current/phase-06.done`
@@ -37,6 +39,10 @@ methodology spines (ASVS, API Top 10, LLM Top 10, LINDDUN, STRIDE).
   per attack-surface row.
 - `.claude-audit/current/phase-06-llm-top10.jsonl` — LLM Top 10 (if LLM
   usage detected; else empty).
+- `.claude-audit/current/phase-06-web-top10.jsonl` — OWASP Top 10:2025
+  (web) mapping, one row per A01..A10 (always written; roll-up).
+- `.claude-audit/current/phase-06-agentic-top10.jsonl` — Agentic
+  Applications 2026 coverage (if `mcp_agentic.detected`; else empty).
 - `.claude-audit/current/phase-06-linddun.jsonl` — LINDDUN privacy review
   (if PII detected; else empty).
 - `.claude-audit/current/phase-06-stride/<partition>.md` — STRIDE table
@@ -268,17 +274,109 @@ The STRIDE sub-agent reads:
 
 Output Markdown, not JSONL (STRIDE is inherently tabular-narrative).
 
+## 6.16 — OWASP Top 10:2025 (web) mechanical mapping
+
+**Always runs** (no gate, no sub-agent fan-out) — this is a roll-up from
+the CWE tags every finding already carries, mirroring the §6.10 API Top 10
+pattern. Drive it off the lookup table in `lib/owasp-web-top10.md` (Part 1).
+
+**Edition.** OWASP Top 10:2025 (web) — final (announced Nov 2025, final
+text Jan 2026). Tag form `A##:2025` (e.g. `A03:2025`). The owasp_ids
+pattern in `lib/finding-schema.json` already admits `A\d+:\d{4}`.
+
+For each finding collected so far (Phase 5 deep-dives + §6.1-6.13), look
+up `properties.cwe` in the `lib/owasp-web-top10.md` Part 1 table and assign
+it to the **first** matching `A##:2025` category (A01→A10 order, so the
+specific access-control / supply-chain buckets win ties — do not
+double-count one finding into two A## categories). Key 2025 changes to
+honour in the mapping:
+- **SSRF (CWE-918) rolls up to A01** (Broken Access Control), not to A05
+  Injection — this is the 2025 fold. Keep the finding's own
+  `category: injection`; only the `A##:2025` roll-up changes.
+- **A03 Software Supply Chain Failures** (NEW) draws from cat-10 supply-
+  chain findings + scanner SBOM/dependency results (osv-scanner, trivy,
+  grype). A `category: supply_chain` finding still rolls up to A03.
+- **A02 Security Misconfiguration** is the §6.1-6.8 config bucket.
+- **A10 Mishandling of Exceptional Conditions** (NEW) draws from §6.4
+  error-handling findings.
+
+Append the resolved `A##:2025` id to the finding's `owasp_ids[]` (additive;
+never replace existing tags) and emit `phase-06-web-top10.jsonl` with one
+row per A01..A10 containing counts and pointers into the underlying
+findings. Keep the web Top 10 **and** the API Top 10 (§6.10) — both ship.
+
+Row shape (one JSON object per line):
+```json
+{"web_top10_id":"A03:2025","name":"Software Supply Chain Failures","count":0,"finding_ids":[]}
+```
+
+Emit all 10 rows (A01..A10) even when a category's count is 0, so Phase 7's
+coverage matrix can report which categories fired.
+
+## 6.17 — Agentic Applications 2026 coverage lens — conditional
+
+If `profile.mcp_agentic.detected != true`, write an empty
+`.claude-audit/current/phase-06-agentic-top10.jsonl` (literally zero bytes)
+and note the skip in the methodology coverage. The empty file is the signal
+that the gate ran; do not omit it. This gate **mirrors how §6.11 LLM Top 10
+is gated on `llm_usage`** — except it keys on `mcp_agentic` (tool-calling /
+MCP surface), which is a distinct surface that the LLM gate would wrongly
+skip.
+
+If `mcp_agentic.detected == true`, this is a **spine-level coverage view**,
+NOT new analysis: `steps/deepdive/cat-11-mcp-agentic.md` already emits
+per-finding `ASI##:2026` tags during its fan-out. Here, roll those cat-11
+findings up by ASI tag into an ASI01..ASI10 coverage matrix, using the list
+in `lib/owasp-agentic-2026.md`. No sub-agent fan-out (cat-11 already did it).
+
+**Edition.** OWASP Top 10 for Agentic Applications 2026 — published
+2025-12-09; **complementary to** the LLM Top 10 2025. LLM tags stay
+`LLM##:2025`; agentic tags are `ASI##:2026` (e.g. `ASI01:2026`). The
+owasp_ids pattern already admits `ASI\d+:\d{4}`.
+
+Emit `phase-06-agentic-top10.jsonl`, one row per ASI01..ASI10:
+```json
+{"agentic_id":"ASI01:2026","name":"Agent Goal Hijack","count":0,"finding_ids":[]}
+```
+
+## 6.18 — NIST SSDF (SP 800-218 v1.1) repo meta-check
+
+Repo-metadata-level assertions (NOT per-finding). Cite **NIST SP 800-218
+v1.1 (Feb 2022)** explicitly. Assert presence of:
+- (PO/RV) a documented vuln-disclosure / `SECURITY.md`.
+- (PS/PW) dependency-pinning + SBOM generation in CI.
+- (PS.2) signed releases / build provenance.
+- (PW.7 / PW.8) automated SAST + secret-scanning in CI.
+
+**When `profile.llm_usage.detected == true` OR `profile.mcp_agentic.detected
+== true`**, ADD the **SP 800-218A** assertions — the *Generative-AI / dual-
+use SSDF Community Profile*, **final July 2024** (an extension of 800-218,
+not a replacement). These are repo-metadata-level meta-checks relevant to
+AI components, reported as a meta-check section (not per-finding):
+- training-data provenance documented (source, license, integrity);
+- model-artifact integrity (checksums / signatures for shipped weights;
+  cross-ref cat-10 / cat-11 model-deserialization findings);
+- model-supply-chain documentation (which hubs / base models, pinned
+  revisions, `trust_remote_code` posture).
+
+Record the SSDF + (conditional) 800-218A results inside `phase-06-config.json`
+under an `ssdf` key; surface them in the Phase 7 report's coverage section.
+
 ## 6.14 — Emit
 
-Write all JSONL files, the STRIDE Markdown files, and
-`phase-06-config.json` (the §6.1-6.8 findings in structured form).
+Run §6.16-6.18 (web Top 10 roll-up, agentic coverage lens, SSDF meta-check)
+after the §6.1-6.13 work, then write all JSONL files (including
+`phase-06-web-top10.jsonl` and `phase-06-agentic-top10.jsonl`), the STRIDE
+Markdown files, and `phase-06-config.json` (the §6.1-6.8 config findings
+plus the §6.18 `ssdf` meta-check block, in structured form).
 Write `phase-06.done`.
 
 ## 6.15 — Report to user
 
 > Phase 6 complete — ASVS coverage: <X%> passed, <Y%> failed, <Z%> N/A.
-> API Top 10 mapping: <count> findings across <N> categories. <LLM/LINDDUN
-> status>. STRIDE tables written for <K> partitions. Proceeding to Phase 7.
+> API Top 10 mapping: <count> findings across <N> categories. Web Top
+> 10:2025: <K> of 10 categories fired. <LLM/Agentic/LINDDUN status>.
+> STRIDE tables written for <K> partitions. Proceeding to Phase 7.
 
 ---
 

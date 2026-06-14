@@ -1,0 +1,119 @@
+{
+  "target": "DVWA@v1.10",
+  "schema_version": 3,
+  "target_repo": "https://github.com/digininja/DVWA.git",
+  "target_ref": "v1.10",
+  "target_ref_note": "Pinned to the tagged DVWA v1.10 release (digininja/DVWA, the canonical 'Damn Vulnerable Web Application'). PHP + MariaDB/MySQL, GPL-3.0. DVWA grades every module low/medium/high/impossible: the low/medium/high source files are deliberately vulnerable (POSITIVE fixtures); the impossible source file is the hardened, parameterized/escaped twin (NEGATIVE decoy). This gives a positive and a false-positive denominator from a SINGLE module. v1.10 is stable for fixture pinning; if you re-pin to the newer 'Vulnerable APIs' release (2025-01-29) re-verify file paths — the vulnerabilities/<module>/source/<level>.php layout has been stable across releases but the API modules added new directories.",
+  "languages": ["php"],
+
+  "notes": "Match rule identical to expected-findings.json (see tests/e2e/assertions.py). DVWA's per-module graded sources make precision testing cheap: source/{low,medium,high}.php are the vulnerable twins; source/impossible.php is the safe twin that MUST NOT be flagged. Select with: scripts/run-e2e-test.sh --target dvwa.",
+
+  "schema_changelog": {
+    "v3": "see expected-findings.json — negative_expectations[] decoys + precision/recall scorer."
+  },
+
+  "expectations": [
+    {
+      "id": "dvwa-01",
+      "description": "SQL injection — unparameterized query built from $_GET['id'] (string concatenation into mysqli_query).",
+      "cwe": "CWE-89",
+      "category": "injection",
+      "file_pattern": "vulnerabilities/sqli/source/low.php",
+      "alternate_file_patterns": ["vulnerabilities/sqli/source/medium.php", "vulnerabilities/sqli_blind/source/low.php"],
+      "rationale": "Canonical DVWA SQLi: \"SELECT first_name, last_name FROM users WHERE user_id = '$id'\" with no parameterization. Blind variant (sqli_blind) is an alternate file."
+    },
+    {
+      "id": "dvwa-02",
+      "description": "Reflected XSS — $_GET['name'] echoed into the response without output encoding.",
+      "cwe": "CWE-79",
+      "category": "injection",
+      "alternate_categories": ["xss"],
+      "file_pattern": "vulnerabilities/xss_r/source/low.php",
+      "alternate_file_patterns": ["vulnerabilities/xss_r/source/medium.php"],
+      "rationale": "Reflected XSS: echo 'Hello ' . $_GET['name'] with no htmlspecialchars()."
+    },
+    {
+      "id": "dvwa-03",
+      "description": "Stored XSS — message/name persisted to DB and rendered without encoding.",
+      "cwe": "CWE-79",
+      "category": "injection",
+      "alternate_categories": ["xss"],
+      "file_pattern": "vulnerabilities/xss_s/source/low.php",
+      "must_match": false,
+      "rationale": "Soft: stored XSS requires tracing a persisted value across write (guestbook insert) and read (render) paths; single-shot auditors catch reflected (dvwa-02) but often miss the stored variant. CWE-79 same class."
+    },
+    {
+      "id": "dvwa-04",
+      "description": "OS command injection — $_REQUEST['ip'] concatenated into a shell ping command (shell_exec).",
+      "cwe": "CWE-78",
+      "category": "injection",
+      "file_pattern": "vulnerabilities/exec/source/low.php",
+      "alternate_file_patterns": ["vulnerabilities/exec/source/medium.php"],
+      "rationale": "Canonical command injection: shell_exec('ping ' . $target) with no validation; medium.php blacklists only '&&' and ';' (still bypassable)."
+    },
+    {
+      "id": "dvwa-05",
+      "description": "File inclusion (LFI/RFI) — $_GET['page'] passed to include() with no allow-list.",
+      "cwe": "CWE-22",
+      "alternate_cwes": ["CWE-98", "CWE-73"],
+      "category": "injection",
+      "file_pattern": "vulnerabilities/fi/source/low.php",
+      "alternate_file_patterns": ["vulnerabilities/fi/source/medium.php"],
+      "rationale": "include($_GET['page']); — path traversal / remote file inclusion. CWE-98 is the precise PHP-remote-file-inclusion tag; CWE-22 path traversal accepted; CWE-73 external-control-of-filename also valid."
+    },
+    {
+      "id": "dvwa-06",
+      "description": "Unrestricted file upload — uploaded file moved into webroot with no type/content validation.",
+      "cwe": "CWE-434",
+      "alternate_cwes": ["CWE-646"],
+      "category": "injection",
+      "alternate_categories": ["deployment"],
+      "file_pattern": "vulnerabilities/upload/source/low.php",
+      "alternate_file_patterns": ["vulnerabilities/upload/source/medium.php"],
+      "must_match": false,
+      "rationale": "Soft: move_uploaded_file into the webroot enabling webshell upload; medium.php checks $_FILES type (client-controlled, bypassable). Requires file-upload deep dive (cat-08)."
+    }
+  ],
+
+  "negative_expectations": [
+    {
+      "id": "dvwa-neg-01",
+      "description": "SQLi 'impossible' level uses a prepared statement (PDO ->prepare / ->bindParam) — NOT injectable.",
+      "file_pattern": "vulnerabilities/sqli/source/impossible.php",
+      "forbidden_cwe": "CWE-89",
+      "forbidden_category": "injection",
+      "min_severity": "MEDIUM",
+      "rationale": "DVWA's designed safe twin of dvwa-01: $data = $db->prepare('SELECT ... WHERE user_id = (:id) ...'); $data->bindParam(':id', ...). Flagging it as SQLi is the textbook false positive the graded levels exist to catch."
+    },
+    {
+      "id": "dvwa-neg-02",
+      "description": "Command-exec 'impossible' level validates the IP with explode()+is_numeric octet checks and uses stripslashes — input is constrained, not injectable.",
+      "file_pattern": "vulnerabilities/exec/source/impossible.php",
+      "forbidden_cwe": "CWE-78",
+      "forbidden_category": "injection",
+      "min_severity": "MEDIUM",
+      "rationale": "Safe twin of dvwa-04: the target is split on '.' and each octet checked with is_numeric before being reassembled, so no shell metacharacters survive. A finding here is an FP."
+    },
+    {
+      "id": "dvwa-neg-03",
+      "description": "Reflected-XSS 'impossible' level wraps output in htmlspecialchars() — correctly encoded.",
+      "file_pattern": "vulnerabilities/xss_r/source/impossible.php",
+      "forbidden_cwe": "CWE-79",
+      "forbidden_category": "injection",
+      "min_severity": "MEDIUM",
+      "rationale": "Safe twin of dvwa-02: htmlspecialchars($_GET['name']) before echo. Encoded output is not XSS."
+    }
+  ],
+
+  "gated_categories": {
+    "token_scope": "DVWA has no PAT/scope/OAuth-token system; session-cookie auth only. No token_scope ground truth.",
+    "mitm": "DVWA makes no outbound TLS calls of note. No mitm fixture.",
+    "deployment": "DVWA ships an intentionally weak config but the fixture does not assert a specific deployment finding (config drift across releases). Not a gated-off category — just unfixtured here.",
+    "llm": "No LLM SDK in DVWA; cat-09 gated off. Absent phase-05-llm-*.jsonl is pass-via-skip.",
+    "agentic": "No MCP/agent/tool-definition surface in DVWA; profile.mcp_agentic.detected=false → cat-agentic gated off. Absent phase-05-agentic-*.jsonl is a LEGITIMATE skip."
+  },
+
+  "always_on_categories": {
+    "supply_chain": "Always-on. DVWA's PHP dependencies are sparse (mostly vendored), but cat-supply_chain still runs; no specific supply_chain fixture is asserted."
+  }
+}

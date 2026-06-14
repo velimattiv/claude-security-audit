@@ -21,12 +21,20 @@
 #
 # Usage:
 #   scripts/run-e2e-test.sh              # full E2E (Path A — host scanners)
+#   scripts/run-e2e-test.sh --target X   # select the E2E target / fixture:
+#                                        #   juice-shop (default) → tests/e2e/expected-findings.json
+#                                        #   dvwa                  → tests/e2e/dvwa-fixture.json
+#                                        #   crapi                 → tests/e2e/crapi-fixture.json
+#                                        # Repo + pinned ref come from the fixture's
+#                                        # target_repo / target_ref fields (juice-shop
+#                                        # still uses config.env for back-compat).
 #   scripts/run-e2e-test.sh --path-b     # full E2E with Path B — scanners run in
 #                                        # the isolated container, host PATH
 #                                        # binaries (if any) are bypassed via
 #                                        # AUDIT_FORCE_PATH_B=1
 #   scripts/run-e2e-test.sh --dry-run    # skip `claude` invocation; validate existing artifacts
 #   scripts/run-e2e-test.sh --keep       # do NOT wipe the target dir (preserve baseline for delta-mode testing)
+#   scripts/run-e2e-test.sh --min-recall N --min-precision N  # opt-in scorecard floors
 #   scripts/run-e2e-test.sh --help
 #
 # Cost: expect $5-$20 per run on an API key, or no marginal cost on
@@ -48,19 +56,72 @@ fi
 DRY_RUN=0
 KEEP=0
 PATH_B=0
+TARGET="${TARGET_NAME:-juice-shop}"   # default from config.env
+MIN_RECALL=""
+MIN_PRECISION=""
 while [ $# -gt 0 ]; do
   case "${1:-}" in
     --dry-run) DRY_RUN=1; shift ;;
     --keep)    KEEP=1; shift ;;
     --path-b)  PATH_B=1; shift ;;
-    --help|-h) sed -n '2,40p' "$0"; exit 0 ;;
+    --target)  TARGET="${2:?--target needs a value (juice-shop|dvwa|crapi)}"; shift 2 ;;
+    --target=*) TARGET="${1#*=}"; shift ;;
+    --min-recall)    MIN_RECALL="${2:?--min-recall needs a value}"; shift 2 ;;
+    --min-recall=*)  MIN_RECALL="${1#*=}"; shift ;;
+    --min-precision)    MIN_PRECISION="${2:?--min-precision needs a value}"; shift 2 ;;
+    --min-precision=*)  MIN_PRECISION="${1#*=}"; shift ;;
+    --help|-h) sed -n '2,52p' "$0"; exit 0 ;;
     "")        break ;;
     *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
   esac
 done
 
+# --- Target → fixture / repo / ref resolution --------------------------------
+# juice-shop keeps reading config.env (back-compat); dvwa + crapi read their
+# repo + pinned ref straight out of the fixture JSON's target_repo/target_ref
+# fields so the pin lives in ONE place (the fixture).
+read_fixture_field() {  # $1=fixture path, $2=top-level key
+  python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or '')" "$1" "$2"
+}
+
+case "$TARGET" in
+  juice-shop|"")
+    TARGET="juice-shop"
+    FIXTURE="$REPO_ROOT/tests/e2e/expected-findings.json"
+    # TARGET_REPO / TARGET_TAG / TARGET_NAME come from config.env.
+    ;;
+  dvwa)
+    FIXTURE="$REPO_ROOT/tests/e2e/dvwa-fixture.json"
+    TARGET_NAME="dvwa"
+    TARGET_REPO="$(read_fixture_field "$FIXTURE" target_repo)"
+    TARGET_TAG="$(read_fixture_field "$FIXTURE" target_ref)"
+    TARGET_DIR="${TARGET_DIR}-dvwa"   # isolate target clones per target
+    ;;
+  crapi)
+    FIXTURE="$REPO_ROOT/tests/e2e/crapi-fixture.json"
+    TARGET_NAME="crapi"
+    TARGET_REPO="$(read_fixture_field "$FIXTURE" target_repo)"
+    TARGET_TAG="$(read_fixture_field "$FIXTURE" target_ref)"
+    TARGET_DIR="${TARGET_DIR}-crapi"
+    ;;
+  *)
+    echo "ERROR: unknown --target '$TARGET'. Valid: juice-shop, dvwa, crapi." >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -f "$FIXTURE" ]; then
+  echo "ERROR: fixture for target '$TARGET' not found: $FIXTURE" >&2
+  exit 2
+fi
+if [ -z "${TARGET_REPO:-}" ] || [ -z "${TARGET_TAG:-}" ]; then
+  echo "ERROR: target '$TARGET' has no repo/ref (fixture missing target_repo/target_ref?)." >&2
+  exit 2
+fi
+
 echo "=== /security-audit E2E ==="
 echo "Target:         $TARGET_NAME @ $TARGET_TAG"
+echo "Fixture:        $FIXTURE"
 echo "Skill version:  $(cat "$REPO_ROOT/skills/security-audit/VERSION" | tr -d '[:space:]')"
 echo "Target dir:     $TARGET_DIR"
 echo "Artifacts:      $TARGET_DIR/.claude-audit (inside target clone)"
@@ -257,12 +318,22 @@ fi
 # --- 5. Run assertions -------------------------------------------------------
 echo
 echo "[5/5] Running assertion suite..."
-set +e
-python3 "$REPO_ROOT/tests/e2e/assertions.py" \
-  --artifact-dir "$TARGET_DIR" \
-  --repo-root "$REPO_ROOT" \
-  --fixture "$REPO_ROOT/tests/e2e/expected-findings.json" \
+# Scorecard is written next to the run artifacts (inside the target clone,
+# which lives under /tmp and is gitignored), NOT into the repo's tests/e2e/,
+# so a live run never dirties the working tree. The default scorecard-dir
+# (the fixture's directory) is what a manual `python3 assertions.py` uses.
+SCORECARD_DIR="$TARGET_DIR/.claude-audit/current"
+ASSERT_ARGS=(
+  --artifact-dir "$TARGET_DIR"
+  --repo-root "$REPO_ROOT"
+  --fixture "$FIXTURE"
+  --scorecard-dir "$SCORECARD_DIR"
   --require-jsonschema-backend
+)
+[ -n "$MIN_RECALL" ]    && ASSERT_ARGS+=( --min-recall "$MIN_RECALL" )
+[ -n "$MIN_PRECISION" ] && ASSERT_ARGS+=( --min-precision "$MIN_PRECISION" )
+set +e
+python3 "$REPO_ROOT/tests/e2e/assertions.py" "${ASSERT_ARGS[@]}"
 RC=$?
 set -e
 
@@ -272,6 +343,7 @@ if [ "$RC" -eq 0 ]; then
   echo "Report:    $TARGET_DIR/docs/security-audit-output/security-audit-report.md  (or .claude-audit/current/phase-07-report.md)"
   echo "SARIF:     $TARGET_DIR/docs/security-audit-output/findings.sarif  (also .claude-audit/current/findings.sarif)"
   echo "Baseline:  $TARGET_DIR/docs/security-audit-output/security-audit-baseline.json"
+  echo "Scorecard: $SCORECARD_DIR/scorecard.md  (+ scorecard.json — precision/recall/F1)"
 else
   echo "=== E2E FAIL (exit $RC) — see diff above ==="
 fi

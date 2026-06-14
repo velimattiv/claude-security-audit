@@ -162,11 +162,78 @@ Build a table for the report:
 | Methodology | Coverage | Findings tagged |
 |---|---|---|
 | ASVS 5.0 L2 | X% (pass / fail / n.a.) | N |
+| OWASP Top 10:2025 (web) | K/10 categories fired (A01..A10) | N |
 | API Top 10 (2023) | per-category counts | N |
 | LLM Top 10 (2025) | per-category counts (or N/A) | N |
+| OWASP Agentic Applications (2026) | K/10 ASI categories fired (or N/A) | N |
 | LINDDUN | 7-category counts (or N/A) | N |
 | STRIDE | partitions covered | Markdown tables |
 | CWE | unique CWEs seen | N |
+| CWE Top 25 (2025) | hits / 25 (highest-ranked: #R) | N |
+
+- **OWASP Top 10:2025 (web)** row reads `phase-06-web-top10.jsonl` (§6.16);
+  count categories whose `count > 0`. **Agentic (2026)** row reads
+  `phase-06-agentic-top10.jsonl` (§6.17); show `N/A` when that file is
+  zero bytes (gate did not fire).
+- **CWE Top 25 (2025)** row is computed by §7.13 below.
+
+## 7.13 — CWE Top 25 (2025) prioritization enrichment
+
+**Additive, after §7.4 severity is final. Pure lookup, no fan-out.** Uses
+the ranked list in `lib/owasp-web-top10.md` (Part 2) — MITRE CWE Top 25
+(2025), published 2025-12-15.
+
+For each finding whose `properties.cwe` matches an in-map `CWE-NNN` row in
+that list:
+1. Stamp `properties.cwe_top25_2025_rank` = the row's rank (1–25) on the
+   finding's SARIF result (and carry it on the in-memory finding).
+2. Treat Top-25 membership as a **reporting-priority** signal, surfaced in
+   the Executive Summary ("CWE Top 25 (2025) hits: <n>, top-ranked #<r>")
+   and as a tiebreaker when ordering findings of equal severity (lower
+   rank = list first).
+
+**Severity-cap interaction (MANDATORY — do NOT break §7.4):**
+- This enrichment may **raise priority by at most one rung** and **never
+  lowers** severity.
+- The ±1-rung cap in §7.4 is the single authority. If §7.4 already applied
+  a +1 promotion to a finding, Top-25 membership adds **zero** further
+  rungs — it becomes a pure reporting highlight only (no second bump).
+- Concretely: the total context-driven promotion for any finding is **≤ +1
+  rung** counting §7.4 and §7.13 together. Top-25 never stacks on top of an
+  existing §7.4 promotion, and never demotes.
+
+The seven memory-safety entries in the Part 2 list (rendered as `#NNN`,
+not `CWE-NNN`) are not in `lib/cwe-map.json`, so they never match a finding
+— correct for a web/polyglot audit.
+
+## 7.14 — grype EPSS / CISA-KEV join
+
+**Additive prioritization, after §7.4. Never lowers severity.** Scanner
+side already documented in `lib/scanner-bundle.md` (grype EPSS/KEV).
+
+If `phase-04-scanners/grype.json` exists, read it and join onto matching
+findings by CVE / GHSA id:
+- EPSS probability: `.matches[].vulnerability.epss[0].epss`
+- CISA-KEV flag: `.matches[].vulnerability.knownExploited` (boolean)
+
+Match grype entries to findings by vulnerability id (CVE-/GHSA-) — these
+appear in dependency/SCA findings' `id`, `title`, or `sources[].detail`,
+and in scanner-run SARIF `ruleId`. For each matched finding:
+1. Stamp `properties.epss` (numeric string, e.g. `"0.142"`) and
+   `properties.kev` (`"true"`/`"false"`) on its SARIF result.
+2. If **EPSS ≥ 0.10 OR KEV == true**, add it to an **"Exploit-likely"**
+   callout surfaced in the Executive Summary and at the top of the
+   Remediation Roadmap.
+
+**Severity-cap interaction:** EPSS/KEV is prioritization-only and
+**additive** — it may raise reporting priority but **never lowers**
+severity, and like §7.13 it does not stack a second rung on top of any
+§7.4 promotion (the ±1-rung cap is authoritative). KEV/high-EPSS findings
+that are still only MEDIUM by the rubric stay MEDIUM but are flagged
+"Exploit-likely" so triage sees them first.
+
+If `grype.json` is absent, skip silently (grype is optional) and note
+"EPSS/KEV: grype not run" in the report's coverage section.
 
 ## 7.7 — Emit `phase-07-report.md`
 
@@ -175,7 +242,9 @@ Use the template in `lib/report-template.md`. Sections in order:
 1. **Header** — project name, audit id, skill version, generated-at,
    scope, duration.
 2. **Executive Summary** — total findings, by severity, by category,
-   by confidence. Top 3 risks (one line each).
+   by confidence. Top 3 risks (one line each). Plus: **CWE Top 25 (2025)
+   hits** (§7.13) and the **"Exploit-likely" callout** (EPSS ≥ 0.10 OR
+   KEV=true, §7.14) when either is non-empty.
 3. **Partition Risk Ranking** — table from Phase 1 with finding counts
    appended per partition.
 4. **Findings** — grouped by severity (CRITICAL → INFO), within severity
@@ -219,6 +288,11 @@ Every `results[]` item in the synthetic `security-audit-skill` run:
   for fixture matching, baseline carryover, and GitHub Security tab
   grouping. Look up in `lib/cwe-map.json`.
 - `properties.category`: one of the 10 category slugs. Recommended.
+- `properties.cwe_top25_2025_rank` (optional): integer 1–25 when the
+  finding's CWE is in the 2025 CWE Top 25 (§7.13).
+- `properties.epss` / `properties.kev` (optional): EPSS probability and
+  CISA-KEV flag joined from grype (§7.14). Additive prioritization signals
+  only — they never change `level` or `properties.security-severity`.
 
 **Scanner-run results.** Per-scanner SARIF runs (semgrep, trivy, etc.)
 emit CWE in scanner-specific locations — `tags[]`, `rule.properties.tags`,

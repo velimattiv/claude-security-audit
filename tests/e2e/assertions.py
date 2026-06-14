@@ -313,6 +313,319 @@ def check_jsonl_schema_validity(
             failures.append(f"SCHEMA-FAIL: {jsonl.name} — {result.stdout}{result.stderr}")
 
 
+# --- Precision/recall scorecard (schema v3) ---------------------------------
+#
+# The coverage gate (check_expectations) answers "did we find the bugs?".
+# The scorecard adds "did we ALSO avoid flagging safe code?" by scoring
+# every finding against the fixture's positive expectations AND its
+# negative_expectations[] decoys:
+#
+#   TP = a positive expectation matched by >=1 finding.
+#   FN = a positive expectation with no matching finding.
+#   FP = a finding that matches a negative_expectation's forbidden tuple
+#        (file + forbidden_cwe/forbidden_category) at >= the decoy's
+#        min_severity, AND is not itself a true positive (a finding that
+#        legitimately satisfies a positive expectation is never counted
+#        as an FP, even if it also lands on a decoy file — TP precedes FP;
+#        see neg-03 in expected-findings.json).
+#
+#   precision = TP / (TP + FP)   recall = TP / (TP + FN)   F1 = 2PR/(P+R)
+#
+# Findings that land outside any labeled region (neither a positive nor a
+# decoy) are "unscored" — precision is computed only over labeled
+# territory so legitimate extra finds are not penalised (research note
+# §2). Default gate floors are 0.0 (no-op) so the scorecard is purely
+# additive and never regresses the existing coverage gate.
+
+SEVERITY_RANK = {
+    "INFO": 0, "INFORMATIONAL": 0, "NONE": 0, "NOTE": 0,
+    "LOW": 1, "WARNING": 1, "WARN": 1,
+    "MEDIUM": 2, "MODERATE": 2, "MED": 2,
+    "HIGH": 3, "ERROR": 3,
+    "CRITICAL": 4, "CRIT": 4,
+}
+
+
+def finding_severity_rank(finding: dict) -> int:
+    """Best-effort severity → ordinal rank. Accepts a textual `severity`
+    (LOW/MEDIUM/HIGH/CRITICAL or SARIF level/INFO synonyms) or a numeric
+    SARIF `security-severity` (CVSS 0-10). Unknown/absent severity is
+    treated as MEDIUM (rank 2) — the conservative default so a finding
+    with no severity still counts against a MEDIUM-floor decoy."""
+    # Prefer the numeric CVSS-style score (SARIF properties.security-severity)
+    # — it is finer-grained than the coarse SARIF `level` (error/warning/note),
+    # so when both are present the numeric value wins.
+    score = finding.get("security_severity")
+    if score is None:
+        props = finding.get("properties")
+        if isinstance(props, dict):
+            score = props.get("security-severity")
+    if score is not None:
+        try:
+            v = float(score)
+        except (TypeError, ValueError):
+            v = None
+        if v is not None:
+            if v >= 9.0:
+                return 4
+            if v >= 7.0:
+                return 3
+            if v >= 4.0:
+                return 2
+            if v > 0.0:
+                return 1
+            return 0
+    # No numeric score → fall back to a textual severity / SARIF level.
+    sev = finding.get("severity")
+    if isinstance(sev, str) and sev.strip():
+        return SEVERITY_RANK.get(sev.strip().upper(), 2)
+    return 2  # no severity info → conservative MEDIUM
+
+
+def finding_matches_negative(finding: dict, neg: dict) -> bool:
+    """True if `finding` lands on a negative_expectation decoy AND matches
+    its forbidden tuple at >= the decoy's min_severity. A decoy may forbid
+    by cwe (forbidden_cwe / forbidden_cwes), by category
+    (forbidden_category / forbidden_categories), or both — when both are
+    given, EITHER matching is enough to count as an FP (a naive auditor
+    flagging the safe file under the wrong cwe OR the wrong category is
+    still a false positive)."""
+    # File must match first — a decoy is location-scoped.
+    patterns = [neg["file_pattern"]] + neg.get("alternate_file_patterns", [])
+    f_file = normalize_path(finding.get("handler_file") or finding.get("file"))
+    if not any(
+        fnmatch.fnmatch(f_file, p)
+        or fnmatch.fnmatch(f_file, f"*/{p}")
+        or f_file.endswith(p)
+        for p in patterns
+    ):
+        return False
+
+    # Severity floor (default MEDIUM if the decoy omits one).
+    floor = neg.get("min_severity", "MEDIUM")
+    floor_rank = SEVERITY_RANK.get(str(floor).upper(), 2)
+    if finding_severity_rank(finding) < floor_rank:
+        return False
+
+    forbidden_cwes = neg.get("forbidden_cwes", [])
+    if "forbidden_cwe" in neg:
+        forbidden_cwes = [neg["forbidden_cwe"]] + forbidden_cwes
+    forbidden_cats = neg.get("forbidden_categories", [])
+    if "forbidden_category" in neg:
+        forbidden_cats = [neg["forbidden_category"]] + forbidden_cats
+
+    if not forbidden_cwes and not forbidden_cats:
+        # Decoy with no forbidden tuple = "nothing of MEDIUM+ here".
+        return True
+
+    cwe_hit = bool(forbidden_cwes) and finding.get("cwe") in forbidden_cwes
+    # SARIF findings carry no native category; only score category-FP on
+    # non-SARIF findings (mirrors finding_matches_expectation's policy).
+    cat_hit = (
+        bool(forbidden_cats)
+        and finding.get("_source") != "sarif"
+        and finding.get("category") in forbidden_cats
+    )
+    return cwe_hit or cat_hit
+
+
+def score_findings(findings: list[dict], expected: dict) -> dict:
+    """Compute the precision/recall scorecard. Returns a dict with overall
+    and per-category P/R/F1 + TP/FP/FN counts and the labeled detail.
+
+    TP/FN are computed over HARD positive expectations (must_match!=false)
+    — the gated contract. Soft expectations are reported separately and do
+    NOT drag recall down (they are orchestrator-depth-dependent, see the
+    existing check_expectations rationale). FP is computed over decoys."""
+    positives = expected.get("expectations", [])
+    negatives = expected.get("negative_expectations", [])
+
+    # First pass: which findings are true positives (so TP can pre-empt FP).
+    tp_finding_ids: set[int] = set()
+    tp_exps: list[dict] = []
+    fn_hard: list[dict] = []
+    soft_missed: list[dict] = []
+    per_cat: dict[str, dict] = {}
+
+    def _cat_bucket(cat: str) -> dict:
+        return per_cat.setdefault(
+            cat, {"tp": 0, "fp": 0, "fn": 0}
+        )
+
+    for exp in positives:
+        is_hard = exp.get("must_match", True)
+        matches = [f for f in findings if finding_matches_expectation(f, exp)]
+        cat = exp.get("category", "uncategorized")
+        if matches:
+            for f in matches:
+                tp_finding_ids.add(id(f))
+            if is_hard:
+                tp_exps.append(exp)
+                _cat_bucket(cat)["tp"] += 1
+        else:
+            if is_hard:
+                fn_hard.append(exp)
+                _cat_bucket(cat)["fn"] += 1
+            else:
+                soft_missed.append(exp)
+
+    # Second pass: false positives = findings on a decoy's forbidden tuple
+    # that are not already counted as a true positive.
+    fp_detail: list[dict] = []
+    for neg in negatives:
+        for f in findings:
+            if id(f) in tp_finding_ids:
+                continue  # TP precedes FP
+            if finding_matches_negative(f, neg):
+                cat = (
+                    neg.get("forbidden_category")
+                    or f.get("category")
+                    or "uncategorized"
+                )
+                _cat_bucket(cat)["fp"] += 1
+                fp_detail.append({
+                    "decoy_id": neg.get("id"),
+                    "file": f.get("handler_file") or f.get("file"),
+                    "cwe": f.get("cwe"),
+                    "category": f.get("category"),
+                    "source": f.get("_source", "jsonl"),
+                    "title": f.get("title"),
+                })
+
+    tp = len(tp_exps)
+    fn = len(fn_hard)
+    fp = len(fp_detail)
+
+    def _metrics(tp_: int, fp_: int, fn_: int) -> dict:
+        precision = tp_ / (tp_ + fp_) if (tp_ + fp_) else 1.0
+        recall = tp_ / (tp_ + fn_) if (tp_ + fn_) else 1.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall)
+            else 0.0
+        )
+        # OWASP-Benchmark-style Youden index (TPR - FPR) is not computable
+        # without a labeled-negative count per category; we expose F1 as
+        # the headline and leave Youden to the optional external bench.
+        return {
+            "tp": tp_, "fp": fp_, "fn": fn_,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+        }
+
+    overall = _metrics(tp, fp, fn)
+    per_category = {
+        cat: _metrics(b["tp"], b["fp"], b["fn"]) for cat, b in sorted(per_cat.items())
+    }
+
+    return {
+        "target": expected.get("target"),
+        "schema_version": expected.get("schema_version"),
+        "has_decoys": bool(negatives),
+        "n_positives_hard": sum(1 for e in positives if e.get("must_match", True)),
+        "n_positives_soft": sum(1 for e in positives if not e.get("must_match", True)),
+        "n_decoys": len(negatives),
+        "overall": overall,
+        "per_category": per_category,
+        "soft_missed": [
+            {"id": e.get("id"), "cwe": e.get("cwe"), "category": e.get("category"),
+             "file_pattern": e.get("file_pattern")}
+            for e in soft_missed
+        ],
+        "false_positives": fp_detail,
+        "false_negatives": [
+            {"id": e.get("id"), "cwe": e.get("cwe"), "category": e.get("category"),
+             "file_pattern": e.get("file_pattern"), "description": e.get("description")}
+            for e in fn_hard
+        ],
+    }
+
+
+def write_scorecard(scorecard: dict, scorecard_dir: Path) -> tuple[Path, Path]:
+    """Emit scorecard.json + scorecard.md into scorecard_dir. Returns the
+    two paths. Stdlib-only; no templating dependency."""
+    scorecard_dir.mkdir(parents=True, exist_ok=True)
+    json_path = scorecard_dir / "scorecard.json"
+    md_path = scorecard_dir / "scorecard.md"
+
+    with open(json_path, "w") as f:
+        json.dump(scorecard, f, indent=2, sort_keys=False)
+        f.write("\n")
+
+    o = scorecard["overall"]
+    lines = [
+        f"# Precision/Recall Scorecard — {scorecard.get('target')}",
+        "",
+        f"- Fixture schema: v{scorecard.get('schema_version')}",
+        f"- Decoys present: {'yes' if scorecard.get('has_decoys') else 'no (precision = 1.0 by convention — no FP denominator)'}",
+        f"- Hard positives: {scorecard.get('n_positives_hard')} | "
+        f"Soft positives: {scorecard.get('n_positives_soft')} | "
+        f"Decoys: {scorecard.get('n_decoys')}",
+        "",
+        "## Overall",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| True Positives (TP) | {o['tp']} |",
+        f"| False Positives (FP) | {o['fp']} |",
+        f"| False Negatives (FN) | {o['fn']} |",
+        f"| **Precision** | **{o['precision']:.3f}** |",
+        f"| **Recall** | **{o['recall']:.3f}** |",
+        f"| **F1** | **{o['f1']:.3f}** |",
+        "",
+        "> Recall is computed over HARD fixtures only (the gated contract). "
+        "Soft fixtures are orchestrator-depth-dependent and reported "
+        "separately; they do not lower recall. Precision is computed only "
+        "over labeled territory (positives + decoys); unlabeled extra "
+        "finds are neither rewarded nor penalised.",
+        "",
+        "## Per-category",
+        "",
+        "| Category | TP | FP | FN | Precision | Recall | F1 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for cat, m in scorecard["per_category"].items():
+        lines.append(
+            f"| {cat} | {m['tp']} | {m['fp']} | {m['fn']} | "
+            f"{m['precision']:.3f} | {m['recall']:.3f} | {m['f1']:.3f} |"
+        )
+    if not scorecard["per_category"]:
+        lines.append("| _(none)_ | | | | | | |")
+
+    if scorecard["false_positives"]:
+        lines += ["", "## False positives (findings on safe decoys)", ""]
+        for fp in scorecard["false_positives"]:
+            lines.append(
+                f"- decoy `{fp['decoy_id']}` — finding {fp.get('cwe')}"
+                f"/{fp.get('category')} on `{fp.get('file')}` "
+                f"(source={fp.get('source')}): {fp.get('title')}"
+            )
+
+    if scorecard["false_negatives"]:
+        lines += ["", "## False negatives (missed hard fixtures)", ""]
+        for fn in scorecard["false_negatives"]:
+            lines.append(
+                f"- `{fn['id']}` — {fn.get('description')} "
+                f"(expected {fn.get('cwe')}/{fn.get('category')} "
+                f"file≈{fn.get('file_pattern')})"
+            )
+
+    if scorecard["soft_missed"]:
+        lines += ["", "## Soft fixtures not matched (non-fatal)", ""]
+        for s in scorecard["soft_missed"]:
+            lines.append(
+                f"- `{s['id']}` — {s.get('cwe')}/{s.get('category')} "
+                f"file≈{s.get('file_pattern')}"
+            )
+
+    lines.append("")
+    with open(md_path, "w") as f:
+        f.write("\n".join(lines))
+
+    return json_path, md_path
+
+
 def normalize_path(p: str | None) -> str:
     """Normalize a finding's file field for glob matching. Strips
     absolute-path prefixes from known repo roots + leading `./`."""
@@ -320,7 +633,7 @@ def normalize_path(p: str | None) -> str:
         return ""
     p = p.strip()
     if p.startswith("/"):
-        for marker in ("/juice-shop/", "/DVWA/", "/gosec/", "/e2e-target/"):
+        for marker in ("/juice-shop/", "/DVWA/", "/crapi/", "/crAPI/", "/gosec/", "/e2e-target/"):
             if marker in p:
                 p = p.split(marker, 1)[1]
                 break
@@ -468,6 +781,12 @@ def _sarif_result_to_finding(r: dict) -> dict:
         "handler_file": f_uri,
         "line": line,
         "title": (r.get("message") or {}).get("text"),
+        # Carry severity so the scorecard's decoy min_severity floor works on
+        # SARIF-sourced findings (the canonical export). Prefer the numeric
+        # CVSS-style security-severity; fall back to the SARIF `level`
+        # (error/warning/note) which finding_severity_rank also understands.
+        "security_severity": props.get("security-severity"),
+        "severity": r.get("level"),
         "_source": "sarif",
     }
 
@@ -543,6 +862,61 @@ def check_gated_categories_diagnostic(
                 )
 
 
+def run_scorecard(args, expected: dict, failures: list[str]) -> None:
+    """Collect findings, compute the precision/recall scorecard, emit
+    scorecard.{json,md}, print a summary, and apply optional floor gates.
+
+    Additive by design: with default floors (0.0) this never appends to
+    `failures`, so the existing exit-code behavior is preserved. A run
+    against a fixture with no negative_expectations[] yields precision=1.0
+    (no FP denominator) — also non-failing."""
+    findings = collect_all_findings(args.artifact_dir)
+    scorecard = score_findings(findings, expected)
+
+    scorecard_dir = args.scorecard_dir or args.fixture.resolve().parent
+    try:
+        json_path, md_path = write_scorecard(scorecard, scorecard_dir)
+        wrote = f"{json_path} + {md_path.name}"
+    except OSError as e:
+        # Emitting the scorecard is best-effort; a write failure must not
+        # mask the structural/coverage verdict. Report and continue.
+        print(f"  WARN: could not write scorecard to {scorecard_dir}: {e}",
+              file=sys.stderr)
+        wrote = "(write failed)"
+
+    o = scorecard["overall"]
+    print(
+        f"  scorecard: TP={o['tp']} FP={o['fp']} FN={o['fn']} | "
+        f"precision={o['precision']:.3f} recall={o['recall']:.3f} "
+        f"f1={o['f1']:.3f} | decoys={scorecard['n_decoys']} "
+        f"({'with FP denominator' if scorecard['has_decoys'] else 'no FP denominator'})",
+        flush=True,
+    )
+    print(f"  wrote: {wrote}", flush=True)
+
+    # Optional floor gates. Default floors are 0.0 → never fire.
+    if args.min_recall > 0.0 and o["recall"] < args.min_recall:
+        failures.append(
+            f"scorecard recall {o['recall']:.3f} < floor {args.min_recall:.3f} "
+            f"(--min-recall): {o['fn']} hard fixture(s) missed."
+        )
+    if args.min_precision > 0.0:
+        if not scorecard["has_decoys"]:
+            print(
+                "  NOTE: --min-precision set but fixture has no "
+                "negative_expectations[] decoys; precision is 1.0 by "
+                "convention (no FP denominator). Gate is a no-op until "
+                "decoys exist.",
+                file=sys.stderr,
+            )
+        elif o["precision"] < args.min_precision:
+            failures.append(
+                f"scorecard precision {o['precision']:.3f} < floor "
+                f"{args.min_precision:.3f} (--min-precision): {o['fp']} "
+                f"false positive(s) on safe decoys."
+            )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--artifact-dir", type=Path, required=True,
@@ -558,6 +932,23 @@ def main():
                         help="Hard-fail if Python `jsonschema` is not installed.")
     parser.add_argument("--skip-manifest-check", action="store_true",
                         help="Skip the manifest.yaml required_outputs / forbidden_outputs cross-check. Use when a known false-positive exists and the rest of the suite is sufficient.")
+    parser.add_argument("--scorecard-dir", type=Path, default=None,
+                        help="Directory to write scorecard.json + scorecard.md "
+                             "(default: the fixture's directory, e.g. tests/e2e/). "
+                             "run-e2e-test.sh points this at the artifact dir so "
+                             "live runs don't dirty the repo.")
+    parser.add_argument("--no-scorecard", action="store_true",
+                        help="Do not compute/emit the precision/recall scorecard "
+                             "(scorecard is additive; this restores pre-v3 behavior).")
+    parser.add_argument("--min-precision", type=float, default=0.0,
+                        help="Fail the suite if scorecard precision < this floor "
+                             "(default 0.0 = no-op; only meaningful when decoys "
+                             "exist). Opt-in gate; does not affect existing runs.")
+    parser.add_argument("--min-recall", type=float, default=0.0,
+                        help="Fail the suite if scorecard recall (over HARD "
+                             "fixtures) < this floor (default 0.0 = no-op; the "
+                             "existing hard-fixture coverage gate already enforces "
+                             "recall=1.0). Opt-in tightening.")
     args = parser.parse_args()
 
     if not args.artifact_dir.exists():
@@ -575,33 +966,39 @@ def main():
     print(f"artifact-dir: {args.artifact_dir}")
     print()
 
-    print("[1/6] Phase-done markers...", flush=True)
+    n_steps = 6 if args.no_scorecard else 7
+
+    print(f"[1/{n_steps}] Phase-done markers...", flush=True)
     check_phase_markers(args.artifact_dir, failures)
 
     if args.skip_manifest_check:
-        print("[2/6] Manifest cross-check — SKIPPED (--skip-manifest-check).", flush=True)
+        print(f"[2/{n_steps}] Manifest cross-check — SKIPPED (--skip-manifest-check).", flush=True)
     else:
-        print("[2/6] Manifest required_outputs cross-check...", flush=True)
+        print(f"[2/{n_steps}] Manifest required_outputs cross-check...", flush=True)
         check_manifest_required_outputs(args.repo_root, args.artifact_dir, failures)
 
-    print("[3/6] SARIF structure...", flush=True)
+    print(f"[3/{n_steps}] SARIF structure...", flush=True)
     check_sarif_structure(args.artifact_dir, failures)
 
-    print("[4/6] Report section headers (tolerant)...", flush=True)
+    print(f"[4/{n_steps}] Report section headers (tolerant)...", flush=True)
     check_report_sections(args.artifact_dir, failures)
 
-    print("[5/6] Phase-05 JSONL schema + CWE-in-map (gated-aware)...", flush=True)
+    print(f"[5/{n_steps}] Phase-05 JSONL schema + CWE-in-map (gated-aware)...", flush=True)
     check_jsonl_schema_validity(
         args.repo_root, args.artifact_dir, gated_cats,
         args.require_jsonschema_backend, failures,
     )
 
     if not args.skip_expectations:
-        print("[6/6] Fixture expectations...", flush=True)
+        print(f"[6/{n_steps}] Fixture expectations...", flush=True)
         check_expectations(args.artifact_dir, expected, failures)
         check_gated_categories_diagnostic(args.artifact_dir, expected)
     else:
-        print("[6/6] Fixture expectations — SKIPPED (--skip-expectations).", flush=True)
+        print(f"[6/{n_steps}] Fixture expectations — SKIPPED (--skip-expectations).", flush=True)
+
+    if not args.no_scorecard:
+        print(f"[7/{n_steps}] Precision/recall scorecard (schema v3)...", flush=True)
+        run_scorecard(args, expected, failures)
 
     sys.stdout.flush()
     print()

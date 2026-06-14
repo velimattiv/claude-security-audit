@@ -1,15 +1,38 @@
 # E2E Test Suite
 
 Local-only end-to-end test that runs the full `/security-audit` skill
-against a pinned Juice Shop tag and asserts against a fixture of known
-vulnerabilities.
+against a pinned vulnerable-by-design target and asserts against a
+fixture of known vulnerabilities. As of schema **v3** the suite also
+emits a **precision/recall scorecard** (it no longer only measures
+coverage — it now penalises false positives on labeled-safe decoys).
+
+Three targets are wired (one fixture each):
+
+| `--target` | Fixture | Stack | Adds |
+|---|---|---|---|
+| `juice-shop` (default) | `expected-findings.json` | JS/TS (Express) | the original 12-fixture coverage gate + decoys |
+| `dvwa` | `dvwa-fixture.json` | PHP + MariaDB | SQLi/XSS/cmd-inj/LFI/upload; graded `impossible.php` decoys |
+| `crapi` | `crapi-fixture.json` | Java/Spring + Python/Django + Go + TS | `token_scope` (JWT/JWK), `deployment`, partial `mitm`, BOLA, mass-assignment, SSRF |
 
 ## Quick start
 
 ```bash
 # From the skill's repo root
-scripts/run-e2e-test.sh
+scripts/run-e2e-test.sh                      # Juice Shop (default)
+scripts/run-e2e-test.sh --target dvwa        # DVWA (PHP)
+scripts/run-e2e-test.sh --target crapi       # OWASP crAPI (polyglot)
+
+# Opt-in scorecard floors (default floors are 0.0 = no-op):
+scripts/run-e2e-test.sh --min-recall 0.9 --min-precision 0.8
 ```
+
+> **Live runs need Claude auth.** `run-e2e-test.sh` invokes the host's
+> already-authenticated `claude` CLI (API key, claude.ai OAuth, or
+> Claude Max). A fresh CI runner has none of these — see "Why
+> local-only" below. The harness logic + fixtures in this directory are
+> validated offline ( `python3 tests/e2e/assertions.py --help`,
+> `ast.parse`, `jq empty <fixture>`); only the full
+> clone→audit→assert loop needs live auth.
 
 Runs in ≈30-60 minutes wall time on a medium host; cost is your Claude
 Code usage (Max subscription or pay-per-token, whichever your local
@@ -48,9 +71,103 @@ Code usage (Max subscription or pay-per-token, whichever your local
 - Categories with ≥1 fixture: `auth` (3), `injection` (5),
   `secret_sprawl` (2), `idor` (1), `crypto` (1).
 - Gated categories (noted in `gated_categories`): `token_scope`,
-  `mitm`, `deployment`, `llm`. No fixture; Juice Shop v19.2.1 has no
-  ground truth for these. Coverage supplemented in v2.1 via a DVWA +
-  Go-target dogfood.
+  `mitm`, `deployment`, `llm`, **`agentic`**. No fixture; Juice Shop
+  v19.2.1 has no ground truth for these. An absent
+  `phase-05-<gated>-*.jsonl` is a **legitimate skip, not a failure**
+  (see "Gated vs always-on categories" below). DVWA and crAPI supply
+  the missing language/category coverage.
+
+**Precision/recall scorecard (schema v3):**
+- After the coverage gate, `assertions.py` scores every finding against
+  the fixture's positive expectations **and** its
+  `negative_expectations[]` decoys, then writes `scorecard.json` +
+  `scorecard.md` (next to the run artifacts; the manual default is the
+  fixture's directory).
+- **The scorecard is additive.** With the default floors
+  (`--min-precision 0.0`, `--min-recall 0.0`) it never changes the
+  exit code — the existing coverage gate and all structural checks are
+  unchanged. Use `--no-scorecard` to skip it entirely.
+
+## Fixture schema v3 — `negative_expectations[]` (decoys)
+
+v3 adds a sibling array to `expectations[]`. Each decoy is a **safe
+location that MUST NOT produce a finding**; a finding that lands on one
+(matching its forbidden tuple, at or above its severity floor) is
+counted as a **false positive**.
+
+```jsonc
+"negative_expectations": [
+  {
+    "id": "neg-01",                       // required, unique
+    "description": "...",                 // human note
+    "file_pattern": "Dockerfile",         // required; same glob rules as expectations
+    "alternate_file_patterns": ["..."],   // optional
+    "forbidden_cwe": "CWE-89",            // forbid by CWE (single)…
+    "forbidden_cwes": ["CWE-250", "..."], // …or several
+    "forbidden_category": "deployment",   // and/or forbid by category…
+    "forbidden_categories": ["..."],      // …or several
+    "min_severity": "HIGH",               // optional; default MEDIUM. Findings
+                                          //   below this rank are ignored (an
+                                          //   informational note on safe code
+                                          //   is not an FP). Accepts
+                                          //   LOW/MEDIUM/HIGH/CRITICAL or a
+                                          //   numeric CVSS security-severity.
+    "rationale": "..."                    // why this is a realistic decoy
+  }
+]
+```
+
+**Scoring (`score_findings` in `assertions.py`):**
+
+- **TP** — a positive expectation matched by ≥1 finding.
+- **FN** — a *hard* positive expectation (`must_match` ≠ `false`) with
+  no match. Recall is computed over hard fixtures only; soft fixtures
+  are orchestrator-depth-dependent and reported separately (they do not
+  lower recall).
+- **FP** — a finding that matches a decoy's forbidden tuple at ≥ its
+  `min_severity`, **and is not itself a true positive**. TP precedes FP:
+  a finding that legitimately satisfies a positive expectation is never
+  counted against a decoy on the same file (lets a decoy and a positive
+  share a file/CWE — e.g. `lib/insecurity.ts` has both the MD5 misuse
+  *and* a correct bcrypt path).
+- When both `forbidden_cwe(s)` and `forbidden_category(s)` are present,
+  **either** match is an FP. SARIF-sourced findings carry no native
+  category, so category-only decoys only catch JSONL findings; give a
+  `forbidden_cwe` too if you need the SARIF export covered.
+- Findings outside any labeled region (neither positive nor decoy) are
+  **unscored** — precision is computed only over labeled territory, so
+  legitimate extra finds are neither rewarded nor penalised.
+- `precision = TP/(TP+FP)`, `recall = TP/(TP+FN)`,
+  `F1 = 2PR/(P+R)`. A fixture with **no** decoys yields
+  `precision = 1.0` (no FP denominator) — backward compatible.
+
+**Seed decoys (real FP denominator on day one):** the Juice Shop fixture
+ships three — the hardened v19.2.1 Dockerfile (distroless + `USER 65532`,
+flagging it `deployment HIGH` is an FP), the Sequelize ORM model layer
+(flagging it `CWE-89` is the ORM false-positive twin of the real raw-SQL
+SQLi), and the bcrypt path in `lib/insecurity.ts`. DVWA's graded
+`impossible.php` files and crAPI's BCrypt/ORM/JPA layers are the decoys
+for those targets.
+
+## Gated vs always-on categories
+
+`gated_categories{}` documents categories that have **no ground truth in
+this target** and whose absence is a *legitimate skip*:
+
+- **`agentic`** is gated on `profile.mcp_agentic.detected`. Juice Shop,
+  DVWA, and crAPI have no MCP server / agent / tool-definition surface,
+  so the profiler sets `detected=false` and `cat-agentic` is gated off.
+  **An absent `phase-05-agentic-*.jsonl` is a PASS, not a failure** —
+  the suite never demands agentic findings on a target with no MCP
+  surface.
+- `token_scope`, `mitm`, `deployment`, `llm` are gated on Juice Shop
+  (no ground truth); crAPI un-gates `token_scope`/`deployment`/`mitm`
+  by providing fixtures for them.
+
+`always_on_categories{}` documents the opposite: **`supply_chain`** runs
+on *every* target and is **never** excused by gating. It lives in its
+own key (not `gated_categories`) precisely so the empty-JSONL excuse does
+not apply to it.
 
 ## Why local-only (no GitHub Actions yet)
 
@@ -86,15 +203,28 @@ scripts/run-e2e-test.sh --keep        # preserve prior baseline for delta-mode t
   `.claude-audit/baseline.json` under `.claude-audit/history/` with a
   timestamp before wiping — you can always recover prior state.
 
-## Updating the fixture
+## Updating a fixture / pinning a target
 
-When upstream Juice Shop releases a new version:
+**Where the pin lives.** Juice Shop pins via `config.env`
+(`TARGET_TAG`) for back-compat. DVWA and crAPI pin **inside their
+fixture JSON** — the `target_repo` + `target_ref` fields are the single
+source of truth; `run-e2e-test.sh --target dvwa|crapi` reads them
+directly. Current pins:
 
-1. Pin `TARGET_TAG` in `config.env` to the new tag.
-2. Run the E2E; it'll likely fail on file-path drift (routes rename
-   between majors).
-3. Update `expected-findings.json` — adjust `file_pattern` +
-   `alternate_file_patterns` per the new layout.
+- `juice-shop` → `v19.2.1` (config.env)
+- `dvwa` → `v1.10` (dvwa-fixture.json `target_ref`)
+- `crapi` → `v1.1.6` (crapi-fixture.json `target_ref`)
+
+When upstream releases a new version:
+
+1. Update the pin (`config.env` for Juice Shop; `target_ref` in the
+   fixture for DVWA/crAPI).
+2. Run the E2E; it'll likely fail on file-path drift (routes/handlers
+   rename between majors; crAPI's microservice paths are especially
+   version-sensitive).
+3. Update the fixture — adjust `file_pattern` +
+   `alternate_file_patterns` per the new layout, and re-verify
+   `negative_expectations[]` still point at the hardened twin.
 4. Commit pin + fixture edit **atomically**. A mismatched pair makes
    the test flaky.
 
