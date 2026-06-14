@@ -151,6 +151,12 @@ case "$CMD" in
     case "$SCANNER" in
       semgrep)
         if [ -n "${AUDIT_SAST_RULES:-}" ]; then
+          # The mount + --config are word-split into the run/INNER commands, so
+          # a path with whitespace would break them. Fail loud rather than
+          # silently mis-mount (host path quotes it; here we require no spaces).
+          case "$AUDIT_SAST_RULES" in
+            *[[:space:]]*) echo "ERROR: AUDIT_SAST_RULES must be a path without spaces (container path)." >&2; exit 2 ;;
+          esac
           SAST_CFG="--config ${AUDIT_SAST_RULES}"
           RULES_MOUNT="-v ${AUDIT_SAST_RULES}:${AUDIT_SAST_RULES}:ro,Z"
         else
