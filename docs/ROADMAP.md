@@ -4,6 +4,133 @@ Forward-looking candidates for the next minor release. Items delivered
 in v2.0.1 have been removed from this list. Ordered by severity of the
 underlying problem (highest impact first).
 
+---
+
+# Research round — 2026-06-14
+
+Synthesized, deduplicated backlog from seven parallel research agents
+(reports in [`research/`](research/)). This is the "since-last-research"
+refresh; the last round (2026-04-24) is the basis for `V2-SCOPE.md`.
+
+**Scope of this round was research only — nothing below is implemented yet.**
+Bracketed `[NN]` tags cite the source report in `research/`.
+
+> **Verify-before-ship caveat.** Several 2026 CVE IDs in the source reports
+> are flagged "verify on NVD," and report 01 self-flagged `CVE-2026-23993`
+> as fabricated. Confirm every CVE identifier against NVD before encoding it
+> into a pattern, fixture, or doc. Bug *classes* are well-sourced; individual
+> IDs are not all confirmed.
+
+## 🔴 Fix-now (security issue in our own tooling)
+
+- **Bump `TRIVY_VER` 0.70.0 → 0.71.0** in `scripts/install-scanners.sh:37`.
+  Our pin is in the vulnerable range of **GHSA-q3fv-x8vg-qqm4** (Helm-chart
+  tar-bomb OOM, patched in 0.71.0) and we run `trivy config` — the affected
+  path. Effort **S**. Verified against our code. Regression-test the
+  CycloneDX 1.6→1.7 SBOM output change while doing it. [04]
+
+## P0 — highest impact
+
+| Item | Touches | Effort | Src |
+|---|---|---|---|
+| **New deep-dive `cat-10` Supply Chain & CI/CD Integrity** — static lifecycle-hook scan (npm pre/postinstall, Python `setup.py`/`.pth`, gem `extconf.rb`, cargo `build.rs`, Go), dependency-confusion / lockfile-integrity, CI script-injection. Regex-first MVP catches every 2026 campaign (Shai-Hulud 2.0, TrapDoor, trivy-action compromise). | Phase 5 (new cat) + `manifest.yaml` + Phase 0 gate | M | [02] |
+| **New deep-dive `cat-11` MCP / Agentic** with its **own** Phase-0 gate (separate from cat-09's LLM gate — MCP servers/agents are a distinct surface the LLM gate would wrongly skip): MCP tool-scope breadth, prompt-injection-via-tool-output, confused-deputy/token-passthrough. | Phase 5 (new cat) + Phase 0 detection | M–L | [03] |
+| **Deserialization false-safety corrections** in cat-08: PyYAML `FullLoader` is NOT safe; `torch.load(weights_only=True)` was bypassable pre-2.10. Both currently trusted by most tooling. | cat-08 (+ cat-09 model files) | S | [01][03] |
+| **Framework fail-open auth heuristic** in cat-01: flag positive-allowlist ("protect these paths") auth matchers — the Next.js `x-middleware-subrequest` / Clerk / Spring matcher-evasion class. | cat-01 | M | [01] |
+| **OWASP Top 10:2025 (web) mapping** — final Jan 2026; new A03 Supply-Chain, A10 Exceptional-Conditions, SSRF folded into A01. The skill maps the web Top 10 *nowhere* today. CWE→category lookup, no fan-out. | Phase 6 spine + Phase 7 report | M | [05] |
+| **CWE Top 25 (2025) prioritization layer** — published 2025-12-15; additive enrichment on the existing per-finding CWE tag (keep the ±1-rung severity cap). | Phase 6/7 | S | [05] |
+| **Precision/recall scorecard** — add `negative_expectations[]` decoys to the fixture schema (v3) + TP/FP/FN/precision/recall/F1 scorer in `assertions.py`; emit `scorecard.json`/`.md`; gate on floors. Closes KNOWN-GAPS #1 ("we measure coverage, not false-positive rate"). | `tests/e2e/` | M | [07] |
+| **Lambda Function URL `AuthType = NONE`** detection in cat-07 — now *actively exploited* (HazyBeacon C2). Trivial regex, high signal. | cat-07 | S | [06] |
+
+## P1
+
+**Scanner hygiene** [04]:
+- Bump `osv-scanner` 2.3.5→2.3.8, `trufflehog` 3.95.2→3.95.5 (+ migrate
+  `--only-verified` → `--results verified`). Effort S.
+- Fix stale tool references that will silently break: `zizmor` repo moved to
+  `zizmorcore/zizmor` (+ flag change); `govulncheck` "latest" install
+  endpoint; `psalm` SARIF flag (`--report=*.sarif`); `brakeman` license is
+  non-OSS (non-commercial) — note it. Effort S.
+- Promote **grype** to a first-class EPSS/KEV prioritization step; carry EPSS
+  in SARIF `properties.epss*`. Effort M.
+
+**Detection depth** [01]:
+- JWT header-trust + missing `iss`/`aud` + exact `redirect_uri` (cat-01/03). S–M.
+- SSRF validation-method upgrade + metadata-denylist completeness, incl.
+  IPv4-mapped-IPv6 (cat-08). S.
+- SAML signature-wrapping sub-section (cat-01). S.
+- DOMPurify-class prototype-pollution→XSS gadget signals. S.
+
+**Cloud / IaC / NHI** [06]:
+- Kyverno CEL **SSRF CVE-2026-4789** (CVSS 9.8, verified on NVD) +
+  admission-webhook misconfig (cat-07). M.
+- **Native-sidecar `securityContext` parsing** — k8s 1.33 GA'd
+  `initContainers[].restartPolicy: Always`; container-only greps now
+  silently miss privileged sidecars (correctness fix, cat-07). M.
+- OIDC workload-identity trust misconfig (wildcard/missing `sub`) + IMDSv1
+  detection (cat-07). M.
+- MCP-config secret sweep in cat-06 (GitGuardian: 24,008 secrets in MCP
+  config files). S.
+
+**Methodology** [03][05]:
+- Conditional **OWASP Agentic Applications 2026** lens (`ASI01:2026…ASI10:2026`),
+  gated on tool-calling detection. M.
+- NIST **SP 800-218A** (GenAI SSDF profile) assertions; fix the SSDF citation
+  to v1.1 (Feb 2022). S.
+- Add `supply_chain` + `agentic` category enums; add **CWE-1426** to
+  `lib/cwe-map.json` (currently missing). S.
+
+**Benchmark targets** [07]:
+- Add **DVWA** (PHP) as the second E2E target — cheapest already-planned win;
+  its "impossible" level gives free false-positive decoys. Closes the
+  ROADMAP "second polyglot target" item. S.
+- Add **OWASP crAPI** as the third — one repo covers `token_scope` +
+  `deployment` + partial `mitm` and adds Java/Go/Python. M.
+
+## P2
+
+- PCI DSS 4.0.1 opt-in tagging mode (6.4.3 / 11.6.1 client-side & e-skimming);
+  EU CRA / SBOM-completeness note leveraging existing CycloneDX. [05]
+- RAG / memory-poisoning + LLM-output→code-interpreter-sink detections (cat-11). [03]
+- Dogfood: enumerate this repo's own Claude Code skill / agent / MCP surfaces
+  (`.mcp.json`, `.claude/settings*.json` scopes, sub-agent prompt
+  interpolation) as cat-11 self-audit targets. [03]
+- Polyglot precision micro-benchmark from **CVEfixes** (CC-BY-4.0, multi-lang);
+  optional **OWASP Benchmark** (Java v1.2 + Python v0.1) calibration run; mine
+  **CyberSecEval** Insecure-Code-Detector rule corpus (~189 patterns / 50 CWEs
+  / 8 langs) for ready-made detections. [07]
+- Terraform/IaC breadth to CIS v6/v7. [06]
+- "Funky Chunks" request-smuggling + web cache poisoning/deception — note most
+  of this is **NOT statically detectable** (CDN cache-key composition, proxy
+  chains); flag-location-and-defer only. [01]
+
+## ⚠️ Needs a user decision before implementing
+
+- **Opengrep migration + rule-licensing.** The Semgrep Rules License (Dec 2024)
+  forbids redistributing the `p/...` rule packs the skill currently bundles —
+  a latent licensing exposure *today*, independent of engine choice. Opengrep
+  (v1.22, LGPL-2.1, SARIF, Semgrep-rule-compatible) is the OSS path, but
+  Commons Clause / non-OSI concerns apply if the skill ever becomes part of a
+  paid offering. Decide engine + rule-distribution posture. [04]
+- **Prototype pollution placement** — new Phase-5 category vs. a sub-area of
+  cat-08 (injection). [01]
+- **Fan-out width.** Adding cat-10 + cat-11 takes Phase-5 categories 9 → 11
+  while the concurrency cap is 8. Confirm scheduling/cap implications (more
+  waves, or raise cap). [02][03]
+
+## Negative findings (do NOT chase)
+
+- No 2026 Terraform AWS-provider default-drift — provider 6.0 (2025-06-18)
+  flipped no security defaults. [06]
+- OWASP **LLM Top 10 is still 2025** (no newer edition) — keep `LLMxx:2025`
+  tags. API Top 10 still **2023**; ASVS still **5.0.0** (5.0.1 only planned). [03][05]
+- Offensive agentic cyber gyms (Cybench, NYU CTF Bench, CyberGym,
+  AutoPenBench) are the **wrong instrument** for a defensive static auditor.
+  Only **CyberSecEval's** Insecure-Code-Detector rule corpus is reusable. [07]
+
+---
+
+
 ## ✅ Delivered in v2.0.1
 
 The following were on the v2.0.0 roadmap and have landed:

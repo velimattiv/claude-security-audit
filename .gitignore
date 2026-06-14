@@ -12,7 +12,14 @@ TODO.md
 # completeness in case an operator clones into /workspace by accident)
 /tmp/audit-targets/
 
+# Local scratch space for external audit artifacts staged for analysis
+# (e.g. user copies a third-party project's .claude-audit/ here for review).
+# Never commit external project's findings to this repo.
+tmp/
+
 # Container-local tooling state (not part of the skill source)
 .claude/
 _bmad/
 _bmad-output/
+_agent-memory/
+AGENTS.md
