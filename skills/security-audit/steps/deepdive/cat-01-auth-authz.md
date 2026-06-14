@@ -53,8 +53,8 @@ as the `phase-specific-method-body`.
 ### Missing auth on write handlers
 
 For every Phase-2 surface row in scope with `flags[]` containing
-`NO_AUTH_WRITE` or `AUTH_UNKNOWN`, read the handler file and verify
-invariant #1. Absence → **HIGH** finding.
+`NO_AUTH_WRITE` or `AUTH_UNKNOWN`, read the handler (± ~40 lines, not the
+whole file unless small) and verify invariant #1. Absence → **HIGH** finding.
 
 ### Session regeneration on login
 

@@ -7,6 +7,46 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.2.0] — 2026-06-14
+
+Quality hardening from a read of **CyberGym-E2E** (arXiv 2606.04460v1,
+`docs/research/08-cybergym-e2e.md`; plan `docs/EPIC-v2.2-cybergym.md`), plus the
+systemic validator deferred from the v2.1 Gate-C adversarial rounds.
+
+### Added
+- **Sub-agent repo-navigation discipline** (`templates/subagent-prompt.md`):
+  grep/ripgrep-first, read the handler ±~40 lines (not whole files),
+  move-on-after-2–3-failed-hypotheses → `confidence: POSSIBLE`. Backed by
+  CyberGym-E2E's context-flooding failure mode (full-file loaders abandon
+  early; targeted strategy wins).
+- **Explicit source→sink taint-trace** guidance in `cat-02` + `cat-08`, with
+  confidence calibrated to trace completeness (CyberGym-E2E's #1 failure =
+  incomplete data-flow tracing).
+- **Semantic-correctness scorecard check** (`tests/e2e/assertions.py`): optional
+  `mechanism_keywords` fixture field + a `semantic_match` rate (scorecard
+  v3.1) + opt-in `--semantic-floor` (default report-only). Addresses
+  CyberGym-E2E's S3↔S4 "found A bug ≠ found THE bug" gap and partially
+  automates KNOWN-GAPS #1. Additive — existing scorecard/exit codes unchanged.
+- **Patched-commit-as-decoy method** doc (`tests/e2e/README.md`): recipe to
+  mint TP(pre-patch)/TN(post-patch) precision-fixture pairs from CVE fix
+  commits (the decoy mechanism itself shipped in v2.1).
+- **CWE↔OWASP pair validator** (`lib/cwe-owasp-map.json` +
+  `validate-schemas.sh` [8/8]): asserts each cat-file `CWE-N / A##:2025` pair
+  matches the canonical map or a documented `context_override`; genuine
+  mismaps fail CI. Closes the v2.1 Gate-C systemic gap (both rounds caught a
+  hand-authored mismap that passed green).
+- Live/GHA E2E **cost anchor** (KNOWN-GAPS): ≈ $10 / 90 min per target,
+  diminishing returns after ~60 min.
+
+### Changed
+- `cat-01` handler-read wording aligned to "± ~40 lines, not the whole file"
+  for consistency with the new navigation discipline.
+
+### Note
+CyberGym-E2E is an exploit/patch-lifecycle benchmark, **not** a static-auditor
+scorer — v2.2 takes its method + failure-analysis, not the benchmark. This
+corrects `docs/research/07`'s over-dismissal of the CyberGym line.
+
 ## [2.1.0] — 2026-06-14
 
 Capability refresh from the 2026-06-14 research round (7 parallel reports in
