@@ -60,6 +60,13 @@ New v2.1 deferrals (see `docs/EPIC-v2.1-refresh.md` §4 + `docs/ROADMAP.md`):
   blocker). The static assertion suite + new scorecard logic are updated and
   internally consistent; a host run with Claude auth is still required to
   exercise the new categories end-to-end.
+- **CWE↔OWASP-tag pair validator** — `validate-schemas.sh` checks the *shape*
+  of `owasp_ids` and that CWEs exist in the map, but does NOT assert that a
+  finding's `CWE-N / A##:2025` pairing matches `lib/owasp-web-top10.md`. Two
+  Gate-C rounds each caught a hand-authored tag mismap (cat-07, then cat-06)
+  that all validators passed green. A machine-readable CWE→A## map + a §
+  asserting each pair would prevent recurrence. Deferred (needs the mapping
+  encoded as data first).
 
 ## Reporting a new gap
 

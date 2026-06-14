@@ -135,11 +135,11 @@ sk-[A-Za-z0-9]{16,}
 - A `*_TOKEN` / `*_API_KEY` / `*_SECRET` / `*_PASSWORD` key whose value is
   a literal high-entropy string (not a `${VAR}` reference) → **HIGH**
   (escalate to **CRITICAL** if the file is git-tracked) / CWE-798 /
-  A05:2025.
+  A07:2025.
 - An `Authorization` header with an inline `Bearer` / `Basic` literal →
-  **HIGH** / CWE-522 / A05:2025.
+  **HIGH** / CWE-522 / A04:2025.
 - Any tracked MCP config containing a literal secret (vs. an env-var
-  reference) is leaked-at-rest → **CRITICAL** / CWE-538 / A05:2025.
+  reference) is leaked-at-rest → **CRITICAL** / CWE-538 / A02:2025.
 
 The `"env"` / `"headers"` object-open patterns are *locators*: when one
 matches, inspect the nested values against the literal-secret patterns

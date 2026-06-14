@@ -183,7 +183,7 @@ not disabled, and treat it as a **locator → POSSIBLE** pending taint
 confirmation, never an automatic HIGH:
 
 ```
-requests\.(get|post)\(\s*(?!['"])\w+[^)]*\)(?![^)]*allow_redirects\s*=\s*False)
+requests\.(get|post)\(\s*(?!['"])(?![^)]*allow_redirects\s*=\s*False)\w+
 ```
 (The `(?!['"])\w+` requires a variable, not a `"https://..."` literal, which
 cuts the false-positive storm on ordinary HTTP calls.)

@@ -237,12 +237,12 @@ as "structurally valid + 12 fixture hits" not "semantically correct."
 
 ## What this catches that the partial M4/M5 dogfoods don't
 
-- **Full 9-category fan-out succeeded.** Every category either produced
+- **Full 11-category fan-out succeeded.** Every category either produced
   findings or was gated. No category silently returned zero because of
   a prompt bug.
 - **Phase 7 synthesis produced valid SARIF + report.** The M4/M5
-  dogfoods validated this on 2 of 9 categories' output — this does it
-  on all 9.
+  dogfoods validated this on 2 of 11 categories' output — this does it
+  on all 11.
 - **Baseline emission works end-to-end.** M6 only dry-ran the
   invalidation math; E2E runs Phase 8.
 - **Scanner bundle ran at the real fan-out scale.** Previous dogfoods
