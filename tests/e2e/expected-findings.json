@@ -6,7 +6,8 @@
   "schema_changelog": {
     "v1": "initial: cwe + category + file_pattern with optional alternate_file_patterns",
     "v2": "added alternate_cwes (for CWE-precision drift across skill versions) and alternate_categories (for Phase 6 cross-category hits — e.g., a cookie secret found by cat-06 as secret_sprawl AND by §6.3 cookie-audit as config)",
-    "v3": "added negative_expectations[] — decoys (safe locations a naive auditor might false-positive on). Each is {id, file_pattern, forbidden_cwe?|forbidden_category?, min_severity?, rationale}. A finding on a decoy that matches the forbidden tuple (and meets min_severity, default MEDIUM) is a FALSE POSITIVE. Drives the precision/recall/F1 scorer; backward compatible — a fixture with no negative_expectations[] yields precision=1.0 (no FP denominator) and the existing coverage gate is unchanged."
+    "v3": "added negative_expectations[] — decoys (safe locations a naive auditor might false-positive on). Each is {id, file_pattern, forbidden_cwe?|forbidden_category?, min_severity?, rationale}. A finding on a decoy that matches the forbidden tuple (and meets min_severity, default MEDIUM) is a FALSE POSITIVE. Drives the precision/recall/F1 scorer; backward compatible — a fixture with no negative_expectations[] yields precision=1.0 (no FP denominator) and the existing coverage gate is unchanged.",
+    "v3.1": "added OPTIONAL mechanism_keywords[] on positive expectations — a semantic-correctness check (CyberGym-E2E S3↔S4 gap: 'found A bug here' != 'found THE bug'). A TP is semantically correct only if its title+description text (case-insensitive) satisfies EVERY keyword group (AND across groups); a group is a plain string OR {keyword, alternate:[synonyms]} (OR within a group). Produces a semantic_match rate = (mechanism-matched TPs)/(TPs with mechanism_keywords); expectations without the field are excluded from the denominator (not penalised). Surfaced in scorecard.{json,md} alongside precision/recall/F1; gated by --semantic-floor (default 0.0 = report-only). Fully additive — does not affect TP/FP/FN/precision/recall/coverage or exit codes."
   },
 
   "expectations": [
@@ -18,7 +19,11 @@
       "alternate_categories": ["auth", "config"],
       "file_pattern": "lib/insecurity.ts",
       "alternate_file_patterns": ["encryptionkeys/*.priv*", "lib/crypto*.ts"],
-      "rationale": "Secrets-in-source. alternate_categories accepts pre-v2.0.1 dogfoods where cat-01 tagged this auth."
+      "mechanism_keywords": [
+        {"keyword": "private key", "alternate": ["rsa key", "signing key", "privatekey"]},
+        {"keyword": "hard-coded", "alternate": ["hardcoded", "hard coded", "inline", "embedded", "in source", "in code", "committed"]}
+      ],
+      "rationale": "Secrets-in-source. alternate_categories accepts pre-v2.0.1 dogfoods where cat-01 tagged this auth. mechanism_keywords (v3.1 semantic check) require the finding text to name BOTH the secret TYPE (private/RSA/signing key) AND that it is hard-coded/inline — a generic 'JWT issue' on this file is not THE bug."
     },
     {
       "id": "e2e-02",
@@ -67,7 +72,11 @@
       "cwe": "CWE-89",
       "category": "injection",
       "file_pattern": "routes/login.ts",
-      "rationale": "Canonical Juice Shop SQLi — sequelize.query with $-interpolation."
+      "mechanism_keywords": [
+        {"keyword": "sql injection", "alternate": ["sqli", "sql-injection"]},
+        {"keyword": "template literal", "alternate": ["string interpolation", "string concatenation", "unparameterized", "raw query", "sequelize.query"]}
+      ],
+      "rationale": "Canonical Juice Shop SQLi — sequelize.query with $-interpolation. mechanism_keywords (v3.1 semantic check) require the finding to name BOTH the class (SQLi) AND the actual sink mechanism (template literal / raw query / unparameterized) — distinguishes 'found THE SQLi' from a vague 'injection risk on login.ts'."
     },
     {
       "id": "e2e-07",
@@ -123,7 +132,11 @@
       "alternate_cwes": ["CWE-327", "CWE-328"],
       "category": "crypto",
       "file_pattern": "lib/insecurity.ts",
-      "rationale": "CWE-916 is v2.0.1+ precise tag for password-hash insufficient-effort; CWE-327/328 accepted for pre-v2.0.1 artifacts."
+      "mechanism_keywords": [
+        "md5",
+        {"keyword": "password", "alternate": ["hash", "hashing"]}
+      ],
+      "rationale": "CWE-916 is v2.0.1+ precise tag for password-hash insufficient-effort; CWE-327/328 accepted for pre-v2.0.1 artifacts. mechanism_keywords (v3.1 semantic check) require the finding to name the specific weak algorithm (MD5) AND the password/hashing context — guards against the neg-03 bcrypt twin in the same file being mistaken for THE finding. The first group is a plain-string keyword (no synonyms); the second is an alternate group."
     }
   ],
 

@@ -23,6 +23,20 @@ SCOPE:
   Honor excludes from: {{partition.paths_excluded}} and .claude-audit/ignore.txt
   Do not read files outside this scope.
 
+REPO NAVIGATION & CONTEXT DISCIPLINE (basis: docs/research/08-cybergym-e2e.md):
+  - Locate code with grep / ripgrep FIRST, then read only the relevant
+    region — the handler ± ~40 lines — not whole files. Full-file loading
+    floods the context window and causes premature abandonment (in the
+    paper, OpenHands burned 2000+ tokens per file read and lost to Claude
+    Code's targeted-file strategy). A small file (< ~200 lines) may be read
+    whole.
+  - Do NOT dump large files or verbose tool output into context. Extract
+    the specific lines you need.
+  - Follow the success pattern: keyword-parse the task -> targeted grep ->
+    trace the code path -> confirm -> record. If 2-3 hypotheses on one
+    candidate fail, record it as confidence: POSSIBLE and move on rather
+    than spiraling on it.
+
 METHOD:
   1. Load the inputs via the Read tool.
   2. {{phase-specific-method-body}}

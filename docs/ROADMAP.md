@@ -14,6 +14,15 @@ refresh; the last round (2026-04-24) is the basis for `V2-SCOPE.md`.
 
 Bracketed `[NN]` tags cite the source report in `research/`.
 
+> **v2.2 (2026-06-14, CyberGym-E2E round):** a fresh read of CyberGym-E2E
+> (arXiv 2606.04460v1, `research/08-cybergym-e2e.md`) drives a quality round —
+> sub-agent prompt hardening (grep-first / explicit taint trace), a
+> semantic-correctness scorecard check (S3↔S4 gap → KNOWN-GAPS #1), the
+> patched-commit-as-decoy fixture method, a budget calibration note, and the
+> CWE↔OWASP pair validator deferred from v2.1 Gate-C. Plan:
+> `docs/EPIC-v2.2-cybergym.md`. Still deferred beyond v2.2: Opengrep swap
+> (owner decision), full CVEfixes corpus, PCI/CRA modes, live-container E2E.
+
 > **Shipped in v2.1 (2026-06-14):** the Fix-now item, all P0s, and most P1s
 > below are implemented on `epic/v2.1-security-refresh` — see CHANGELOG
 > [2.1.0] and `docs/EPIC-v2.1-refresh.md` for the exact set. **Still open

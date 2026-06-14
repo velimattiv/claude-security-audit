@@ -11,6 +11,9 @@
 #   6. VERSION file is well-formed (semver).
 #   7. Fixture jsonl (tests/fixtures/) validates against its matching
 #      schema.
+#   8. Every "CWE-N / A##:2025" tag-pair in steps/deepdive/cat-*.md is a
+#      canonical match (lib/cwe-owasp-map.json .canonical) or a documented
+#      context override (.context_overrides); genuine mismaps fail.
 #
 # Exit 0 = clean; 1 = one or more checks failed. Intended for
 # .github/workflows/ci.yml.
@@ -35,7 +38,7 @@ echo "checked; pair with markdown-link-check for full coverage."
 echo
 
 # --- 1. JSON parse ----------------------------------------------------------
-echo "[1/7] JSON parse..."
+echo "[1/8] JSON parse..."
 if ! command -v jq >/dev/null 2>&1; then
   fail "jq not installed — required for validation"
 else
@@ -51,7 +54,7 @@ note "$checks JSON files parsed cleanly so far"
 
 # --- 2. JSON Schemas have $schema -------------------------------------------
 echo
-echo "[2/7] JSON Schema declarations..."
+echo "[2/8] JSON Schema declarations..."
 for f in skills/security-audit/lib/*-schema.json; do
   [ -f "$f" ] || continue
   schema_id="$(jq -r '."$schema" // empty' "$f")"
@@ -65,7 +68,7 @@ note "schemas validated"
 
 # --- 3. CWE references ------------------------------------------------------
 echo
-echo "[3/7] CWE cross-references..."
+echo "[3/8] CWE cross-references..."
 if [ -f skills/security-audit/lib/cwe-map.json ]; then
   # Extract CWEs referenced anywhere in the spec + catalogs.
   # Include E2E fixtures: a fixture CWE absent from the map hard-fails
@@ -86,7 +89,7 @@ fi
 
 # --- 4. Shell syntax --------------------------------------------------------
 echo
-echo "[4/7] Shell script syntax..."
+echo "[4/8] Shell script syntax..."
 for f in scripts/*.sh; do
   [ -f "$f" ] || continue
   if bash -n "$f" 2>/dev/null; then
@@ -99,7 +102,7 @@ note "shell scripts pass -n"
 
 # --- 5. Markdown references -------------------------------------------------
 echo
-echo "[5/7] Markdown sibling-file references..."
+echo "[5/8] Markdown sibling-file references..."
 broken=0
 while IFS= read -r md; do
   # Extract [text](path.md#anchor) local refs, skip http(s):// and #
@@ -125,7 +128,7 @@ fi
 
 # --- 6. VERSION semver ------------------------------------------------------
 echo
-echo "[6/7] VERSION file..."
+echo "[6/8] VERSION file..."
 if [ -f skills/security-audit/VERSION ]; then
   ver="$(cat skills/security-audit/VERSION | tr -d '[:space:]')"
   if printf "%s" "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$'; then
@@ -204,6 +207,108 @@ jsonschema.Draft202012Validator(schema).validate(doc)
   done
 else
   note "tests/fixtures/ absent — skipping fixture check (not fatal)"
+fi
+
+# --- 8. CWE / A##:2025 tag-pair mapping ------------------------------------
+# Guards the tag-mismap class both v2.1 adversarial rounds caught: a
+# hand-authored "CWE-N / A##:2025" pairing that every other validator passed
+# green. Each tag-pair in steps/deepdive/cat-*.md must be either a canonical
+# CWE->A## match (lib/cwe-owasp-map.json .canonical) or a documented
+# (cwe, owasp, cat) context override (.context_overrides). A CWE absent from
+# the canonical web-Top-10 table (and not overridden) WARNs but does not fail;
+# only a pair that is neither a canonical match nor a documented override
+# (a genuine mismap) fails.
+echo
+echo "[8/8] CWE / A##:2025 tag-pair mapping..."
+cwe_owasp_map="skills/security-audit/lib/cwe-owasp-map.json"
+if [ ! -f "$cwe_owasp_map" ]; then
+  fail "tag-pair map missing: $cwe_owasp_map"
+elif ! command -v jq >/dev/null 2>&1; then
+  fail "jq not installed — required for tag-pair validation"
+elif ! jq empty "$cwe_owasp_map" >/dev/null 2>&1; then
+  fail "tag-pair map is not valid JSON: $cwe_owasp_map"
+else
+  tagpair_bad=0
+  tagpair_warn=0
+  tagpair_ok=0
+  # Extract (cat, cwe, owasp) triples. Handles same-line pairs and the
+  # line-wrapped case where the A##:2025 tag wraps onto the following line.
+  # Output: one "cat<TAB>CWE-N<TAB>A##:2025" per unique triple per file.
+  while IFS="$(printf '\t')" read -r cat cwe owasp; do
+    [ -n "$cwe" ] || continue
+    [ -n "$owasp" ] || continue
+    # 1. canonical match?
+    canon="$(jq -r --arg c "$cwe" '.canonical[$c] // empty' "$cwe_owasp_map")"
+    if [ -n "$canon" ] && [ "$canon" = "$owasp" ]; then
+      tagpair_ok=$((tagpair_ok + 1))
+      continue
+    fi
+    # 2. documented (cwe, owasp, cat) context override?
+    if jq -e --arg c "$cwe" --arg o "$owasp" --arg f "$cat" \
+        '.context_overrides[]? | select(.cwe == $c and .owasp == $o)
+         | (.cats // []) | index($f)' "$cwe_owasp_map" >/dev/null 2>&1; then
+      tagpair_ok=$((tagpair_ok + 1))
+      note "override OK: $cat  $cwe / $owasp (documented context roll-up)"
+      continue
+    fi
+    # 3. CWE absent from canonical table (and not overridden) → WARN, not fail.
+    if [ -z "$canon" ]; then
+      note "WARN: $cat  $cwe / $owasp — $cwe absent from canonical web-Top-10 table; not a documented override (add to .context_overrides if intentional)"
+      tagpair_warn=$((tagpair_warn + 1))
+      continue
+    fi
+    # 4. genuine mismap: CWE is canonical but tagged to the wrong A##.
+    fail "tag-mismap: $cat  $cwe / $owasp — canonical for $cwe is $canon, and no documented context override authorises $owasp"
+    tagpair_bad=$((tagpair_bad + 1))
+  done < <(
+    for f in skills/security-audit/steps/deepdive/cat-*.md; do
+      [ -f "$f" ] || continue
+      base="$(basename "$f")"
+      # Extract ONLY genuine `CWE-N / A##:2025` ASSERTION adjacencies (the
+      # finding-line format `→ **SEV** / CWE-N / A##:2025`). Anchoring on the
+      # CWE-slash-A## adjacency — and iterating ALL matches per line — avoids
+      # (a) mis-pairing when two assertions share a line, and (b) false pairs
+      # from prose where a CWE and an A## merely co-occur. The line-wrap case
+      # (CWE-N / at EOL, A##:2025 leading the next line) is handled separately.
+      awk -v base="$base" '
+        { line[NR] = $0 }
+        END {
+          for (i = 1; i <= NR; i++) {
+            cur = line[i]
+            # (a) same-line adjacent pairs — iterate every match
+            s = cur
+            while (match(s, /CWE-[0-9]+[[:space:]]*\/[[:space:]]*`?A(0[0-9]|10):2025/)) {
+              tok = substr(s, RSTART, RLENGTH)
+              match(tok, /CWE-[0-9]+/);        c = substr(tok, RSTART, RLENGTH)
+              match(tok, /A(0[0-9]|10):2025/); o = substr(tok, RSTART, RLENGTH)
+              emit(base, c, o)
+              s = substr(s, RSTART + RLENGTH)
+            }
+            # (b) line-wrap: "... CWE-N /" at EOL, "A##:2025 ..." next line
+            if (cur ~ /CWE-[0-9]+[[:space:]]*\/[[:space:]]*$/) {
+              nxt = (i < NR ? line[i+1] : "")
+              if (nxt ~ /^[[:space:]]*`?A(0[0-9]|10):2025/) {
+                t = cur; c = ""
+                while (match(t, /CWE-[0-9]+/)) { c = substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH) }
+                match(nxt, /A(0[0-9]|10):2025/); o = substr(nxt, RSTART, RLENGTH)
+                if (c != "") emit(base, c, o)
+              }
+            }
+          }
+        }
+        function emit(b, c, o,   key) {
+          key = b SUBSEP c SUBSEP o
+          if (!(key in seen)) { seen[key] = 1; print b "\t" c "\t" o }
+        }
+      ' "$f"
+    done
+  )
+  if [ "$tagpair_bad" -eq 0 ]; then
+    pass
+    note "all tag-pairs valid ($tagpair_ok matched canonical/override, $tagpair_warn warned)"
+  else
+    note "$tagpair_bad tag-mismap(s) found ($tagpair_ok valid, $tagpair_warn warned)"
+  fi
 fi
 
 # --- summary ----------------------------------------------------------------

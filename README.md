@@ -16,7 +16,16 @@ Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD, MCP/Agentic).
 
 ## Version
 
-- **v2.0.6** (current) — DinD probe `:ro,z` SELinux fix in the
+- **v2.2.0** (current) — CyberGym-E2E-derived quality round: sub-agent
+  repo-navigation discipline + explicit source→sink taint tracing,
+  semantic-correctness scorecard check (`--semantic-floor`), patched-commit
+  decoy method, and a CWE↔OWASP tag-pair validator. See CHANGELOG +
+  `docs/EPIC-v2.2-cybergym.md`.
+- **v2.1.0** — capability refresh: supply-chain (cat-10) + MCP/agentic
+  (cat-11) deep-dives, methodology spine (OWASP Top 10:2025, CWE Top 25,
+  Agentic 2026), unified configurable output dir (de-BMAD), grype EPSS/KEV,
+  precision/recall scorecard. See CHANGELOG + `docs/EPIC-v2.1-refresh.md`.
+- **v2.0.6** — DinD probe `:ro,z` SELinux fix in the
   Path B smoke test (probe was misclassifying SELinux confinement
   as DinD blockage, pushing every Fedora / RHEL / CentOS contributor
   to a misleading PASS-WITH-LIMITATIONS exit).
@@ -76,16 +85,16 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.1.0 \
+git clone --depth 1 --branch v2.2.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.0.2
+cat ~/.claude/skills/security-audit/VERSION   # → 2.2.0
 ```
 
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.1.0 \
+git clone --depth 1 --branch v2.2.0 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -130,7 +139,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.1.0 \
+git clone --depth 1 --branch v2.2.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
