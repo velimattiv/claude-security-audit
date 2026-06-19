@@ -1,0 +1,13 @@
+{
+  "_mutation": "Resource RENAMED: the sink serves 'DeckRenamed' while the credential still protects 'Deck' — the credential join is BROKEN (the rename-masks-regression the adversarial review warned about). Default-deny must still catch the unauthenticated byte path via R3.",
+  "_expect": "R3",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "deck:sink:renamed", "sink_file": "a/renamed.ts", "line": 1, "kind": "file",
+      "serves_resource": "DeckRenamed", "coverage": "complete",
+      "guarded_paths": [{"branch_id": "open", "condition": "publishLink exists", "enforced_gate": "none (publishLink exists)", "serves_bytes": true}]
+    }
+  ],
+  "dismissed": []
+}

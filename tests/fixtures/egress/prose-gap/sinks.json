@@ -1,0 +1,16 @@
+{
+  "_mutation": "P0-1 regression: the gap is described in NATURAL LANGUAGE ('no verification check ...'), not the magic value 'none'. A negation-blind ranker would read 'verification' as a strong gate and emit nothing. The negation-aware ranker must rank it NONE and fire.",
+  "_expect": "CRITICAL (negation-aware ranker)",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "deck:sink:prose", "sink_file": "a/prose.ts", "line": 1, "kind": "file",
+      "serves_resource": "Deck", "coverage": "complete",
+      "guarded_paths": [
+        {"branch_id": "bypass", "condition": "publishLink exists",
+         "enforced_gate": "no verification check — serves whenever a publish link exists", "serves_bytes": true}
+      ]
+    }
+  ],
+  "dismissed": []
+}

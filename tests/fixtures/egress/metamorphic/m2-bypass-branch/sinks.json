@@ -1,0 +1,16 @@
+{
+  "_mutation": "Single sink, conditional bypass branch added: an authed branch AND an unauthenticated bypass branch in the same handler. The bypass branch must be flagged even though the authed branch looks fine.",
+  "_expect": "R2 + CRITICAL",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "deck:sink:cond", "sink_file": "a/cond.ts", "line": 1, "kind": "file",
+      "serves_resource": "Deck", "coverage": "complete",
+      "guarded_paths": [
+        {"branch_id": "authed", "enforced_gate": "role:viewer + canAccessDeck", "serves_bytes": true},
+        {"branch_id": "bypass", "condition": "publishLink exists", "enforced_gate": "none (publishLink exists)", "serves_bytes": true}
+      ]
+    }
+  ],
+  "dismissed": []
+}

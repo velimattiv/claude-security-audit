@@ -1,0 +1,8 @@
+{
+  "_comment": "Deterministic extractor output. The asset-proxy middleware AND the external endpoint are real egress candidates the agent FAILED to inventory in sinks.json. The coverage gate MUST fail-closed on them — a silent omission is exactly how the original bug survived.",
+  "candidates": [
+    {"file": "server/api/decks/[id]/build-output/[...].get.ts", "line": 18, "kind": "file"},
+    {"file": "server/api/decks/[id]/external/[...].get.ts", "line": 22, "kind": "file"},
+    {"file": "server/middleware/02.deck-asset-proxy.ts", "line": 14, "kind": "proxy"}
+  ]
+}

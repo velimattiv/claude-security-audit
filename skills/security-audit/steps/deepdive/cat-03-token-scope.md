@@ -51,6 +51,15 @@ Build a **Scope × Endpoint matrix** locally (in-sub-agent, not persisted
 unless findings emerge). For each endpoint requiring a token, note the
 required scope and the actually-enforced scope. Mismatches are findings.
 
+> **v2.4 — the persisted, cross-partition version of this matrix is the global
+> credential ledger** (`phase-02-credentials.json`) reconciled in Phase 6 §6.19.
+> This in-sub-agent matrix is per-partition and was historically *not persisted*,
+> which is exactly why a credential minted in one partition and ignored in
+> another (the deck-2FA bug) escaped. When you find a token/claim whose
+> writer and consumer span partitions, ensure it is represented in the ledger
+> (`writers[]`, `readers[]`, `protects_resources[]`) so §6.19 can reconcile it —
+> a "minted but never consumed on the byte path" claim is the headline finding.
+
 ## Detection patterns
 
 ### No scope check — endpoint accepts any valid token

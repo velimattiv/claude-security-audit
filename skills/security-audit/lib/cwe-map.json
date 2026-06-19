@@ -60,6 +60,7 @@
     "CWE-611":  { "name": "Improper Restriction of XML External Entity Reference (XXE)", "category": "injection" },
     "CWE-613":  { "name": "Insufficient Session Expiration",           "category": "auth" },
     "CWE-614":  { "name": "Sensitive Cookie Without Secure Attribute", "category": "config" },
+    "CWE-441":  { "name": "Unintended Proxy or Intermediary ('Confused Deputy')", "category": "idor" },
     "CWE-639":  { "name": "Authorization Bypass Through User-Controlled Key", "category": "idor" },
     "CWE-640":  { "name": "Weak Password Recovery Mechanism",          "category": "auth" },
     "CWE-732":  { "name": "Incorrect Permission Assignment for Critical Resource", "category": "deployment" },

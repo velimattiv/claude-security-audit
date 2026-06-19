@@ -188,14 +188,23 @@ For each detected schema file, extract:
 - Ownership columns: any column name matching `user_id|userId|ownerId|createdBy|organizationId|tenantId|accountId`
 - PII columns: any column name matching `email|phone|dob|ssn|passport|address|ip|full_name|firstName|lastName|birthdate`
 
-Emit:
+Emit (include a canonical `id` per entity — the join key the Authorized-Egress
+reconciliation uses; default it to the entity name):
 ```json
 {
   "orm": "drizzle",
   "schema_files": ["drizzle/schema.ts"],
-  "entities": [{"name": "User", "owner_cols": ["id"], "pii_cols": ["email"]}]
+  "entities": [{"name": "User", "id": "User", "owner_cols": ["id"], "pii_cols": ["email"]}]
 }
 ```
+
+> The `owner_cols` / `pii_cols` here are ONE source of "this resource is
+> sensitive" — they are not the only source, and they are not required to be
+> complete. The Authorized-Egress reconciliation (v2.4) is **default-deny**:
+> any served entity is treated as sensitive unless you place it on the
+> `public_resources` allowlist (§0.12b). A resource gated by a share/2FA
+> mechanism (§0.11d) is sensitive even with no ownership column — that is the
+> exact case the deck-2FA bug exploited.
 
 ## 0.9 — Deployment
 
@@ -305,6 +314,33 @@ Emit into `supply_chain`:
 }
 ```
 
+## 0.11d — Access / share mechanisms (confused-deputy precursor)
+
+A share/capability mechanism gates access at a **discovery layer** (resolve a
+short link, mint a signed URL) that is often SEPARATE from the **content layer**
+that serves the bytes. When the content layer doesn't re-enforce the gate, you
+get the control-with-no-enforcer / capability-URL class (the deck-2FA bug). Detect:
+
+- **Publish / share links**: routes like `/s/:shortId`, `/share/:token`,
+  `publishLink`, `shareToken`, columns `requireVerification` / `is_public` /
+  `expires_at` on a share table.
+- **Signed / capability URLs**: `getSignedUrl`, `presign`, HMAC-signed query
+  params, magic links.
+- **Verification gates**: email-code / 2FA / OTP on a share flow; a
+  verification cookie (`__sv_`-style) minted by a resolver.
+
+Emit into `access_mechanisms`:
+```json
+{
+  "detected": true,
+  "kinds": ["publish_link", "verification"],
+  "evidence": ["server/api/s/[shortId].get.ts", "schema: publishLinks.requireVerification"]
+}
+```
+Absent ⇒ none detected. This feeds Phase 2's egress inventory and the Phase 6
+§6.19 Authorized-Egress reconciliation. Any resource reachable through such a
+mechanism is **sensitive** for default-deny purposes regardless of ownership cols.
+
 ## 0.12 — PII classification
 
 From Phase 0.8, if any entity has PII columns, mark `pii.detected: true` and
@@ -318,6 +354,25 @@ collate:
 ```
 
 This gates LINDDUN privacy review (Phase 6).
+
+## 0.12b — Public-resource allowlist (default-deny sensitivity)
+
+The Authorized-Egress reconciliation treats every served entity as sensitive
+**unless** it is explicitly intended to be public. Build that allowlist here so
+default-deny doesn't drown the report in false positives on genuinely-public data.
+
+A resource belongs on `public_resources` ONLY with positive evidence of intended
+public access: a `/public/` route, an `is_public`/`published` flag with no
+verification, README/marketing copy ("public product catalog"), or a CMS/blog
+content type. **When in doubt, leave it OFF** (default-deny — a false positive is
+triaged; a false negative is the deck bug).
+
+Emit the canonical entity ids at the top level:
+```json
+{ "public_resources": ["Product", "BlogPost", "Category"] }
+```
+This list is surfaced in the Phase 7 report for human review — it is the one
+place where "we decided this is public" is auditable.
 
 ## 0.13 — Ignore list
 

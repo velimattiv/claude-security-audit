@@ -16,7 +16,16 @@ Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD, MCP/Agentic).
 
 ## Version
 
-- **v2.3.0** (current) — kept Semgrep (evaluated and declined Opengrep: its
+- **v2.4.0** (current) — **Authorized-Egress detection**: catches the
+  control-with-no-enforcer / confused-deputy / capability-URL class (a credential
+  minted at one layer but never enforced on the byte-serving path). A
+  path-sensitive egress-sink inventory + credential mint/consume ledger feed a
+  deterministic reconciliation (`scripts/validate-egress.py`, rules R1–R5) with a
+  **fail-closed coverage gate** so a silently-omitted sink breaks the run. Design
+  was adversarially reviewed before build. Honest scope: reliably catches the
+  class + raises recall — a clean run is **not** a proof of absence. See
+  `docs/EPIC-v2.4-authorized-egress.md` + CHANGELOG.
+- **v2.3.0** — kept Semgrep (evaluated and declined Opengrep: its
   only free ruleset is archived/frozen at Dec-2024, and free-OSS invoke-only
   use of Semgrep is unrestricted); added an `AUDIT_SAST_RULES` offline /
   BYO-rules override. See CHANGELOG.
@@ -89,16 +98,16 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.3.0 \
+git clone --depth 1 --branch v2.4.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.3.0
+cat ~/.claude/skills/security-audit/VERSION   # → 2.4.0
 ```
 
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.3.0 \
+git clone --depth 1 --branch v2.4.0 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -143,7 +152,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.3.0 \
+git clone --depth 1 --branch v2.4.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 

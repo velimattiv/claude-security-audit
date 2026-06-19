@@ -47,6 +47,16 @@ as the `phase-specific-method-body`.
    `@ModelAttribute User user` that maps `role`/`isAdmin` from body.
 9. Role / scope checks exist on admin endpoints and use `===` or
    equivalent exact comparison, not `includes`/partial match.
+10. **Cross-layer enforcement.** When a resource is gated by a control at a
+    *discovery* layer (a share-link resolver, a signed-URL minter, a 2FA
+    verification step), **every** layer that subsequently serves the resource's
+    bytes re-enforces that same gate. A control minted at one layer but not
+    consumed on the content-serving path is the control-with-no-enforcer /
+    confused-deputy class. Do NOT treat "the identifier (deckId/UUID/token) is
+    hard to guess" as a gate — it is handed to clients and is not secret. This
+    invariant is checked mechanically by the Phase 6 §6.19 Authorized-Egress
+    reconciliation (`scripts/validate-egress.py`) over the global sink +
+    credential inventories; cat-01 corroborates it per-handler.
 
 ## Detection patterns (polyglot)
 
@@ -262,6 +272,17 @@ call whose options block has no `iss`/`aud`:
 → **CRITICAL** / **CWE-347** for `alg:none`, alg-confusion, and
 `jku`/`x5u`/`kid` header-trust; **HIGH** / **CWE-345** (Insufficient
 Verification of Data Authenticity) for missing `iss`/`aud` validation.
+
+### Consistency-with-a-sibling is NOT proof of correctness
+
+When a handler mirrors a sibling endpoint's access-control pattern ("this serves
+content the same way `build-output` does"), do **not** conclude it is safe because
+it is *consistent*. Consistency with a flawed baseline reproduces the flaw and
+reads as correct — this is exactly how the deck-2FA gap propagated to a second
+endpoint and passed two reviews. Audit the **sibling's** correctness against the
+resource's intended gate; if the sibling is wrong, both are wrong. When a finding
+involves a resource served by multiple endpoints, set `related_partitions[]` and
+defer the cross-endpoint verdict to §6.19.
 
 ## False-positive notes
 

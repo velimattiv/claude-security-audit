@@ -4,6 +4,8 @@
 
 📋 **This phase MUST produce, on disk, before advancing:**
 - `.claude-audit/current/phase-02-surface.json` (one row per attack-surface item: route, handler file+line, method, auth status, trust zone)
+- `.claude-audit/current/phase-02-sinks.json` (egress-sink inventory — §2.11; ALWAYS written, empty `sinks: []` if none)
+- `.claude-audit/current/phase-02-credentials.json` (credential mint/consume ledger — §2.11; ALWAYS written, empty `credentials: []` if none)
 - `.claude-audit/current/phase-02.done`
 
 ⛔ **DO NOT advance to Phase 3** until both files exist AND the Verify block at the bottom prints `phase-02 verified`.
@@ -98,7 +100,19 @@ Every surface row in `surfaces[]` MUST include:
 | `trust_zone` | inherited from the partition by default; override if the surface is explicitly admin/internal |
 | `data_ops` | list of data operations: `read|write|delete|exec|none` |
 | `framework` | the framework that produced this surface (e.g., `Express`) |
+| `serves_resource` | canonical `data_model` entity id this surface reads/emits, or `null` (v2.4 — join key for Authorized-Egress) |
+| `intended_gate` | the strongest gate the served resource declares (RBAC / tenant-ownership / 2FA-share / OIDC), or `null` (v2.4) |
+| `emits_bytes` | `true` if this surface itself returns the resource's bytes; `false` for resolve/identify surfaces that only hand out an id (v2.4) |
+| `guarded_paths` | per-branch authz `[{branch_id, condition, enforced_gate, serves_bytes}]` — fill for any surface that serves a sensitive resource (v2.4) |
 | `notes` | free text (≤200 chars), optional |
+
+> **v2.4 — answer the real question per interface.** For every surface that can
+> read or emit a resource, the question is NOT "is there an auth check?" but
+> "what is the resource's *strongest intended gate*, and is it enforced on
+> **every branch** that emits bytes?" Record `serves_resource` + `intended_gate`,
+> and enumerate `guarded_paths` per branch. A handler with an authed branch AND
+> a conditional unauthenticated bypass branch (the deck-2FA shape) MUST show both
+> branches — recording only the authed one is the exact miss this release fixes.
 
 ## 2.5 — Handler body extraction & hashing
 
@@ -203,7 +217,8 @@ Write the consolidated surface document to
 }
 ```
 
-Write `phase-02.done` marker.
+Then run §2.11 to write `phase-02-sinks.json` and `phase-02-credentials.json`.
+Write `phase-02.done` marker only after all three artifacts exist.
 
 ## 2.9 — Report to user
 
@@ -224,6 +239,50 @@ Write `phase-02.done` marker.
 - **Vendor code.** Any path matching an `ignore.txt` pattern is skipped —
   no surface emitted regardless of apparent route-like structure.
 
+## 2.11 — Egress-sink inventory + credential ledger (v2.4, GLOBAL)
+
+The surface inventory above catalogues **ingress**. This section catalogues
+**egress of sensitive data** + the **credential mint/consume map** — the inputs
+to the Phase 6 §6.19 Authorized-Egress reconciliation. Both files are GLOBAL
+(span all partitions) because a credential's writer and a resource's byte-serving
+sink routinely live in different partitions (the deck bug's cookie was minted in
+`/s/...` and ignored in `/api/decks/...`).
+
+**Method is deterministic-candidate-first (fail-closed).** Do NOT free-form
+enumerate from memory — that is how sinks get missed:
+
+1. **Extract candidates deterministically.** Grep the per-framework anchors in
+   [`../lib/egress-detection.md`](../lib/egress-detection.md) to enumerate every
+   candidate egress site and credential read/write site. This is the SAME
+   candidate set the Phase 6 §6.19 coverage gate re-derives from source — so
+   anything you miss here will be raised against you there (fail-closed). Use the
+   catalogue, not memory.
+2. **Account for EVERY candidate.** Each candidate becomes either a `sinks[]`
+   row (a real sensitive-data emitter) or a `dismissed[]` row **with a reason**
+   (e.g. "serves a public asset", "health check"). An unaccounted candidate
+   FAILS `validate-egress.py` (fail-closed coverage) — silence is not allowed.
+3. **Be path-sensitive.** For each sink, enumerate `guarded_paths[]` — **every
+   branch** that can emit bytes, with the gate enforced on that branch. If a
+   handler has more emitting branches than you can confidently enumerate (e.g.
+   it exceeds ~40 lines or has multiple `return res.*`/early-return branches),
+   set `coverage: "incomplete"` — that is itself a fail-closed deficit, not a
+   silent pass.
+4. **Map credentials.** For every minted claim (cookie/JWT/CSRF/signed-URL/
+   capability/api-key/session/feature-flag/licence), record `writers[]`,
+   `readers[]`, `validation_at_readers[]`, and `protects_resources[]` (canonical
+   entity ids it is meant to gate).
+
+Write `phase-02-sinks.json` (schema `lib/sink-schema.json`) and
+`phase-02-credentials.json` (schema `lib/credential-ledger-schema.json`).
+Both ALWAYS written — empty arrays if nothing is found (the file's presence is
+the signal that the egress pass ran). Validate each against its schema before
+proceeding.
+
+> Honest scope: this catalogue is the *known* egress surface. Accounting for
+> every candidate means "nothing the catalogue can see was silently dropped" —
+> it does NOT prove no unauthorized path exists. New modality found ⇒ extend
+> `lib/egress-detection.md`.
+
 ---
 
 ## Verify before exit (MANDATORY)
@@ -232,9 +291,11 @@ Before declaring this phase complete and proceeding, run:
 
 ```bash
 test -f .claude-audit/current/phase-02-surface.json  \
+  && test -f .claude-audit/current/phase-02-sinks.json \
+  && test -f .claude-audit/current/phase-02-credentials.json \
   && test -f .claude-audit/current/phase-02.done \
   && echo "phase-02 verified" \
-  || { echo "phase-02 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+  || { echo "phase-02 INCOMPLETE — re-write artifact(s) + .done marker before proceeding" >&2; exit 1; }
 ```
 
 Do not advance to the next phase until this check prints "phase-02 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.

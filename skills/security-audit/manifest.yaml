@@ -43,7 +43,7 @@
 
 schema_version: 1
 skill: security-audit
-skill_version: 2.3.0
+skill_version: 2.4.0
 
 description: |
   Per-phase contract. Every phase MUST produce the listed required_outputs
@@ -87,6 +87,13 @@ phases:
     required_outputs:
       - path: .claude-audit/current/phase-02-surface.json
         schema: lib/surface-schema.json
+      - path: .claude-audit/current/phase-02-sinks.json
+        schema: lib/sink-schema.json
+        # Egress-sink inventory (v2.4 §2.11). ALWAYS written (empty sinks:[] if
+        # none). Input to the Phase-6 §6.19 Authorized-Egress reconciliation.
+      - path: .claude-audit/current/phase-02-credentials.json
+        schema: lib/credential-ledger-schema.json
+        # Credential mint/consume ledger (v2.4 §2.11). ALWAYS written.
       - path: .claude-audit/current/phase-02.done
     sub_agent_fan_out: none
 
@@ -204,6 +211,11 @@ phases:
         empty_if_gated: "profile.pii.detected == false"
       - path_glob: .claude-audit/current/phase-06-stride/*.md
         at_least_one: true
+      - path: .claude-audit/current/phase-06-egress.jsonl
+        # Authorized-Egress reconciliation (§6.19). ALWAYS written; zero-byte
+        # only when phase-02-sinks.json has no sinks. Catches the cross-layer /
+        # missing-enforcer / capability-URL class.
+        empty_if_gated: "phase-02-sinks.json has no sinks"
       - path: .claude-audit/current/phase-06.done
     sub_agent_fan_out:
       # All three Phase 6 fan-outs: do NOT pass a `model` parameter to

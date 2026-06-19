@@ -151,6 +151,24 @@ If the entity uses sequential integer ids and the endpoint allows
 authenticated enumeration (the error message differs between "forbidden"
 and "not found"), flag as **MEDIUM** / CWE-200.
 
+### Capability-URL / cross-surface identifier flow (distinct from classic IDOR)
+
+Classic IDOR is a *missing ownership scope on an authenticated request*. The
+**capability-URL** cousin is different and easy to miss: access is
+**unauthenticated**, gated only by knowledge of a hard-to-guess identifier
+(UUID/slug/short-id), where that identifier is **handed to clients** (rendered in
+the DOM, returned in an API response, used as an iframe `src`, leaked via
+`Referer`/logs). The control collapses to id-secrecy, which is not secret.
+
+Trace the identifier **across surfaces**: it is often *issued* by one endpoint (a
+resolver that gates on 2FA/login) and *consumed* by another (a content endpoint
+that re-derives authority from possession of the id alone). The cross-surface hop
+is the vuln, and it spans files/partitions — so a single-handler ±40-line read
+cannot see it. Flag the consuming endpoint → **HIGH/CRITICAL** / **CWE-639**
+(user-controlled key) or **CWE-441** (confused deputy) and set
+`related_partitions[]`. The authoritative cross-surface check is the Phase 6
+§6.19 Authorized-Egress reconciliation; cat-02 feeds it the per-handler trace.
+
 ## False-positive notes
 
 - **Public resources.** Products, categories, blog posts — shared-read

@@ -1,0 +1,18 @@
+{
+  "_mutation": "Gate moved to a SIBLING SINK (not a resolver). Deck is served by two sinks: one enforces 2FA, the other none. The weak sibling must be flagged (R2 asymmetry).",
+  "_expect": "R2",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "deck:sink:strong", "sink_file": "a/strong.ts", "line": 1, "kind": "file",
+      "serves_resource": "Deck", "coverage": "complete",
+      "guarded_paths": [{"branch_id": "ok", "enforced_gate": "2FA verification + allow-list", "serves_bytes": true}]
+    },
+    {
+      "id": "deck:sink:weak", "sink_file": "a/weak.ts", "line": 1, "kind": "file",
+      "serves_resource": "Deck", "coverage": "complete",
+      "guarded_paths": [{"branch_id": "open", "enforced_gate": "role:viewer", "serves_bytes": true}]
+    }
+  ],
+  "dismissed": []
+}

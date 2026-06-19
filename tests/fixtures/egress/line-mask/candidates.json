@@ -1,0 +1,7 @@
+{
+  "_comment": "Two egress candidates in the SAME file, far apart. Only line 5 is inventoried; line 99 must NOT be masked by it.",
+  "candidates": [
+    {"file": "handlers.ts", "line": 5, "kind": "file"},
+    {"file": "handlers.ts", "line": 99, "kind": "proxy"}
+  ]
+}

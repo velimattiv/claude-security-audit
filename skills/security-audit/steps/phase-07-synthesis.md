@@ -32,6 +32,8 @@ consolidated SARIF 2.1.0 document, and a CycloneDX SBOM.
 - `phase-04-scanners/adversarial-*.md`
 - `phase-05-*.jsonl` (all deep-dive category findings)
 - `phase-06-config.json`, `phase-06-asvs.jsonl`, etc.
+- `phase-06-egress.jsonl` (Authorized-Egress reconciliation findings, §6.19)
+- `phase-02-sinks.json`, `phase-02-credentials.json` (egress inventories, for the report's coverage counts)
 - `phase-00-profile.json`, `partitions.json`, `phase-02-surface.json`
 
 **Outputs.**
@@ -56,6 +58,11 @@ must see the whole picture).
 Load every JSONL / JSON artifact into in-memory lists:
 - `findings[]` — all Phase 5 + Phase 6 JSONL lines + scanner-derived
   findings (from slim SARIF, with the scanner tool name in `sources[0].detail`).
+  **Include `phase-06-egress.jsonl`** — the Authorized-Egress reconciliation
+  findings (cross-layer / missing-enforcer class). These carry
+  `sources[].detail = "validate-egress.py:R<n>"` and often a `verification_probe`;
+  preserve the probe through dedup so it reaches the SARIF (`properties`) and the
+  report. They are deterministic (`scanner` source) ⇒ CONFIRMED per §7.3.
 - `asvs_results[]` — Phase 6 ASVS rows.
 - `stride_tables{}` — per-partition Markdown blobs.
 - `surfaces[]` — Phase 2.
@@ -252,7 +259,14 @@ Use the template in `lib/report-template.md`. Sections in order:
    CWE, OWASP ids, description, attack scenario, suggested fix.
 5. **Attack Surface Summary** — from Phase 2, counts by category,
    noteworthy surfaces listed.
-6. **Methodology Coverage** — the §7.6 matrix.
+5b. **Authorized-Egress (cross-layer access control)** — from §6.19.
+   Report: sensitive-resource count (default-deny) + the `public_resources`
+   allowlist for human review; egress sinks inventoried + candidates dismissed;
+   the fail-closed **coverage gate** status; the cross-layer / missing-enforcer
+   findings WITH their `verification_probe` (the request that should fail). Close
+   with the honest caveat: a clean reconciliation is high-signal, **not** a proof
+   of absence; list any `coverage: caveat` modalities (e.g. CDN-edge) explicitly.
+6. **Methodology Coverage** — the §7.6 matrix (add the Authorized-Egress row).
 7. **STRIDE Tables** — per-partition, inline from phase-06-stride/*.md.
 8. **ASVS Checklist** — summary then per-category breakdown.
 9. **Route Inventory** — first 50 rows (truncated with count).
@@ -293,6 +307,9 @@ Every `results[]` item in the synthetic `security-audit-skill` run:
 - `properties.epss` / `properties.kev` (optional): EPSS probability and
   CISA-KEV flag joined from grype (§7.14). Additive prioritization signals
   only — they never change `level` or `properties.security-severity`.
+- `properties.verification_probe` (optional): for Authorized-Egress findings
+  (§6.19), the JSON `{request, expected, actual}` — the executable proof (the
+  request that should fail). Carry it through verbatim so a triager can run it.
 
 **Scanner-run results.** Per-scanner SARIF runs (semgrep, trivy, etc.)
 emit CWE in scanner-specific locations — `tags[]`, `rule.properties.tags`,

@@ -121,6 +121,32 @@ else:
   rerun_phase_04 = False
 ```
 
+#### 2f — Authorized-Egress: ALWAYS global, never carried from baseline (v2.4)
+
+The cross-layer / missing-enforcer class is **invisible to a partition-scoped
+delta**: the credential's writer and the resource's byte-serving sink routinely
+live in different partitions, so a change to *either* (or to neither — a pure
+copy-forward of a flawed pattern) can open the gap, and "a pre-existing gap is
+not a delta" is exactly why the original bug survived. Therefore:
+
+```
+# The egress inventory + reconciliation do NOT respect touched_partitions.
+rerun_egress_global = True   # unconditional, every delta run
+```
+
+- Phase 2 §2.11 re-enumerates `phase-02-sinks.json` + `phase-02-credentials.json`
+  **across the whole repo**, even though the surface inventory is partition-scoped.
+- Phase 6 §6.19 (`validate-egress.py`, incl. the fail-closed coverage gate)
+  **always runs in full**, over the freshly-regenerated global inventory.
+- Egress findings (`category in {auth, idor}` sourced from `validate-egress.py`)
+  are **never** carried forward via §4; they are recomputed every run. This is
+  the bounded cost of correctness for this class (enumeration, not deep-dive —
+  seconds, not minutes).
+- **Resource-rename invalidation.** If a `data_model` entity `id` changed since
+  baseline (rename refactor), invalidate ALL egress findings — a renamed
+  `serves_resource` would silently stop joining to `protects_resources` and the
+  class would look "fixed". Detect via a diff of `profile.data_model.entities[].id`.
+
 ### Step 3 — Scope computation
 
 ```
@@ -152,7 +178,11 @@ for finding in baseline_full.findings_carryover:
 ### Step 5 — Execute partial audit
 
 Run Phases 2-7 scoped to `touched_partitions`:
-- Phase 2 re-enumerates surfaces only for touched partitions.
+- Phase 2 re-enumerates surfaces only for touched partitions — **EXCEPT** the
+  egress inventory (`phase-02-sinks.json` / `phase-02-credentials.json`), which
+  is regenerated **globally** every delta run (§2f).
+- Phase 6 §6.19 Authorized-Egress reconciliation **always runs in full** (§2f),
+  regardless of `rerun_phase_06`.
 - Phase 3 re-indexes keystones only for touched partitions (but
   existing cache entries for non-touched are kept).
 - Phase 4 either re-runs full (if `rerun_phase_04`) or reuses the
@@ -215,3 +245,7 @@ speed-up is ~10× on average.
    a new scanner result corroborated it") happens in Phase 7
    synthesis as usual — baseline findings are merged into the
    findings list and then pass through dedup + confidence logic.
+4. **The Authorized-Egress reconciliation (§2f) is exempt from carryover** —
+   its inventory and findings are recomputed globally on every run (full or
+   delta). A delta run must never report this class as "carried forward /
+   accepted"; a pre-existing cross-layer gap is not a delta and must re-raise.

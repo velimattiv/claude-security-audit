@@ -1,0 +1,13 @@
+{
+  "_mutation": "R4 pure theatre: the deck IS served only behind a real 2FA gate (no R5/R3), but the credential meant to gate it is minted and read NOWHERE (readers: []). An issued credential with zero consumers is not a control.",
+  "_expect": "R4",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "deck:sink:gated", "sink_file": "a/gated.ts", "line": 1, "kind": "file",
+      "serves_resource": "Deck", "coverage": "complete",
+      "guarded_paths": [{"branch_id": "ok", "enforced_gate": "2FA verification + allow-list", "serves_bytes": true}]
+    }
+  ],
+  "dismissed": []
+}

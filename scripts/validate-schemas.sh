@@ -209,6 +209,36 @@ else
   note "tests/fixtures/ absent — skipping fixture check (not fatal)"
 fi
 
+# --- 7c. Egress fixtures vs sink/credential schemas -------------------------
+echo
+echo "[7c/8] Egress fixtures (sink + credential schemas)..."
+if [ -d tests/fixtures/egress ]; then
+  while IFS= read -r ef; do
+    case "$(basename "$ef")" in
+      sinks.json)       esch="skills/security-audit/lib/sink-schema.json" ;;
+      credentials.json) esch="skills/security-audit/lib/credential-ledger-schema.json" ;;
+      surface.json)     esch="skills/security-audit/lib/surface-schema.json" ;;
+      *)                esch="" ;;
+    esac
+    [ -z "$esch" ] && continue
+    if python3 -c "
+import json, sys
+try:
+    import jsonschema
+except ImportError:
+    sys.exit(0)
+jsonschema.Draft202012Validator(json.load(open('$esch'))).validate(json.load(open('$ef')))
+" 2>/dev/null; then
+      pass
+    else
+      fail "egress fixture $ef failed schema validation against $esch"
+    fi
+  done < <(find tests/fixtures/egress -type f -name '*.json')
+  note "egress fixtures validated"
+else
+  note "tests/fixtures/egress absent — skipped"
+fi
+
 # --- 8. CWE / A##:2025 tag-pair mapping ------------------------------------
 # Guards the tag-mismap class both v2.1 adversarial rounds caught: a
 # hand-authored "CWE-N / A##:2025" pairing that every other validator passed

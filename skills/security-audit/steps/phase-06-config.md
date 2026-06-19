@@ -11,6 +11,7 @@
 - `.claude-audit/current/phase-06-agentic-top10.jsonl` — ALWAYS written. If `profile.mcp_agentic.detected != true`, write a zero-byte file (the file's presence is the signal that the gate ran). Otherwise one row per ASI01..ASI10 (§6.17).
 - `.claude-audit/current/phase-06-linddun.jsonl` — ALWAYS written. If `profile.pii.detected == false`, write a zero-byte file.
 - `.claude-audit/current/phase-06-stride/*.md` — one Markdown file per top-N partition (filename uses the partition id, e.g. `services-api.md`)
+- `.claude-audit/current/phase-06-egress.jsonl` — Authorized-Egress reconciliation findings (§6.19). ALWAYS written; zero-byte only when `phase-02-sinks.json` has no sinks.
 - `.claude-audit/current/phase-06.done`
 
 🔁 **Methodology fan-out is MANDATORY (per §6.9, §6.12, §6.13):**
@@ -362,14 +363,99 @@ AI components, reported as a meta-check section (not per-finding):
 Record the SSDF + (conditional) 800-218A results inside `phase-06-config.json`
 under an `ssdf` key; surface them in the Phase 7 report's coverage section.
 
+## 6.19 — Authorized-Egress Reconciliation (the cross-layer / missing-enforcer pass)
+
+**Always runs. This is the pass that catches the control-with-no-enforcer /
+confused-deputy / capability-URL class** (the deck-2FA bug) — the class that
+per-partition, per-handler deep-dives structurally cannot see, because the
+credential's writer and the resource's byte-serving sink live in different
+partitions and each looks locally fine. Inputs: the GLOBAL `phase-02-sinks.json`
++ `phase-02-credentials.json` + `phase-02-surface.json` + `phase-00-profile.json`.
+
+### Step 1 — deterministic reconciliation + fail-closed coverage gate
+
+Load `SKILL_DIR=$(cat .claude-audit/.skill-dir)` and run:
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/scripts/validate-egress.py" \
+  .claude-audit/current/phase-02-sinks.json \
+  .claude-audit/current/phase-02-credentials.json \
+  .claude-audit/current/phase-02-surface.json \
+  .claude-audit/current/phase-00-profile.json \
+  --source-root . \
+  --partition global \
+  --out .claude-audit/current/phase-06-egress.jsonl
+```
+
+The script (a) re-extracts egress candidates from source and **FAILS the run if
+any candidate sink/credential site was neither inventoried nor dismissed in
+Phase 2** (fail-closed coverage, **line-scoped** — a sink at one line cannot mask
+an un-inventoried sink elsewhere in the same file), and (b) emits one finding per
+gate-deficit via rules R2-R5:
+
+- **R2** — R served by ≥2 sinks with differing min-branch gates ⇒ the weaker is a deficit (CWE-862).
+- **R3** — a byte-serving branch that is ungated / gated only by "identifier known" on a sensitive R (CWE-639/441).
+- **R4** — a credential minted (writers≠∅) but with **zero readers anywhere** — pure theatre (CWE-862). (Reader-based, NOT substring — a credential consumed in middleware is correctly NOT flagged.)
+- **R5** — R's strongest gate sits only on a resolve/identify surface (not a byte sink) ⇒ flag every byte-serving sink for R (CWE-862). **This is the deck-2FA rule.**
+
+> **How gates are ranked (controlled, negation-aware).** `enforced_gate` /
+> `intended_gate` free text is ranked NONE < AUTHN < AUTHZ < VERIFIED by keyword,
+> but **negation dominates**: a description of an *absent* control ("no role
+> check", "unauthenticated", "missing ownership") ranks NONE even though it
+> contains positive keywords. Unrecognized text also ranks NONE. The failure
+> direction is deliberately conservative — an ambiguous gate is treated as **no
+> gate**, so the tool over-flags (triaged) rather than misses. A credential that
+> protects R raises R's gate floor, so an ungated byte path to R is caught as a
+> deficit (R5/R2) — this replaces the unsound v2.4-draft "R1" substring-
+> consumption check, which false-positived on credentials enforced in middleware.
+
+If the coverage gate fails, go back to Phase 2 §2.11 and account for the missing
+candidates; do not proceed with an incomplete egress inventory. If
+`phase-02-sinks.json` has no sinks, write a zero-byte `phase-06-egress.jsonl`.
+
+### Step 2 — adversarial confirmation (attack, don't summarize)
+
+For each deficit finding the reconciliation emitted, invoke the **Agent tool**
+(concurrency cap 8) per `(resource, sink)` with a task that is an **attack, not a
+review** — this operationalizes RCA §11 ("show me the request that should
+fail"):
+
+- `description`: `"Egress probe: <resource> via <sink_id>"`.
+- `subagent_type`: `"general-purpose"`. Do NOT pass a `model` parameter.
+- `prompt`: *"Here is a candidate unauthorized-access path: sink `<sink_file>`
+  branch `<branch_id>` serves `<resource>` bytes with gate `<enforced_gate>`,
+  while the resource's intended gate is `<floor_src>`. **Construct the exact
+  unauthenticated / under-authorized request that returns `<resource>`'s bytes,
+  or prove it is impossible** by tracing the real middleware/branch order from
+  entry to bytes. Read the actual handler + every middleware in its chain — do
+  NOT trust the inventory's summary. Return the `verification_probe` (the curl an
+  attacker runs + the expected denial), set `actual` if you can statically
+  determine the live result, and a confidence: CONFIRMED if you produced a
+  concrete bypass request, REFUTED if you proved the gate holds on every path
+  (with the line that enforces it)."*
+
+Merge each confirmation back into `phase-06-egress.jsonl`: promote to
+`confidence: CONFIRMED` + attach the `verification_probe` when the sub-agent
+constructs a bypass; **demote/drop** the finding (record as INFO with the
+refuting line) when it proves the gate holds. This adversarial pass is what
+turns "the inventory says weak" into "here is the request that proves it".
+
+> Honest framing (carries into the report): a clean §6.19 means every *known*
+> egress candidate was accounted for and gated — it is high-signal but **NOT a
+> proof of absence**. CDN-edge egress with no code path, and any modality outside
+> `lib/egress-detection.md`, remain out of mechanical reach and are surfaced as
+> report caveats, never silently.
+
 ## 6.14 — Emit
 
-Run §6.16-6.18 (web Top 10 roll-up, agentic coverage lens, SSDF meta-check)
-after the §6.1-6.13 work, then write all JSONL files (including
-`phase-06-web-top10.jsonl` and `phase-06-agentic-top10.jsonl`), the STRIDE
-Markdown files, and `phase-06-config.json` (the §6.1-6.8 config findings
-plus the §6.18 `ssdf` meta-check block, in structured form).
-Write `phase-06.done`.
+Run §6.16-6.19 (web Top 10 roll-up, agentic coverage lens, SSDF meta-check,
+Authorized-Egress reconciliation) after the §6.1-6.13 work, then write all JSONL
+files (including `phase-06-web-top10.jsonl`, `phase-06-agentic-top10.jsonl`, and
+`phase-06-egress.jsonl`), the STRIDE Markdown files, and `phase-06-config.json`
+(the §6.1-6.8 config findings plus the §6.18 `ssdf` meta-check block, in
+structured form). Write `phase-06.done`.
 
 ## 6.15 — Report to user
 
@@ -386,9 +472,10 @@ Before declaring this phase complete and proceeding, run:
 
 ```bash
 test -f .claude-audit/current/phase-06-config.json  \
+  && test -f .claude-audit/current/phase-06-egress.jsonl \
   && test -f .claude-audit/current/phase-06.done \
   && echo "phase-06 verified" \
-  || { echo "phase-06 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }
+  || { echo "phase-06 INCOMPLETE — re-write artifact(s) + .done marker before proceeding" >&2; exit 1; }
 ```
 
 Do not advance to the next phase until this check prints "phase-06 verified". Producing only a downstream artifact (e.g. the final report) without the per-phase artifact + marker is an INVALID run.
