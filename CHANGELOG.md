@@ -7,6 +7,71 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.4.0] — 2026-06-19
+
+**Authorized-Egress detection** — catch the control-with-no-enforcer /
+confused-deputy / capability-URL class that survived multiple prior audits + two
+adversarial reviews (RCA: a 2FA `__sv_` cookie minted at a resolver but never
+consumed on the byte-serving content endpoints). Design was itself adversarially
+reviewed before build; see `docs/EPIC-v2.4-authorized-egress.md`.
+
+### Added
+- **Deterministic reconciliation** (`scripts/validate-egress.py`) — the robust
+  core. Rules R2–R5 over a path-sensitive inventory: R2 gate-asymmetry across
+  sinks, R3 capability-only/ungated byte path, R4 credential minted with
+  **zero readers** (theatre), **R5 cross-layer gate-location** (the rule that
+  catches the deck bug — gate lives on a resolve surface, not the byte sink). Gate
+  ranking is **negation-aware** (an absent control described in prose ranks as no
+  gate — conservative, over-flags rather than misses). Default-deny sensitivity.
+  Emits finding-schema JSONL with a `verification_probe` (the curl that should
+  fail — RCA §11).
+- **Fail-closed coverage gate** — a deterministic per-framework extractor
+  (`lib/egress-detection.md`) enumerates candidate egress sinks; the run FAILS if
+  the agent inventory neither classifies nor explicitly dismisses any candidate.
+  A silently-omitted sink breaks the run instead of passing quietly.
+- **Two Phase-2 inventories** — `phase-02-sinks.json` (egress sinks, path-
+  sensitive `guarded_paths[]`) + `phase-02-credentials.json` (mint/consume
+  ledger), with `lib/sink-schema.json` + `lib/credential-ledger-schema.json`.
+- **Phase 6 §6.19** — runs the reconciliation, then an *adversarial confirmation*
+  fan-out ("construct the unauthenticated request that returns the bytes, or
+  prove it impossible") that writes the executable probe.
+- **Tests** — `tests/test-egress.sh` (CI): deck-bug caught, coverage gate fails-
+  closed, extractor recall across modalities (file/proxy/graphql/sse/presigned/
+  db), and a **metamorphic battery** (gate-moved, conditional-bypass, resource-
+  rename, sink-kind-swap) each still caught. Synthetic source app +
+  inventory mutants under `tests/fixtures/egress/`.
+
+### Changed
+- Phase 0 detects share/capability `access_mechanisms` + a default-deny
+  `public_resources` allowlist; entities carry a canonical `id` join key.
+- Surface rows gain `serves_resource` / `intended_gate` / `emits_bytes` /
+  `guarded_paths` (path-sensitive, per-branch authz).
+- `cat-01/02/03` add cross-layer-enforcement + "consistency-with-a-sibling is
+  not proof" + capability-URL invariants; `finding-schema.json` adds optional
+  `verification_probe`; report + synthesis surface the Authorized-Egress section.
+- **Delta mode**: the egress inventories + §6.19 always regenerate **globally**
+  and are never carried from baseline (a cross-layer gap is not a delta);
+  resource-id rename invalidates egress findings.
+
+### Hardened in pre-merge adversarial review (2× gate)
+A second adversarial pass over the **built code** found and fixed three P0 bugs a
+design review can't see: a **negation-blind ranker** (prose-described gaps scored
+0 findings → now negation-aware), a **file-granular coverage gate** that was
+fail-open (→ now line-scoped), and **substring-based credential consumption** that
+false-positived on middleware-enforced gates (→ R1 removed, R4 is now zero-reader
+theatre). Tests upgraded from substring-presence to exact-finding-set + zero-FP
+assertions, with regression fixtures `prose-gap/`, `line-mask/`, `theatre/`. See
+`docs/EPIC-v2.4-authorized-egress.md §4b`.
+
+### Honest scope
+Not a soundness proof. Reliably catches the named class and raises recall across
+the egress family; a clean reconciliation means every *known* egress candidate
+was accounted for and gated — **not** that no unauthorized path exists. Detection
+depends on the agent recording each branch's gate; ambiguous/negated gates are
+treated conservatively as ungated (over-flag, not miss). CDN-edge egress with no
+code path, and modalities outside `lib/egress-detection.md`, are surfaced as
+report caveats, never silently. `CWE-441` added to the CWE map.
+
 ## [2.3.0] — 2026-06-14
 
 SAST-engine licensing decision resolved + an offline-rules escape hatch.

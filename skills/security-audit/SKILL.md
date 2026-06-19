@@ -46,3 +46,23 @@ landed; do not proceed past a phase whose verification fails.
 The skill version is in [VERSION](VERSION). Stamp it into every artifact
 you emit (`skill_version` field) so the user can reason about cross-run
 comparability.
+
+# Authorized-Egress reconciliation (v2.4)
+
+Phase 2 additionally inventories **egress of sensitive data** (`phase-02-sinks.json`)
+and a **credential mint/consume ledger** (`phase-02-credentials.json`); Phase 6
+§6.19 runs a deterministic reconciliation (`scripts/validate-egress.py`) that
+catches the **control-with-no-enforcer / confused-deputy / capability-URL** class
+— a security claim minted at one layer but never consumed on the byte-serving
+path (incl. conditional unauthenticated-bypass branches and cross-layer gates
+that per-partition deep-dives structurally miss). A **fail-closed coverage gate**
+makes a silently-omitted sink break the run rather than pass quietly.
+
+**Honest scope (state this in the report, do not oversell):** this reliably
+catches the named class and raises recall across the egress family, but a clean
+reconciliation is **NOT a proof of absence**. Detection depends on Phase 2
+recording each byte-serving branch and its gate; gate descriptions are ranked
+**negation-aware and conservatively** (an absent/ambiguous gate is treated as *no
+gate*, so the tool over-flags rather than misses). CDN-edge egress with no code
+path, and any modality outside [lib/egress-detection.md](lib/egress-detection.md),
+remain out of mechanical reach and are surfaced as caveats, never silently.

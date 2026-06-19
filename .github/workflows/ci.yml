@@ -50,6 +50,14 @@ jobs:
               "$fixture"
           done
 
+      - name: Authorized-Egress reconciliation (deterministic + metamorphic battery)
+        run: |
+          # Deck-bug caught (R3/R4/R5 + CRITICAL), coverage gate fails-closed on
+          # an omitted sink, extractor recall across modalities, and every
+          # metamorphic mutant (gate-moved, conditional-bypass, resource-rename,
+          # sink-kind-swap) is still caught.
+          bash tests/test-egress.sh
+
       - name: Compile-check cat-*.md regex patterns (polyglot regression guard)
         run: |
           python3 scripts/validate-patterns.py

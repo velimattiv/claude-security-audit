@@ -109,6 +109,32 @@
             "items": { "enum": ["read", "write", "delete", "exec", "none"] }
           },
           "framework": { "type": "string" },
+          "serves_resource": {
+            "type": ["string", "null"],
+            "description": "Canonical data_model entity id this surface reads/emits, if any. Join key for the Authorized-Egress reconciliation (v2.4)."
+          },
+          "intended_gate": {
+            "type": ["string", "null"],
+            "description": "The strongest gate the served resource declares (RBAC / tenant-ownership / 2FA-share / OIDC). A resolve-layer surface that holds the real gate (e.g. a /s/{shortId} 2FA resolver) is how the cross-layer R5 rule finds the floor for byte-serving sinks."
+          },
+          "emits_bytes": {
+            "type": "boolean",
+            "description": "True if this surface itself returns the resource's bytes (a sink). False for resolve/identify surfaces that only hand out an id — those establish the gate floor but are not the egress."
+          },
+          "guarded_paths": {
+            "type": "array",
+            "description": "Per-branch authz, same shape as sink guarded_paths. Lets the reconciliation read this surface's enforced gate per branch.",
+            "items": {
+              "type": "object",
+              "required": ["branch_id", "enforced_gate"],
+              "properties": {
+                "branch_id": { "type": "string" },
+                "condition": { "type": "string" },
+                "enforced_gate": { "type": "string" },
+                "serves_bytes": { "type": "boolean" }
+              }
+            }
+          },
           "flags": {
             "type": "array",
             "items": { "type": "string" }

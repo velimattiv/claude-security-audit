@@ -76,6 +76,15 @@
     "suggested_fix": { "type": ["string", "null"] },
     "code_owner": { "type": ["string", "null"], "description": "From CODEOWNERS if present; else null." },
     "attack_scenario": { "type": ["string", "null"] },
+    "verification_probe": {
+      "type": ["object", "null"],
+      "description": "Executable proof for access-control findings (RCA §11: 'show me the request that should fail'). The exact unauthorized request an attacker would make, and the expected denial. Emitted by the Authorized-Egress reconciliation and by Phase-6 §6.19 confirmation. `actual` is filled only if the audit ran the probe against a live system.",
+      "properties": {
+        "request": { "type": "string", "description": "e.g. a curl with the attacker's exact capability (id, no credential)." },
+        "expected": { "type": "string", "description": "The denial that proves the control holds (e.g. '401 or 404')." },
+        "actual": { "type": ["string", "null"], "description": "Observed result if probed live; null for static audits." }
+      }
+    },
     "remediation_effort": {
       "type": ["string", "null"],
       "enum": ["trivial", "small", "medium", "large", null]

@@ -150,6 +150,7 @@
             "required": ["name", "owner_cols", "pii_cols"],
             "properties": {
               "name": { "type": "string" },
+              "id": { "type": "string", "description": "Canonical entity id used as the join key by the Authorized-Egress reconciliation (sink.serves_resource / credential.protects_resources). Defaults to `name` if omitted." },
               "owner_cols": { "type": "array", "items": { "type": "string" } },
               "pii_cols": { "type": "array", "items": { "type": "string" } }
             }
@@ -247,6 +248,24 @@
         "ci_systems": { "type": "array", "items": { "type": "string" } },
         "evidence": { "type": "array", "items": { "type": "string" } }
       }
+    },
+    "access_mechanisms": {
+      "type": "object",
+      "required": ["detected"],
+      "description": "Set by Phase 0. Share/capability mechanisms whose gate may live at a discovery layer separate from the content layer (the confused-deputy class). Optional for back-compat; absent ⇒ none detected.",
+      "properties": {
+        "detected": { "type": "boolean" },
+        "kinds": {
+          "type": "array",
+          "items": { "enum": ["publish_link", "share_token", "signed_url", "capability_param", "verification", "magic_link"] }
+        },
+        "evidence": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "public_resources": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Canonical entity ids that are INTENTIONALLY public (no gate). The Authorized-Egress reconciliation is default-deny: any served entity NOT on this allowlist is treated as sensitive. This list is agent-proposed and surfaced in the report for review."
     },
     "ignore_patterns": {
       "type": "array",

@@ -1,0 +1,13 @@
+{
+  "_mutation": "Sink-kind swap: the egress is a GraphQL field resolver (not a REST file endpoint). The reconciliation is kind-agnostic — it must still flag the unguarded byte path on a 2FA-gated resource (CRITICAL).",
+  "_expect": "CRITICAL",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "deck:sink:gqlfield", "sink_file": "a/deck.resolver.ts", "line": 8, "kind": "graphql_field",
+      "serves_resource": "Deck", "coverage": "complete",
+      "guarded_paths": [{"branch_id": "field", "enforced_gate": "none", "serves_bytes": true}]
+    }
+  ],
+  "dismissed": []
+}

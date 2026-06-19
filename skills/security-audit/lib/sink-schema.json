@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/velimattiv/claude-security-audit/lib/sink-schema.json",
+  "title": "Phase-02 Egress-Sink Inventory",
+  "description": "Path-sensitive inventory of every code path that can emit a resource's bytes to a caller. Consumed by scripts/validate-egress.py. The unit of analysis is the BRANCH (guarded_paths[]), not the handler — this is what makes a conditional unauthenticated-bypass branch expressible. Every deterministic candidate from lib/egress-detection.md MUST appear here as a sink OR in dismissed[] with a reason (fail-closed coverage).",
+  "type": "object",
+  "required": ["schema_version", "sinks"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "skill_version": { "type": "string" },
+    "audit_id": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "sinks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sink_file", "line", "kind", "serves_resource", "guarded_paths", "coverage"],
+        "properties": {
+          "id": { "type": "string" },
+          "sink_file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "kind": {
+            "enum": ["file", "stream", "db_entity", "proxy", "static",
+                     "graphql_field", "presigned_url", "websocket", "sse",
+                     "template", "redirect", "async_job", "cdn"]
+          },
+          "framework": { "type": "string" },
+          "serves_resource": {
+            "type": "string",
+            "description": "Canonical data_model entity id this sink emits. The join key for reconciliation — must reference a profile.data_model entity (not free text)."
+          },
+          "reachable_via": { "type": "array", "items": { "type": "string" },
+            "description": "Surface ids (or external path templates) that reach this sink." },
+          "intended_gate": {
+            "type": ["string", "null"],
+            "description": "The strongest gate the served resource declares (RBAC / tenant-ownership / 2FA-share / OIDC). Optional — reconciliation also derives the floor from credentials + sibling branches + resolve-layer surfaces."
+          },
+          "guarded_paths": {
+            "type": "array",
+            "minItems": 1,
+            "description": "EVERY branch in the handler that can emit bytes, with the authz enforced ON THAT BRANCH. A handler with N emitting branches must list N entries; under-reporting ⇒ set coverage:incomplete.",
+            "items": {
+              "type": "object",
+              "required": ["branch_id", "enforced_gate", "serves_bytes"],
+              "properties": {
+                "branch_id": { "type": "string" },
+                "condition": { "type": "string", "description": "The branch's guard condition (e.g. 'an active publishLink exists')." },
+                "enforced_gate": {
+                  "type": "string",
+                  "description": "The authorization actually enforced on this branch, or 'none'. Free text; ranked by keyword in validate-egress.py (gate_rank)."
+                },
+                "serves_bytes": { "type": "boolean" }
+              }
+            }
+          },
+          "coverage": {
+            "enum": ["complete", "incomplete", "caveat"],
+            "description": "complete = every emitting branch enumerated. incomplete = fail-closed deficit (handler has more emitting branches than recorded). caveat = mechanically un-gateable (e.g. CDN-edge), surfaced as a report caveat."
+          }
+        }
+      }
+    },
+    "dismissed": {
+      "type": "array",
+      "description": "Deterministic candidates the agent inspected and ruled out (not a sensitive-data sink). Required so the coverage gate can tell 'accounted-for' from 'silently omitted'.",
+      "items": {
+        "type": "object",
+        "required": ["candidate", "reason"],
+        "properties": {
+          "candidate": { "type": "string", "description": "file or file:line of the candidate." },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "_mutation": "P0-2 regression: a multi-handler file. The agent inventoried the sink at line 5 (correctly gated) but NOT the egress at line 99. A file-granular coverage gate would let line 5 mask line 99. The line-scoped gate must FAIL on line 99.",
+  "_expect": "coverage fail (UNACCOUNTED line 99)",
+  "schema_version": 1,
+  "sinks": [
+    {
+      "id": "x:sink:5", "sink_file": "handlers.ts", "line": 5, "kind": "file",
+      "serves_resource": "X", "coverage": "complete",
+      "guarded_paths": [{"branch_id": "ok", "enforced_gate": "role:admin", "serves_bytes": true}]
+    }
+  ],
+  "dismissed": []
+}

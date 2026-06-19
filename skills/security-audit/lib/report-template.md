@@ -44,6 +44,7 @@ empty ones. Keep the executive summary to one page.
 | OWASP Agentic Apps (2026) | {{agentic_status}} | {{agentic_count}} |
 | LINDDUN (privacy) | {{linddun_status}} | {{linddun_count}} |
 | STRIDE | {{stride_partition_count}} partitions covered | see Appendix C |
+| Authorized-Egress (cross-layer) | {{egress_status}} | {{egress_count}} |
 | CWE tags | {{unique_cwe_count}} unique CWE IDs | — |
 | MITRE CWE Top 25 (2025) | {{cwe_top25_hits}}/25 hit (top #{{cwe_top25_top_rank}}) | {{cwe_top25_count}} |
 
@@ -91,6 +92,7 @@ empty ones. Keep the executive summary to one page.
 > - **Sources:** {{sources_joined}}
 > - **Description:** {{description}}
 > - **Attack scenario:** {{attack_scenario}}
+> - **Verification probe:** {{verification_probe}} (the request that should fail — run it to confirm; omit line if absent)
 > - **Suggested fix:** {{suggested_fix}}
 > - **Effort:** {{remediation_effort}}
 
@@ -101,6 +103,27 @@ empty ones. Keep the executive summary to one page.
 | Category | Count | Notable surfaces |
 |---|---|---|
 {{surface_category_rows}}
+
+---
+
+## Authorized-Egress (cross-layer access control)
+
+Result of the Phase 6 §6.19 reconciliation — does every path that emits a
+sensitive resource's bytes enforce that resource's strongest intended gate?
+
+- **Sensitive resources:** {{egress_sensitive_count}} (default-deny;
+  {{egress_public_count}} on the public allowlist — review: {{egress_public_list}})
+- **Egress sinks inventoried:** {{egress_sink_count}} · **candidates dismissed:** {{egress_dismissed_count}}
+- **Coverage gate:** {{egress_coverage_status}} (fail-closed — a silently-omitted sink fails the run)
+- **Cross-layer / missing-enforcer findings:** {{egress_finding_count}}
+
+{{egress_findings_block}}
+
+> **Scope & honesty.** A clean reconciliation means every *known* egress
+> candidate (per `lib/egress-detection.md`) was accounted for and gated — it is
+> high-signal but **NOT a proof of absence**. CDN-edge egress with no code path,
+> and any modality outside the catalogue, are out of mechanical reach and listed
+> here as caveats, never silently dropped: {{egress_caveats}}
 
 ---
 

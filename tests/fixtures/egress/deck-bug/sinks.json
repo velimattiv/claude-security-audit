@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.4.0",
+  "sinks": [
+    {
+      "id": "deck:sink:build-output",
+      "sink_file": "server/api/decks/[id]/build-output/[...].get.ts",
+      "line": 18,
+      "kind": "file",
+      "framework": "Nuxt",
+      "serves_resource": "Deck",
+      "reachable_via": ["/api/decks/{id}/build-output/index.html"],
+      "guarded_paths": [
+        {"branch_id": "authed", "condition": "session present", "enforced_gate": "role:viewer + canAccessDeck", "serves_bytes": true},
+        {"branch_id": "publish-link-bypass", "condition": "an active publishLink exists for the deck", "enforced_gate": "none (active publishLink exists)", "serves_bytes": true}
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "deck:sink:external",
+      "sink_file": "server/api/decks/[id]/external/[...].get.ts",
+      "line": 22,
+      "kind": "file",
+      "framework": "Nuxt",
+      "serves_resource": "Deck",
+      "reachable_via": ["/api/decks/{id}/external/bundle.html"],
+      "guarded_paths": [
+        {"branch_id": "publish-link-bypass", "condition": "active publishLink exists", "enforced_gate": "none (active publishLink exists)", "serves_bytes": true}
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "deck:sink:asset-proxy",
+      "sink_file": "server/middleware/02.deck-asset-proxy.ts",
+      "line": 14,
+      "kind": "proxy",
+      "framework": "Nuxt",
+      "serves_resource": "Deck",
+      "reachable_via": ["/api/decks/{id}/assets/*"],
+      "guarded_paths": [
+        {"branch_id": "proxy-when-link", "condition": "active publishLink exists", "enforced_gate": "none (active publishLink exists)", "serves_bytes": true}
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "invoice:sink:download",
+      "sink_file": "server/api/invoices/[id]/download.get.ts",
+      "line": 9,
+      "kind": "file",
+      "framework": "Nuxt",
+      "serves_resource": "Invoice",
+      "reachable_via": ["/api/invoices/{id}/download"],
+      "guarded_paths": [
+        {"branch_id": "billing-role", "condition": "user has billing role", "enforced_gate": "role:billing", "serves_bytes": true}
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}
