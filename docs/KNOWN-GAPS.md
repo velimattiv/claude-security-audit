@@ -191,3 +191,16 @@ control, a dependency bump), the run reports `disappeared_unexplained` — a fal
 positive that must be closed by recording the reason. The inverse (a finding that
 disappears because Phase 5 silently under-covered) is the failure this accepts
 noise to catch.
+
+### 23. Literal stripping is a scanner, not a parser
+`predicate_binds_caller` blanks string literals and line comments before scoring,
+because a quoted value can never bind the caller and treating one as an
+identifier laundered an unscoped collection past C1. The scanner handles
+backslash escapes and treats an *unterminated* quote as an ordinary apostrophe
+rather than pairing it with the next unrelated quote. It is still not a language
+parser: a `//` inside a string that was itself opened by an unterminated quote,
+or a nested template-literal interpolation carrying the only caller reference
+(`` sql`... ${session.user.id} ...` ``), can be blanked. The failure direction is
+a **false positive** — a correctly-scoped collection reported as unscoped, which
+a human closes — not a silent pass. Record the predicate as `scope_evidence` on a
+plain line if a template literal is the only place your scoping lives.

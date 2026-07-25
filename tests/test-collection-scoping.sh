@@ -411,6 +411,31 @@ then ok "quoted literals are not caller refs; python def boundary anchored"
 else bad "R5 regression (literal laundering / python def boundary)"
 fi
 
+# --- 4s. R6: literal scanning must survive escapes, prose apostrophes -------
+if python3 - <<'PYEOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+
+# A naive `'[^']*'` pairs a prose apostrophe with the next unrelated quote and
+# blanks a genuine caller reference in between (false positive on safe code).
+assert m.predicate_binds_caller("eq(a,'x') it's real eq(b, viewerId)")
+assert m.predicate_binds_caller("eq(decks.ownerId, session.user.id) // don't scope")
+assert m.predicate_binds_caller(r"eq(x, 'it's') eq(b, viewerId)")
+# ...while a literal still never binds the caller.
+assert not m.predicate_binds_caller("eq(decks.scope, 'session')")
+assert not m.predicate_binds_caller("eq(decks.scope,'user')")
+
+# A decorated indented member is a handler boundary even with no self
+# (@staticmethod / @action / @api_view are real DRF idioms).
+assert m._NEXT_HANDLER_RE.search("    @staticmethod")
+assert m._NEXT_HANDLER_RE.search("    @action(detail=True)")
+assert not m._NEXT_HANDLER_RE.search("    def format_row(row):")
+PYEOF
+then ok "literal scanner handles escapes/apostrophes; decorated handlers bound C2b"
+else bad "R6 regression (literal scanning / decorated handler boundary)"
+fi
+
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
      --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \

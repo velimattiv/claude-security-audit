@@ -486,16 +486,49 @@ def _tokenize(text):
     return [t for t in re.split(r"[^a-z0-9]+", spaced.lower()) if t]
 
 
-_STRING_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"|`[^`]*`")
-
-
 def _strip_literals(text):
-    """Blank the contents of string literals, preserving length.
+    """Blank string literals and line comments, preserving length.
 
-    A quoted value is data, never a caller reference. Without this,
-    `eq(decks.scope, 'session')` scores as caller-bound: the component splitter
-    discards the quotes and `session` becomes an ordinary standalone token."""
-    return _STRING_LITERAL_RE.sub(lambda mo: " " * len(mo.group(0)), str(text))
+    A quoted value is data, never a caller reference: without this,
+    `eq(decks.scope, 'session')` scores caller-bound because the component
+    splitter discards the quotes and `session` becomes an ordinary token.
+
+    Hand-scanned rather than regex-alternated, for two reasons a naive
+    `'[^']*'` gets wrong:
+      - escapes: `'it\'s'` must not terminate at the middle quote;
+      - an UNTERMINATED quote (a prose apostrophe in a trailing comment) must be
+        treated as an ordinary character, not paired with the next unrelated
+        quote further along — which would blank everything between and erase a
+        genuine caller reference.
+    Residual ambiguity is documented in docs/KNOWN-GAPS.md #23."""
+    t = str(text)
+    n = len(t)
+    out = []
+    i = 0
+    while i < n:
+        c = t[i]
+        if c in "'\"`":
+            j = i + 1
+            while j < n:
+                if t[j] == "\\":
+                    j += 2
+                    continue
+                if t[j] == c:
+                    break
+                j += 1
+            if j < n:                       # properly closed literal
+                out.append(" " * (j - i + 1))
+                i = j + 1
+                continue
+            out.append(" ")                 # unterminated: a bare apostrophe
+            i += 1
+            continue
+        if c == "#" or (c == "/" and i + 1 < n and t[i + 1] == "/"):
+            out.append(" " * (n - i))       # line comment
+            break
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def predicate_binds_caller(text):
@@ -866,7 +899,11 @@ _NEXT_HANDLER_RE = re.compile(
     r"|@(?:Get|Post|Put|Patch|Delete)\s*\(|router\.(?:get|post|put|patch|delete)\s*\("
     r"|app\.(?:get|post|put|patch|delete)\s*\("
     r"|^(?:async\s+)?def\s+\w+\s*\("
-    r"|^\s+(?:async\s+)?def\s+\w+\s*\(\s*(?:self|cls)\b",
+    r"|^\s+(?:async\s+)?def\s+\w+\s*\(\s*(?:self|cls)\b"
+    # A decorated member of a view class is a handler even when it takes no
+    # self (@staticmethod, @action, @api_view). Decoration is the real signal;
+    # requiring `self` was over-narrow.
+    r"|^\s+@\w[\w.]*\s*(?:\(|$)",
     re.MULTILINE)
 
 _COMMENT_LINE_RE = re.compile(r"^\s*(//|#|\*|/\*)")
