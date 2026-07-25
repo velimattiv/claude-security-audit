@@ -1056,7 +1056,11 @@ def _read(path):
             return json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         print(f"ERROR: cannot read {path}: {e}", file=sys.stderr)
-        sys.exit(2)
+        # `raise`, not sys.exit(): static analysis does not model sys.exit as
+        # NoReturn, so the except branch appeared to fall off the end and return
+        # an implicit None — a caller that ignored the exit would then get None
+        # where it expected a document.
+        raise SystemExit(2) from e
 
 
 def main():

@@ -105,9 +105,6 @@ _NEGATION = ["none", "no ", "no-", "not ", "without", "missing", "absent",
              "any caller", "anyone", "everyone", "n/a", "tbd", "unknown",
              "ungated", "no auth", "no gate", "no check", "no verification"]
 
-_SEVERITY_RANK = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
-
-
 def _has_negation(t):
     return any(n in t for n in _NEGATION)
 
