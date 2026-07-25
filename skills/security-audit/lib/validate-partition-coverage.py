@@ -90,8 +90,29 @@ def glob_to_re(pat):
     return re.compile("^" + "".join(out) + "$")
 
 
+_CATCH_ALL_PROBES = ("a/b/c/d.ts", "x/y.py", "zz/qq/rr/ss/tt.go", "top.rb")
+
+
 def is_catch_all(pat):
-    return str(pat).strip().lstrip("./") in ("**", "**/*", "*", "./**")
+    """Behavioural, not a spelling allowlist.
+
+    The first version listed four literal spellings ("**", "**/*", "*", "./**").
+    `*/**` compiles to `^[^/]*/.*$`, matches every file below any top-level
+    directory, and was invisible to it — so the whole gate was bypassable by a
+    one-character variant. Compile the glob and ask what it actually matches."""
+    raw = str(pat).strip().lstrip("./")
+    if raw in ("**", "**/*", "*", "./**"):
+        return True
+    try:
+        rx = glob_to_re(raw)
+    except re.error:
+        return False
+    # MAJORITY, not all: `*/**` matches everything under any top-level directory
+    # but not a root-level file, so requiring every probe let it through — the
+    # exact evasion this check exists to close. A directory-anchored glob like
+    # `src/**` matches none of the probes, so the threshold is not close.
+    hits = sum(1 for probe in _CATCH_ALL_PROBES if rx.match(probe))
+    return hits >= max(2, len(_CATCH_ALL_PROBES) - 1)
 
 
 def load_ignore(path):
@@ -188,6 +209,13 @@ def main():
                 multi.append({"file": rel, "partitions": hits})
             for h in hits:
                 per_partition[h] = per_partition.get(h, 0) + 1
+
+    # Second, tree-relative check: a glob can be narrower than the probes above
+    # and still swallow this particular repo (`**/*.ts` in a TypeScript project).
+    if total and len(parts) > 1:
+        for pid, count in per_partition.items():
+            if count >= total * 0.95 and not any(c[0] == pid for c in catch_alls):
+                catch_alls.append((pid, f"<matches {count}/{total} files>"))
 
     depth = {p.get("id"): p.get("depth", "unknown") for p in parts}
     risk = {p.get("id"): (p.get("risk") or {}).get("score") for p in parts}

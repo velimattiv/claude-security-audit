@@ -116,6 +116,24 @@ reset `first_seen_at` and an R4 check that has nothing to compare against.
 Changing the formula outright would invalidate every existing baseline, so the
 window is the compromise. **Watch for it after a big refactor.**
 
+The fallback carries its own residual risk, disclosed here rather than buried:
+two DIFFERENT findings of the same CWE in the same file within 25 lines could in
+principle bind to each other. A title-similarity floor (Jaccard ≥ 0.34) and a
+one-baseline-entry-to-one-consumer rule guard against it, but a routes file with
+several near-identical unscoped-collection findings — this release's own primary
+output shape — is exactly where a similarity floor is weakest, because the titles
+genuinely are near-identical. Cross-check the R4 section of the report after a
+refactor that moves several same-CWE findings at once.
+
+### 21. `--changed-files` line ranges are near-exact by design
+Range matching pads by ±2 lines, not by the fingerprint window's ±25. That is
+deliberate (a 25-line pad made ranges barely tighter than bare paths while being
+sold as the precise option), but it means a genuine fix whose diff hunk lands
+more than 2 lines from the reported line is NOT accepted as an explanation, and
+the finding reports as `disappeared_unexplained`. That is the intended failure
+direction: a false alarm you close by recording the reason, rather than a
+vanished HIGH nobody notices.
+
 ### 13. Base scopes are the main false-positive mode
 A `default_scope`, a tenant-injecting repository, a Prisma client extension, or
 database row-level security **is** valid row scoping, and none of them appear in

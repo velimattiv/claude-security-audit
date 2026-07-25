@@ -132,6 +132,42 @@ install. See `docs/EPIC-v2.5-sufficiency-severity.md`.
   `actions/setup-python` 6.2.0→7.0.0, `github/codeql-action/{init,analyze}`
   4.36.2→4.37.3, `debian:bookworm-slim` digest `67b30a6`→`96e378d`.
 
+### Adversarial review (two rounds, external executor)
+
+Both rounds ran through GitHub Copilot CLI rather than self-review, because
+author-blindness is the structural failure mode for a diff this size. **Round 2
+found that three of round 1's fixes had introduced new defects** — the strongest
+argument for the two-round rule being mandatory rather than advisory:
+
+- The R1 fix for C5 (read the source instead of trusting the claimed predicate)
+  scored a ±3-line window, which absorbed the `const session = await
+  requireRole(...)` line sitting two lines above the query — **reintroducing the
+  exact motivating bug**, verified passing clean at exit 0. Now scored on the
+  cited statement, extended FORWARD only: the gate is always above the query.
+- The R1 catch-all fix shipped a four-string spelling allowlist. `*/**` matches
+  every file below any top-level directory and evaded it entirely. Now
+  behavioural (probe globs + a ≥95%-of-tree check).
+- The R1 token-exact caller matching (fixing the `"me."`-in-`scheme.name`
+  substring fail-open) scored `authUserId`, `currentUserId`, `viewerId` and
+  `callerId` as NOT caller-bound, flagging correctly-scoped handlers. Now
+  camelCase-aware.
+- The Mongoose anchor added in R1 matched `Roles.find(r => r.id === x)` on any
+  capitalised constant array — a false-positive storm that trains operators to
+  dismiss the gate. Now requires a `(` `)` or `{` tail.
+- The baseline drift fallback could bind two unrelated same-CWE findings within
+  25 lines; added a title-similarity floor and one-entry-one-consumer.
+- `--changed-files` ranges reused the ±25 fingerprint tolerance, making the
+  "precise" option barely tighter than a bare path. Now ±2, with a visible note
+  when the match relied on padding.
+
+One round-1 finding was **refuted with evidence** rather than fixed: the claimed
+`_ID_TOKEN` ReDoS is linear (0.0 / 0.1 / 1.2 ms at 400 / 4k / 40k chars) because
+the separator class is disjoint from the alphanumeric class, so there is no
+ambiguity to backtrack on.
+
+Every fix from both rounds is pinned by a regression test. Suite totals: 21
+(egress) + 30 (collection scoping + partition coverage) + 23 (severity gate).
+
 ### Honest scope
 
 A clean C1–C5 run means every *known* list-query candidate was accounted for and

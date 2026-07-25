@@ -188,6 +188,87 @@ echo "$out" | grep -q "UNACCOUNTED.*users.js" \
   || bad "Mongoose list query invisible to the extractor"
 case "$tmp_mongo" in /tmp/mongo-*|"${TMPDIR%/}"/mongo-*) rm -rf "$tmp_mongo" ;; esac
 
+# --- 4g. R2-F1: the evidence window must not absorb the auth gate above it ---
+# The R1 fix read +/-3 lines around scope_evidence.line and scored the whole
+# blur. In the motivating example the auth gate (`const session = ...`) sits two
+# lines above the query, so "session" leaked in and the bug passed CLEAN again.
+tmp_pw=$(mktemp -d "${TMPDIR:-/tmp}/pw-XXXXXX")
+mkdir -p "$tmp_pw/server/api"
+cat > "$tmp_pw/server/api/decks.get.ts" <<'EOF'
+export default defineEventHandler(async (event) => {
+  const session = await requireRole(event, 'reader')
+  const rows = await db.select().from(decks)
+    .where(and(eq(decks.scope, 'user'), isNull(decks.deletedAt)))
+  return { data: rows }
+})
+EOF
+cat > "$tmp_pw/collections.json" <<'EOF'
+{"schema_version":1,"collections":[{"id":"c1","handler_file":"server/api/decks.get.ts","line":3,
+ "entity":"Deck","returns":"collection","row_scope":"caller_bound",
+ "scope_evidence":{"file":"server/api/decks.get.ts","line":4,"predicate":"eq(decks.scope, 'user')"},
+ "endpoint_gate":"requireRole reader","coverage":"complete"}],"dismissed":[]}
+EOF
+out="$($V "$tmp_pw/collections.json" $FIX/tree-bug/profile.json --source-root "$tmp_pw" \
+        --partition pw 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && echo "$out" | grep -q "C1"; } \
+  && ok "an auth gate above the query does not count as row scoping" \
+  || bad "evidence window leaks the auth gate — motivating bug passes again (rc=$rc)"
+case "$tmp_pw" in /tmp/pw-*|"${TMPDIR%/}"/pw-*) rm -rf "$tmp_pw" ;; esac
+
+# --- 4h. R2-F5: camelCase caller identifiers must still count ---------------
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+# Token-exact matching without camelCase splitting scored all four as NOT
+# caller-bound, flagging correctly-scoped handlers as unscoped.
+for p in ("eq(decks.owner, authUserId)", "eq(d.o, currentUserId)",
+          "eq(d.o, viewerId)", "eq(d.o, callerId)"):
+    assert m.predicate_binds_caller(p), p
+# ...without reopening the substring fail-open.
+for p in ("eq(scheme.name,'x')", "eq(oracle.status,'live')",
+          "eq(reports.status,'published')"):
+    assert not m.predicate_binds_caller(p), p
+EOF
+then ok "camelCase caller ids recognised; substring FPs still rejected"
+else bad "caller-token matching regression"
+fi
+
+# --- 4i. R2-F6: the Mongoose anchor must not fire on an array .find() -------
+tmp_noise=$(mktemp -d "${TMPDIR:-/tmp}/noise-XXXXXX")
+mkdir -p "$tmp_noise/server/api"
+printf 'export function label(dto: any) {\n  const role = Roles.find(r => r.id === dto.roleId)\n  return role?.label\n}\n' \
+  > "$tmp_noise/server/api/roles.controller.ts"
+printf '{"schema_version":1,"collections":[],"dismissed":[]}\n' > "$tmp_noise/collections.json"
+out="$($V "$tmp_noise/collections.json" --source-root "$tmp_noise" --partition nz 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && ! echo "$out" | grep -q "UNACCOUNTED"; } \
+  && ok "capitalised-receiver array .find() is NOT a candidate (no FP storm)" \
+  || bad "Roles.find(r => ...) trips the coverage gate — anchor too broad"
+case "$tmp_noise" in /tmp/noise-*|"${TMPDIR%/}"/noise-*) rm -rf "$tmp_noise" ;; esac
+
+# --- 4j. R2-F2: catch-all detection is behavioural, not a spelling list ------
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vp','skills/security-audit/lib/validate-partition-coverage.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+# `*/**` matches every file below any top-level dir but is not the literal "**".
+assert m.is_catch_all("*/**"), "*/** evades catch-all detection"
+assert m.is_catch_all("**")
+assert not m.is_catch_all("src/**"), "src/** wrongly called a catch-all"
+assert not m.is_catch_all("services/api/**")
+EOF
+then ok "catch-all detected behaviourally (*/** does not evade)"
+else bad "catch-all detection is still a spelling allowlist"
+fi
+
+# --- 4k. R2-F8: a failed coverage gate is stamped INTO the artifact ---------
+$V $FIX/omitted/collections.json $FIX/tree-bug/profile.json \
+   --source-root $FIX/tree-bug/source-app --partition om \
+   --out /tmp/cs-gate.jsonl --quiet
+[ -f /tmp/cs-gate.jsonl.incomplete ] \
+  && ok "a failed coverage gate leaves an .incomplete sidecar" \
+  || bad "no in-artifact signal that the gate failed"
+
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
      --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \

@@ -356,6 +356,11 @@ _ALLOWED_DOWNGRADE_KINDS = {"fix_commit", "compensating_control",
 # invalidate every existing baseline), match exactly first, then fall back to the
 # same (file, cwe, category) within a line window.
 _FP_LINE_TOLERANCE = 25
+# Padding applied to an explicit --changed-files range. Deliberately tiny and
+# SEPARATE from _FP_LINE_TOLERANCE: reusing 25 meant a 10-line hunk "explained"
+# any finding within 25 lines of it, which is barely tighter than a bare path
+# while being marketed as the precise option.
+_RANGE_TOLERANCE = 2
 
 
 def baseline_index(baseline):
@@ -373,25 +378,52 @@ def baseline_index(baseline):
     return idx, drift
 
 
-def match_baseline(f, bidx, drift):
+_TITLE_SIM_FLOOR = 0.34
+
+
+def _title_sim(a, b):
+    """Jaccard overlap of title tokens. Cheap, and enough to tell two DIFFERENT
+    findings apart from the same finding that moved."""
+    ta = {t for t in re.split(r"[^a-z0-9]+", str(a or "").lower()) if len(t) > 2}
+    tb = {t for t in re.split(r"[^a-z0-9]+", str(b or "").lower()) if len(t) > 2}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def match_baseline(f, bidx, drift, consumed=None):
     """-> (entry, fingerprint_matched, matched_by). matched_by is 'exact',
-    'line-drift', or None."""
+    'line-drift', or None.
+
+    The drift fallback needs two guards or it trades one silent failure for
+    another. A routes file routinely holds several same-CWE unscoped-collection
+    findings within 50 lines of each other — exactly this release's own primary
+    output shape. Without a similarity floor, a genuinely-FIXED baseline HIGH
+    could be 'matched' by an unrelated neighbour, absorbing its fingerprint and
+    suppressing the disappearance sweep. Without `consumed`, two current findings
+    could both claim the same baseline entry."""
+    consumed = consumed if consumed is not None else set()
     fp = fingerprint_of(f)
     if fp in bidx:
         return bidx[fp], fp, "exact"
     key = (str(f.get("file", "")).lstrip("./"), f.get("cwe"))
     best, best_fp, best_d = None, None, None
     for bline, bfp, b in drift.get(key, []):
+        if bfp in consumed:
+            continue
         if bline is None or f.get("line") is None:
             continue
         # Compare categories only when BOTH sides declare one.
         bcat, fcat = b.get("category"), f.get("category")
         if bcat and fcat and bcat != fcat:
             continue
+        if _title_sim(f.get("title"), b.get("title")) < _TITLE_SIM_FLOOR:
+            continue
         d = abs(int(bline) - int(f["line"]))
         if d <= _FP_LINE_TOLERANCE and (best_d is None or d < best_d):
             best, best_fp, best_d = b, bfp, d
     if best is not None:
+        consumed.add(best_fp)
         return best, best_fp, "line-drift"
     return None, fp, None
 
@@ -447,9 +479,9 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
         gov.append(g)
         return g
 
-    seen_fps = set()
+    seen_fps, consumed = set(), set()
     for f in findings:
-        base, fp, matched_by = match_baseline(f, bidx, bdrift)
+        base, fp, matched_by = match_baseline(f, bidx, bdrift, consumed)
         # Record the BASELINE's fingerprint when matched by drift, so the
         # disappearance sweep below does not also report this finding as vanished.
         seen_fps.add(fp)
@@ -581,8 +613,23 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
                      bfile or None, b.get("line"), remediation_effort="trivial")
                 continue
             bline = b.get("line")
-            if bline is None or any(lo - _FP_LINE_TOLERANCE <= int(bline)
-                                    <= hi + _FP_LINE_TOLERANCE for lo, hi in rngs):
+            if bline is None:
+                continue
+            exact = any(lo <= int(bline) <= hi for lo, hi in rngs)
+            padded = any(lo - _RANGE_TOLERANCE <= int(bline) <= hi + _RANGE_TOLERANCE
+                         for lo, hi in rngs)
+            if exact:
+                continue
+            if padded:
+                _gov("R4", "INFO",
+                     f"Disappearance matched only within +/-{_RANGE_TOLERANCE} "
+                     f"lines: {str(b.get('title', fp))[:50]}",
+                     f"Baseline finding `{fp}` ({b.get('severity')}) is absent "
+                     f"from this run. The changed range in `{bfile}` does not "
+                     f"contain line {bline}; it is within "
+                     f"{_RANGE_TOLERANCE} lines. Accepted, but flagged so the "
+                     "match is not mistaken for exact containment.",
+                     bfile or None, bline, remediation_effort="trivial")
                 continue
             # The file changed, but not anywhere near this finding's lines.
         blocking += 1

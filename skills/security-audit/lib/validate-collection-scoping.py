@@ -152,7 +152,13 @@ _ANCHORS = [
     # capitalised receiver is what separates an ODM query from `array.find(`.
     # Without this, the whole Mongoose ecosystem produced ZERO candidates, so
     # nothing was ever UNACCOUNTED and the fail-closed gate was inert there.
-    ("orm_list", r"\b[A-Z]\w*\.find(?:One)?\s*\(", 0, _JS),
+    # `Model.find()` / `Model.find({...})` only. The `(?:\)|\{)` tail is what
+    # separates an ODM query from an in-memory `Roles.find(r => r.id === x)` on a
+    # capitalised constant array — those are everywhere in real TypeScript, and
+    # matching them turned the fail-closed gate into noise that trains operators
+    # to dismiss it. Trade-off: `Model.find(filterVar)` is missed; a variable
+    # filter is indistinguishable from a predicate callback without type info.
+    ("orm_list", r"\b[A-Z]\w*\.find(?:One)?\s*\(\s*(?:\)|\{)", 0, _JS),
     ("orm_list", r"\b[A-Z]\w*\.countDocuments\s*\(", 0, _JS),
     ("orm_list", r"\.createQueryBuilder\s*\(", 0, _JS),
     ("orm_list", r"\.aggregate\s*\(\s*\[", 0, _JS),
@@ -394,7 +400,40 @@ def is_admin_role(roles, gate_text=None):
     return False
 
 
-_EVIDENCE_WINDOW = 3   # lines either side of scope_evidence.line to read
+# Lines either side of scope_evidence.line to read when checking whether a
+# CLAIMED predicate string was fabricated. Generous on purpose: a wide window
+# only makes us less likely to cry "fabricated".
+_EVIDENCE_WINDOW = 3
+# Max lines a cited statement may span when we SCORE it for caller-binding.
+_STATEMENT_MAX = 8
+
+
+def _statement_at(lines, idx):
+    """The statement beginning at `lines[idx]`, extended FORWARD only until its
+    brackets balance.
+
+    Forward-only is the whole point. Scoring a +/-3 window around the cited line
+    reintroduced the exact bug this file exists to catch: in
+
+        const session = await requireRole(event, 'reader')   <- 2 lines above
+        const rows = await db.select().from(decks)
+          .where(and(eq(decks.scope, 'user'), isNull(decks.deletedAt)))
+
+    the word `session` from the unrelated auth gate leaked into the window and
+    scored the literal-only predicate as caller-bound. The gate is always ABOVE
+    the query; the predicate is always AT or BELOW the citation."""
+    if idx < 0 or idx >= len(lines):
+        return ""
+    out, depth = [], 0
+    for i in range(idx, min(len(lines), idx + _STATEMENT_MAX)):
+        ln = lines[i]
+        out.append(ln)
+        depth += ln.count("(") + ln.count("[") - ln.count(")") - ln.count("]")
+        if depth <= 0 and i > idx:
+            break
+        if depth <= 0 and i == idx and ("(" in ln or ")" in ln):
+            break
+    return "\n".join(out)
 
 
 def _subseq(needle, hay):
@@ -405,10 +444,22 @@ def _subseq(needle, hay):
     return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
 
 
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
 def _tokenize(text):
-    """Lowercase, split on every non-alphanumeric. `session.user.id` ->
-    ['session','user','id']."""
-    return [t for t in re.split(r"[^a-z0-9]+", str(text).lower()) if t]
+    """Split on non-alphanumerics AND camelCase boundaries, then lowercase.
+
+    `session.user.id` -> ['session','user','id']
+    `authUserId`      -> ['auth','user','id']
+
+    The camelCase split matters: token-exact matching without it scored
+    `authUserId`, `currentUserId`, `viewerId` and `callerId` as NOT caller-bound,
+    which flags correctly-scoped handlers as unscoped. Splitting only on
+    punctuation over-corrected the substring fail-open into a fresh false
+    positive on equally common naming."""
+    spaced = _CAMEL_BOUNDARY.sub(" ", str(text))
+    return [t for t in re.split(r"[^a-z0-9]+", spaced.lower()) if t]
 
 
 def predicate_binds_caller(text):
@@ -521,22 +572,25 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
             # whose real query is `eq(reports.status,'published')` and C5 would
             # wave it through. That would have falsified the release's own
             # "a wrong inventory cannot launder a gap into a pass" claim.
-            actual = ""
+            actual = scored = ""
             if source_root and ev.get("file") and ev.get("line"):
                 try:
                     src = (Path(source_root) / _norm(ev["file"])).read_text(
                         encoding="utf-8", errors="replace").splitlines()
                     i = int(ev["line"]) - 1
+                    # Wide window: only used to decide "was this claim fabricated".
                     actual = "\n".join(src[max(0, i - _EVIDENCE_WINDOW):
                                            i + _EVIDENCE_WINDOW + 1])
+                    # Narrow, forward-only statement: what we actually SCORE.
+                    scored = _statement_at(src, i)
                 except (OSError, ValueError, IndexError):
-                    actual = ""
+                    actual = scored = ""
             if actual:
                 if pred and _tokenize(pred) and not _subseq(_tokenize(pred),
                                                             _tokenize(actual)):
                     fabricated = True
                 # The source at the cited line is the authority either way.
-                pred = actual
+                pred = scored
             if fabricated or not predicate_binds_caller(pred):
                 seq += 1
                 findings.append(_finding(
@@ -637,7 +691,14 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
             # Search for the filter only AFTER the permission is computed. A
             # whole-file scan let any unrelated `.filter(` elsewhere in the
             # handler suppress the finding — the false-negative direction.
-            after = src[m.end():] if m else ""
+            # Bound the search to the enclosing handler, not the whole file
+            # tail: a router/controller file holds many endpoints, and a
+            # `.filter(` in an unrelated later one would suppress this finding.
+            after = ""
+            if m:
+                rest = src[m.end():]
+                nxt = _NEXT_HANDLER_RE.search(rest)
+                after = rest[:nxt.start()] if nxt else rest[:4000]
             if m and not re.search(r"\.filter\s*\(|filter\s*\(lambda|\bselect\s*\{", after):
                 seq += 1
                 findings.append(_finding(
@@ -725,6 +786,14 @@ _OTHER_PRINCIPAL_RE = re.compile(
     r"\b(other|another|second|foreign|different|not_?mine|someone_?else)"
     r"[_A-Za-z]*\b|\buser[_-]?(2|b|two|B)\b|\botherUser\b", re.IGNORECASE)
 
+
+# Start of the NEXT handler in a multi-route file — the boundary C2b's filter
+# search must not cross.
+_NEXT_HANDLER_RE = re.compile(
+    r"defineEventHandler\s*\(|export\s+default\b|export\s+async\s+function\b"
+    r"|@(?:Get|Post|Put|Patch|Delete)\s*\(|router\.(?:get|post|put|patch|delete)\s*\("
+    r"|app\.(?:get|post|put|patch|delete)\s*\(|^\s*(?:async\s+)?def\s+\w+\s*\(",
+    re.MULTILINE)
 
 _COMMENT_LINE_RE = re.compile(r"^\s*(//|#|\*|/\*)")
 
@@ -946,9 +1015,20 @@ def main():
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
+        # Stamp the gate outcome on every row. The `|| exit 1` shell guard stops
+        # the documented workflow, but a consumer reading this file directly
+        # (delta mode, a re-run against a stale .claude-audit/current/, a harness
+        # that drops the exit code) would otherwise read an incomplete
+        # reconciliation as a complete one.
+        gate = "failed" if cov else "passed"
+        for f in findings:
+            f["coverage_gate"] = gate
         args.out.write_text(
             "".join(json.dumps(f, sort_keys=False) + "\n" for f in findings),
             encoding="utf-8")
+        if cov:
+            args.out.with_suffix(args.out.suffix + ".incomplete").write_text(
+                "\n".join(cov) + "\n", encoding="utf-8")
         if not args.quiet:
             print(f"\nwrote {len(findings)} finding(s) -> {args.out}")
 
