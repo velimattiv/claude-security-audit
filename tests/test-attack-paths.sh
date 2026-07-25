@@ -133,6 +133,44 @@ grep -q "app:auth:0002" /tmp/ap-life.jsonl \
   && bad "L1 flagged a finding with a valid owned, unexpired acceptance" \
   || ok "an owned, unexpired acceptance is respected"
 
+# --- 4b. R1-F4/F5: the compounded ratchet bypass -----------------------------
+# Fingerprints are sha1(file:line:cwe:category), so adding an import above the
+# handler un-matches the finding from its baseline entry. Combined with
+# file-granular --changed-files evidence, round 1 proved a CONFIRMED MEDIUM->LOW
+# downgrade with no reason exiting 0 and printing "governance gates clean" — the
+# exact failure this gate exists to prevent, via a different mechanical path.
+tmp_drift=$(mktemp /tmp/ap-drift-XXXX.jsonl)
+tmp_ch=$(mktemp /tmp/ap-ch-XXXX.txt)
+python3 - "$tmp_drift" <<'EOF'
+import json, sys
+rows = [json.loads(l) for l in open('tests/fixtures/attack-paths/ratchet/findings.jsonl') if l.strip()]
+r = [x for x in rows if x['fingerprint'] == 'aaaaaaaaaaaa'][0]
+del r['fingerprint']          # sub-agent emitted none; Phase 7 recomputes
+r['line'] = 41                # an import was added above the handler
+with open(sys.argv[1], 'w') as f:
+    f.write(json.dumps(r) + "\n")
+EOF
+printf 'server/api/decks/[id]/build-output.get.ts\nserver/api/assets/proxy.get.ts\nserver/api/s/[shortId]/verify.get.ts\n' > "$tmp_ch"
+out="$($C "$tmp_drift" --baseline $FIX/ratchet/baseline.json --changed-files "$tmp_ch" \
+        --run-id run-2026-07-25 --now "$NOW" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && echo "$out" | grep -q "Unjustified severity downgrade"; } \
+  && ok "R4 survives line drift (baseline matched by (file,cwe) window)" \
+  || bad "line drift still blinds the ratchet (rc=$rc)"
+
+# File-granular disappearance evidence must be visible, not silently trusted.
+echo "$out" | grep -q "explained only at file granularity" \
+  && ok "file-granular disappearance evidence is surfaced, not assumed" \
+  || bad "bare-path --changed-files silently explains a vanished HIGH"
+
+# With a line RANGE that does not cover the finding, it is not explained at all.
+printf 'server/api/s/[shortId]/verify.get.ts:900-910\n' > "$tmp_ch"
+out="$($C $FIX/ratchet/findings.jsonl --baseline $FIX/ratchet/baseline.json \
+        --changed-files "$tmp_ch" --run-id run-2026-07-25 --now "$NOW" 2>&1)"
+echo "$out" | grep -q "disappeared_unexplained" \
+  && ok "a line range away from the finding does not explain it" \
+  || bad "out-of-range change accepted as an explanation"
+rm -f "$tmp_drift" "$tmp_ch"
+
 # --- 5. negative control ----------------------------------------------------
 $C $FIX/clean/findings.jsonl --now "$NOW" --quiet
 [ $? -eq 0 ] && ok "clean fixture exits 0 (gate is not a permanent red)" \

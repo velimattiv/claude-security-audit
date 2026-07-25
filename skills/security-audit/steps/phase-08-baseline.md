@@ -117,13 +117,19 @@ Committed to the user's repo. Keeps only:
 - `partition_manifest` (id, path, risk, depth only)
 - `surface` (id, file, handler_hash — no full params, no notes)
 - `keystone_files` (paths + reason-count only)
-- `findings_carryover`: finding fingerprints + titles + severities
-  (no body, no attack scenarios — users who want the full text read
-  from the full baseline), **plus `first_seen_at`, `severity_history[]`,
-  `severity_asserted`/`severity_computed`, and `lifecycle`** (v2.5). These are
-  small and they are the ratchet's memory — prune the prose, never the
-  provenance. A pruned baseline without them makes R4 and L1 inert on the next
-  run, which is the failure mode they exist to prevent.
+- `findings_carryover`: finding fingerprints + titles + severities, with no body
+  and no attack scenarios (users who want the full text read the full baseline).
+  **Keep these fields regardless of pruning** (v2.5):
+  - `cwe`, `category`, `line` — the next run recomputes fingerprints as
+    `sha1(file:line:cwe:category)` and falls back to a `(file, cwe)` line-drift
+    match when a finding moves. Prune these and R4 misses a downgrade every time
+    someone adds an import above the handler.
+  - `first_seen_at`, `severity_history[]`, `severity_asserted` /
+    `severity_computed`, `lifecycle` — the ratchet's memory.
+
+  Prune the prose, never the provenance. A pruned baseline without these makes
+  R4 and L1 inert on the next run, which is the failure mode they exist to
+  prevent.
 - `methodology_coverage`
 - `ignored`
 

@@ -78,9 +78,11 @@ correctly-looking, and still return every other user's rows — because
 inventories row scoping (`phase-02-collections.json`), Phase 5 category 12
 deep-dives it, and Phase 6 §6.20 runs a deterministic reconciliation
 ([lib/validate-collection-scoping.py](lib/validate-collection-scoping.py), rules
-C1–C5) with a fail-closed coverage gate. C5 re-checks the inventory's own scoping
-*claims* against the source, so a wrong inventory cannot launder a gap into a
-pass. Phase 1 §1.6b additionally asserts partition coverage — an unmatched
+C1–C5) with a fail-closed coverage gate. C5 re-checks each scoping *claim*
+against the source at the cited `file:line` (a predicate that is not there is
+refused) and C2b catches a denied decoration the handler plainly performs. Those
+are the two claims most likely to be wrong; neither is a general proof that an
+agent-written inventory is honest. Phase 1 §1.6b additionally asserts partition coverage — an unmatched
 handler directory now fails the phase instead of vanishing into a catch-all.
 
 **2. Is the severity COMPUTED or merely ASSERTED?** Findings declare

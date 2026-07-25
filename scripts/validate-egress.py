@@ -30,5 +30,7 @@ if __name__ == "__main__":
     if not os.path.exists(_TARGET):
         sys.stderr.write(f"ERROR: canonical validator missing at {_TARGET}\n")
         sys.exit(2)
-    sys.argv[0] = _TARGET
+    # Deliberately NOT rewriting sys.argv[0]: argparse derives `prog` from it,
+    # so overwriting it made `--help` print the long absolute lib/ path instead
+    # of the command the user actually typed.
     runpy.run_path(_TARGET, run_name="__main__")

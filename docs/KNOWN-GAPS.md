@@ -92,9 +92,29 @@ permission-shaped field and no filter, inventoried as un-decorated) re-check the
 two claims most likely to be wrong, and the fail-closed coverage gates make an
 *absent* entry loud. But an agent that mislabels an entity, or records a
 plausible-looking predicate that is not actually applied on the query path, is
-not caught mechanically. **Mitigation available:** the §6.20 adversarial pass
-must name the file:line of the scope it claims to have found; a refutation with
-no line is not a refutation.
+not caught mechanically. C5 verifies that a claimed predicate actually appears
+within ±3 lines of the cited location, and C2b verifies a denied decoration
+against the source — but an agent that cites a *real* predicate from an
+unrelated code path, or mislabels the entity, still passes. **Mitigation
+available:** the §6.20 adversarial pass must name the file:line of the scope it
+claims to have found; a refutation with no line is not a refutation.
+
+### 19. The partition-coverage escape hatch is a full bypass
+`--allow-catch-all` permits a bare `**` glob alongside specific partitions. A
+catch-all matches every file, so coverage is trivially "complete" and the gate
+proves nothing. The flag prints a WARN saying exactly that and records
+`catch_all_accepted` in the JSON report, but nothing stops an operator from
+wiring it into CI and forgetting. It exists because a genuine single-partition
+repo needs it; treat its presence in a config as a finding of its own.
+
+### 20. Fingerprints are line-anchored
+`sha1(file:line:cwe:category)` moves when code above the finding moves. v2.5 adds
+a `(file, cwe)` line-window fallback (±25 lines) so R4 and L1 survive ordinary
+edits, but a finding that moves further than that window — a large refactor, a
+file split — still un-matches from its baseline entry. The consequences are a
+reset `first_seen_at` and an R4 check that has nothing to compare against.
+Changing the formula outright would invalidate every existing baseline, so the
+window is the compromise. **Watch for it after a big refactor.**
 
 ### 13. Base scopes are the main false-positive mode
 A `default_scope`, a tenant-injecting repository, a Prisma client extension, or

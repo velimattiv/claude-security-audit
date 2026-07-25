@@ -142,6 +142,52 @@ grep -q 'Permission-shaped field' /tmp/cs-dec.jsonl \
   || bad "C2b did not fire on a handler with canWrite and no filter"
 rm -f "$tmp_dec"
 
+# --- 4d. R1-F2: a FABRICATED scope_evidence predicate is refused -------------
+# The release claims "a wrong inventory cannot launder a gap into a pass". Until
+# R1 that was false: any non-empty `predicate` string was trusted verbatim and
+# the source at the cited line was never read.
+tmp_fab=$(mktemp /tmp/coll-fab-XXXX.json)
+python3 - "$tmp_fab" <<'EOF'
+import json, sys
+d = json.load(open('tests/fixtures/collection-scoping/laundered/collections.json'))
+d['collections'][0]['scope_evidence']['predicate'] = "eq(reports.authorId, session.user.id)"
+json.dump(d, open(sys.argv[1], 'w'))
+EOF
+$V "$tmp_fab" $FIX/laundered/profile.json --source-root $FIX/laundered/source-app \
+   --partition fab --out /tmp/cs-fab.jsonl --quiet
+grep -q 'does NOT appear at' /tmp/cs-fab.jsonl \
+  && ok "C5 refuses a predicate that is not at the cited file:line" \
+  || bad "fabricated predicate accepted — laundering claim is false"
+rm -f "$tmp_fab"
+
+# --- 4e. R1-F3: caller-token matching is token-scoped, not substring ---------
+if python3 - <<'EOF'
+import importlib.util, sys
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+# "scheme.name" contains "me.", "oracle.status" contains "acl". Substring
+# matching scored both as caller-bound and silently suppressed C1.
+assert not m.predicate_binds_caller("eq(scheme.name, 'x')"), "'me.' substring FP"
+assert not m.predicate_binds_caller("eq(oracle.status,'live')"), "'acl' substring FP"
+assert m.predicate_binds_caller("eq(decks.ownerId, session.user.id)")
+assert m.predicate_binds_caller("where(userId = req.user.id)")
+EOF
+then ok "caller tokens match on token boundaries, not substrings"
+else bad "substring fail-open in predicate_binds_caller"
+fi
+
+# --- 4f. R1-F6: Mongoose Model.find({}) yields a candidate ------------------
+tmp_mongo=$(mktemp -d "${TMPDIR:-/tmp}/mongo-XXXXXX")
+mkdir -p "$tmp_mongo/routes"
+printf 'router.get("/users", async (req,res) => {\n  const all = await User.find({});\n  res.json(all);\n});\n' \
+  > "$tmp_mongo/routes/users.js"
+printf '{"schema_version":1,"collections":[],"dismissed":[]}\n' > "$tmp_mongo/collections.json"
+out="$($V "$tmp_mongo/collections.json" --source-root "$tmp_mongo" --partition mg 2>&1)"
+echo "$out" | grep -q "UNACCOUNTED.*users.js" \
+  && ok "Mongoose Model.find() is a candidate (ecosystem not inert)" \
+  || bad "Mongoose list query invisible to the extractor"
+case "$tmp_mongo" in /tmp/mongo-*|"${TMPDIR%/}"/mongo-*) rm -rf "$tmp_mongo" ;; esac
+
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
      --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \
@@ -163,6 +209,35 @@ echo "$out" | grep -q "server/api/content/tree.get.ts" \
   && ok "names the unpartitioned handler" || bad "unmatched file not named"
 echo "$out" | grep -q "DEEP-DIVE CUT LINE" \
   && ok "reports the deep-dive cut line" || bad "cut line not reported"
+
+# R1-F1: a catch-all glob alongside specific partitions must FAIL. Before R1 it
+# made every file "matched", so the gate reported full coverage no matter what
+# was omitted — passing in exactly the case its own docstring exists to prevent.
+tmp_ca=$(mktemp /tmp/parts-ca-XXXX.json)
+python3 - "$tmp_ca" <<'EOF'
+import json, sys
+d = json.load(open('tests/fixtures/partition-coverage/partitions.json'))
+d['partitions'].append({"id": "catch-all", "kind": "repo", "path": ".",
+                        "paths_included": ["**"],
+                        "risk": {"score": 1, "rationale": "everything else"},
+                        "depth": "inventory-only"})
+json.dump(d, open(sys.argv[1], 'w'))
+EOF
+out="$($P "$tmp_ca" --source-root tests/fixtures/partition-coverage/repo --ignore /dev/null 2>&1)"
+rc=$?
+{ [ "$rc" -eq 1 ] && echo "$out" | grep -q "catch-all glob sits alongside"; } \
+  && ok "a catch-all glob fails the gate instead of swallowing the tree" \
+  || bad "catch-all still passes the coverage gate (rc=$rc)"
+# The escape hatch is a full bypass by construction (a catch-all matches
+# everything, so nothing can be unmatched). It must therefore stay LOUD: exit 0
+# is allowed, silence is not.
+out="$($P "$tmp_ca" --source-root tests/fixtures/partition-coverage/repo \
+        --ignore /dev/null --allow-catch-all 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && echo "$out" | grep -q "WARN: a catch-all glob" \
+    && echo "$out" | grep -q "not evidence of anything"; } \
+  && ok "--allow-catch-all passes but says the coverage proves nothing" \
+  || bad "--allow-catch-all is a silent bypass (rc=$rc)"
+rm -f "$tmp_ca"
 
 # A manifest that DOES cover everything must pass — the gate must not be a
 # permanent red light.

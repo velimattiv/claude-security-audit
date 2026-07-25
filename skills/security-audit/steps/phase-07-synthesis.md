@@ -132,7 +132,6 @@ not a stacking modifier.
    | `confidence == "CONFIRMED"` | **+1** (promotion) |
    | `data_ops ∩ {write, delete, exec} ≠ ∅` | **+1** (promotion) |
    | `trust_zone == "dev"` | **−1** (demotion) |
-
    | `RETURNS_OTHER_PRINCIPALS_ROWS` on the surface (v2.5) | **+1, and VETOES any demotion** |
 
 2. Sum the signals. If net > 0, promote by exactly one rung. If net
@@ -289,13 +288,28 @@ python3 "$SKILL_DIR/lib/compose-attack-paths.py" \
   --out          .claude-audit/current/phase-07-governance.jsonl \
   --rewrite      .claude-audit/current/phase-07-findings-computed.jsonl \
   --json-summary .claude-audit/current/phase-07-severity-gate.json
+# Exit 1 is EXPECTED here whenever escalations or governance failures exist.
+# Do not swallow it: Step 2 below tells you what to do with each class.
+rc=$?; echo "severity gate exit=$rc"
 ```
 
 (`--baseline` is omitted on a first run — R4 and the lifecycle gates need a prior
-baseline to compare against. Pass `--changed-files` with
-`git diff --name-only <baseline.git_head> HEAD` when a baseline exists, so a
-finding that disappeared because its file changed is explained rather than
-flagged.)
+baseline to compare against.)
+
+**`--changed-files` — pass LINE RANGES, not bare paths.** A bare path says only
+"some line in this file moved", which is not evidence that a particular finding
+was addressed; the gate accepts it but records an INFO note saying the
+explanation is file-granular. Ranges make the check precise:
+
+```bash
+git diff --unified=0 "$(jq -r .git_head .claude-audit/baseline.json)" HEAD \
+  | awk '/^\+\+\+ b\//{f=substr($2,3)}
+         /^@@/{split($3,a,","); s=substr(a[1],2); n=(a[2]==""?1:a[2]);
+               if (n>0) print f":"s"-"(s+n-1)}' \
+  > .claude-audit/current/changed-ranges.txt
+```
+
+Then pass `--changed-files .claude-audit/current/changed-ranges.txt`.
 
 ### Step 2 — apply, then converge
 

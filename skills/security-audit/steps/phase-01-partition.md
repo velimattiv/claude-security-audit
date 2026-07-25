@@ -200,7 +200,8 @@ python3 "$SKILL_DIR/lib/validate-partition-coverage.py" \
   .claude-audit/current/partitions.json \
   --source-root . \
   --ignore .claude-audit/ignore.txt \
-  --out .claude-audit/current/phase-01-coverage.json
+  --out .claude-audit/current/phase-01-coverage.json \
+  || { echo "phase-01 FAILED the partition coverage gate — do NOT advance" >&2; exit 1; }
 ```
 
 Non-zero exit means at least one source file belongs to **no** partition.

@@ -348,21 +348,79 @@ _ALLOWED_DOWNGRADE_KINDS = {"fix_commit", "compensating_control",
                             "disproven_exploitability", "rescoped"}
 
 
+# A finding's fingerprint is sha1(file:line:cwe:category), so adding an import
+# above the handler changes it. That silently un-matches the finding from its
+# baseline entry: R4 never fires (nothing to compare), first_seen_at resets, and
+# L1's age gate restarts from zero — the ratchet goes blind on the most ordinary
+# edit there is. Rather than change the fingerprint formula (which would
+# invalidate every existing baseline), match exactly first, then fall back to the
+# same (file, cwe, category) within a line window.
+_FP_LINE_TOLERANCE = 25
+
+
 def baseline_index(baseline):
-    idx = {}
+    """-> (exact fingerprint index, drift index keyed on (file, cwe, category))."""
+    idx, drift = {}, {}
     for b in (baseline or {}).get("findings_carryover", []) or []:
         fp = b.get("fingerprint") or fingerprint_of(b)
         idx[fp] = b
-    return idx
+        # Keyed on (file, cwe) only. `category` is NOT required by
+        # baseline-schema's findings_carryover, and a pruned v2.4-era baseline
+        # omits it — keying on it would make the drift fallback silently never
+        # match, which is how this fix failed its own first test.
+        key = (str(b.get("file", "")).lstrip("./"), b.get("cwe"))
+        drift.setdefault(key, []).append((b.get("line"), fp, b))
+    return idx, drift
+
+
+def match_baseline(f, bidx, drift):
+    """-> (entry, fingerprint_matched, matched_by). matched_by is 'exact',
+    'line-drift', or None."""
+    fp = fingerprint_of(f)
+    if fp in bidx:
+        return bidx[fp], fp, "exact"
+    key = (str(f.get("file", "")).lstrip("./"), f.get("cwe"))
+    best, best_fp, best_d = None, None, None
+    for bline, bfp, b in drift.get(key, []):
+        if bline is None or f.get("line") is None:
+            continue
+        # Compare categories only when BOTH sides declare one.
+        bcat, fcat = b.get("category"), f.get("category")
+        if bcat and fcat and bcat != fcat:
+            continue
+        d = abs(int(bline) - int(f["line"]))
+        if d <= _FP_LINE_TOLERANCE and (best_d is None or d < best_d):
+            best, best_fp, best_d = b, bfp, d
+    if best is not None:
+        return best, best_fp, "line-drift"
+    return None, fp, None
+
+
+def _parse_changed(entries):
+    """`--changed-files` accepts `path` or `path:start-end`. Ranges let a
+    disappearance be explained by a change to the finding's OWN lines; a bare
+    path only says the file was touched somewhere."""
+    files, ranges = set(), {}
+    for raw in entries or []:
+        raw = str(raw).strip().lstrip("./")
+        if not raw:
+            continue
+        m = re.match(r"^(.*?):(\d+)-(\d+)$", raw)
+        if m:
+            files.add(m.group(1))
+            ranges.setdefault(m.group(1), []).append((int(m.group(2)), int(m.group(3))))
+        else:
+            files.add(raw)
+    return files, ranges
 
 
 def governance_checks(findings, baseline, changed_files, now, run_id,
                       max_age_days, strict_closure):
     """R4 + L1-L3. Returns (governance_findings, blocking_count)."""
     gov, blocking = [], 0
-    bidx = baseline_index(baseline)
+    bidx, bdrift = baseline_index(baseline)
     bcreated = parse_ts((baseline or {}).get("created_at"))
-    changed = {str(c).lstrip("./") for c in (changed_files or [])}
+    changed, changed_ranges = _parse_changed(changed_files)
     seq = 0
 
     def _gov(rule, severity, title, description, file, line, **extra):
@@ -391,9 +449,11 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
 
     seen_fps = set()
     for f in findings:
-        fp = fingerprint_of(f)
+        base, fp, matched_by = match_baseline(f, bidx, bdrift)
+        # Record the BASELINE's fingerprint when matched by drift, so the
+        # disappearance sweep below does not also report this finding as vanished.
         seen_fps.add(fp)
-        base = bidx.get(fp)
+        seen_fps.add(fingerprint_of(f))
         sev = f.get("severity", "INFO")
         lc = f.get("lifecycle") or {}
         hist = f.get("severity_history") or []
@@ -502,8 +562,29 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
         if fp in seen_fps or sidx(b.get("severity", "INFO")) < SEV_IDX["HIGH"]:
             continue
         bfile = str(b.get("file", "")).lstrip("./")
+        rngs = changed_ranges.get(bfile)
         if bfile and bfile in changed:
-            continue
+            if rngs is None:
+                # File-granular evidence only. Accept it (the change may well be
+                # the fix) but say so: "some line in this file moved" is not
+                # proof that THIS finding was addressed, and treating it as proof
+                # is how a vanished HIGH slips through.
+                _gov("R4", "INFO",
+                     f"Disappearance explained only at file granularity: "
+                     f"{str(b.get('title', fp))[:60]}",
+                     f"Baseline finding `{fp}` ({b.get('severity')}) is absent "
+                     f"from this run. `{bfile}` appears in --changed-files, but "
+                     "with no line range, so the change may be unrelated to the "
+                     "finding's own lines. Pass ranges "
+                     "(`path:start-end`, e.g. from "
+                     "`git diff --unified=0`) to make this check precise.",
+                     bfile or None, b.get("line"), remediation_effort="trivial")
+                continue
+            bline = b.get("line")
+            if bline is None or any(lo - _FP_LINE_TOLERANCE <= int(bline)
+                                    <= hi + _FP_LINE_TOLERANCE for lo, hi in rngs):
+                continue
+            # The file changed, but not anywhere near this finding's lines.
         blocking += 1
         _gov("R4", b.get("severity", "HIGH"),
              f"disappeared_unexplained: {b.get('title', fp)[:70]}",

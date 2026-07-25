@@ -26,8 +26,11 @@ asserted per finding.
     reconciliation (`lib/validate-collection-scoping.py`, rules C1–C5, fail-closed
     coverage) catch BOLA at the **list** level — including the
     "authorization by decoration" antipattern and tests that pin the insecure
-    behaviour. Rule C5 re-checks the inventory's own scoping claims against
-    source, so a wrong inventory cannot launder a gap into a pass. Phase 1 now
+    behaviour. Rules C5/C2b re-check the inventory's own claims against the
+    source at the cited `file:line` — a scoping predicate that is not actually
+    there, or a denied decoration the handler plainly performs, is refused. That
+    closes the two claims most likely to be wrong; it is not a general proof that
+    an inventory is honest (see `docs/KNOWN-GAPS.md` #12). Phase 1 now
     **asserts** partition coverage (an unmatched handler directory fails the
     phase instead of vanishing into a catch-all), and Phase 2 promotes partitions
     into the deep-dive budget on surface evidence rather than a-priori rank.

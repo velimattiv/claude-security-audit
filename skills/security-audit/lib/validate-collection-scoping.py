@@ -116,7 +116,7 @@ _ADMIN_ROLE_TOKENS = {"admin", "administrator", "superuser", "superadmin",
 _CALLER_TOKENS = (
     "session", "current_user", "currentuser", "req.user", "request.user",
     "ctx.user", "context.user", "auth.uid", "authuser", "principal", "claims",
-    "jwt", "me.", "viewer", "caller",
+    "jwt", "me", "viewer", "caller",
     "userid", "user_id", "user.id", "ownerid", "owner_id", "createdby",
     "created_by", "tenantid", "tenant_id", "orgid", "org_id",
     "organizationid", "organization_id", "accountid", "account_id",
@@ -148,6 +148,12 @@ _ANCHORS = [
     ("orm_list", r"\.query\.\w+\.findMany\b", 0, _JS),
     ("orm_list", r"\bprisma\.\w+\.findMany\b", 0, _JS),
     ("orm_list", r"getRepository\s*\([^)]*\)\s*\.find\s*\(", 0, _JS),
+    # Mongoose / Mongo-style `Model.find({})` and `Model.findOne(...)`. The
+    # capitalised receiver is what separates an ODM query from `array.find(`.
+    # Without this, the whole Mongoose ecosystem produced ZERO candidates, so
+    # nothing was ever UNACCOUNTED and the fail-closed gate was inert there.
+    ("orm_list", r"\b[A-Z]\w*\.find(?:One)?\s*\(", 0, _JS),
+    ("orm_list", r"\b[A-Z]\w*\.countDocuments\s*\(", 0, _JS),
     ("orm_list", r"\.createQueryBuilder\s*\(", 0, _JS),
     ("orm_list", r"\.aggregate\s*\(\s*\[", 0, _JS),
     ("orm_list", r"\bcollection\s*\(\s*[\"'][\w-]+[\"']\s*\)\s*\.\s*(?:get|find)\s*\(", 0, _JS),
@@ -184,6 +190,11 @@ _ANCHORS = [
 _ANCHORS_RE = [(kind, re.compile(rx, flags), exts)
                for kind, rx, flags, exts in _ANCHORS]
 
+# Deliberately narrower than validate-partition-coverage.py's _SOURCE_EXT, which
+# also carries .vue/.svelte: every anchor below is restricted to a server-side
+# language, and single-file components hold template/client code. A SFC that DOES
+# embed a server list-query is reached via the surface inventory's handler_file
+# list (handler_files() unions both), not via this extension walk.
 _SOURCE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rb",
                ".php", ".java", ".kt", ".cs", ".go", ".graphql", ".gql", ".sql"}
 
@@ -204,7 +215,12 @@ _HANDLER_PATH_RE = re.compile(
     r"functions|lambdas?)(/|$)", re.IGNORECASE)
 _HANDLER_FILE_RE = re.compile(
     r"(^|/)(views|urls|routes|schema|resolver|controller|handler)s?\.[a-z]+$|"
-    r"[A-Za-z0-9](Controller|Resolver|Handler)\.[a-z]+$", re.IGNORECASE)
+    r"[A-Za-z0-9](Controller|Resolver|Handler)\.[a-z]+$|"
+    # NestJS / Angular dot-segment convention: `users.controller.ts`. The
+    # alternatives above require the word to follow `/` or a PascalCase char,
+    # so a dot-separated segment matched neither.
+    r"[\w-]+\.(controller|resolver|handler|gateway|route)s?\.[a-z]+$",
+    re.IGNORECASE)
 
 
 def _is_skipped(rel: str) -> bool:
@@ -378,11 +394,45 @@ def is_admin_role(roles, gate_text=None):
     return False
 
 
+_EVIDENCE_WINDOW = 3   # lines either side of scope_evidence.line to read
+
+
+def _subseq(needle, hay):
+    """Is `needle` a contiguous token subsequence of `hay`?"""
+    if not needle:
+        return False
+    n = len(needle)
+    return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
+
+
+def _tokenize(text):
+    """Lowercase, split on every non-alphanumeric. `session.user.id` ->
+    ['session','user','id']."""
+    return [t for t in re.split(r"[^a-z0-9]+", str(text).lower()) if t]
+
+
 def predicate_binds_caller(text):
+    """Does this predicate reference a value derived from the CALLER?
+
+    Token-sequence containment, NOT substring containment. Plain substring
+    matching fail-opens on ordinary identifiers: `scheme.name` contains "me.",
+    `oracle.status` contains "acl", and both would be scored as caller-bound —
+    silently suppressing C1 on a genuinely unscoped collection. False negatives
+    are the expensive direction here, so the match is anchored to whole tokens."""
     if not text:
         return False
-    t = str(text).lower().replace(" ", "")
-    return any(tok.replace(" ", "") in t for tok in _CALLER_TOKENS)
+    toks = _tokenize(text)
+    if not toks:
+        return False
+    for raw in _CALLER_TOKENS:
+        want = _tokenize(raw)
+        if not want:
+            continue
+        n = len(want)
+        for i in range(len(toks) - n + 1):
+            if toks[i:i + n] == want:
+                return True
+    return False
 
 
 def preconditions_for(gate_text, roles):
@@ -463,26 +513,48 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
         if claimed:
             ev = r.get("scope_evidence") or {}
             pred = ev.get("predicate", "")
-            if not pred and source_root and ev.get("file") and ev.get("line"):
+            fabricated = False
+            # Read the cited location whenever we can, and judge on the SOURCE,
+            # not on the claim. Only falling back to source when `predicate` was
+            # empty meant any non-empty string was trusted outright — an agent
+            # could write `eq(reports.authorId, session.user.id)` for a handler
+            # whose real query is `eq(reports.status,'published')` and C5 would
+            # wave it through. That would have falsified the release's own
+            # "a wrong inventory cannot launder a gap into a pass" claim.
+            actual = ""
+            if source_root and ev.get("file") and ev.get("line"):
                 try:
                     src = (Path(source_root) / _norm(ev["file"])).read_text(
                         encoding="utf-8", errors="replace").splitlines()
                     i = int(ev["line"]) - 1
-                    pred = "\n".join(src[max(0, i - 1): i + 2])
+                    actual = "\n".join(src[max(0, i - _EVIDENCE_WINDOW):
+                                           i + _EVIDENCE_WINDOW + 1])
                 except (OSError, ValueError, IndexError):
-                    pred = ""
-            if not predicate_binds_caller(pred):
+                    actual = ""
+            if actual:
+                if pred and _tokenize(pred) and not _subseq(_tokenize(pred),
+                                                            _tokenize(actual)):
+                    fabricated = True
+                # The source at the cited line is the authority either way.
+                pred = actual
+            if fabricated or not predicate_binds_caller(pred):
                 seq += 1
                 findings.append(_finding(
                     seq, partition, "C5", "MEDIUM", "LIKELY", "CWE-1220",
                     ["API1:2023", "A01:2025", "ASVS-V4.2.1"],
                     f"Row-scoping claimed for {entity} but no caller-derived predicate",
-                    f"Collection `{rid}` declares row_scope={scope} for entity "
-                    f"`{entity}`, but its scope_evidence predicate "
-                    f"({pred.strip()[:160] or 'absent'!r}) references no session/"
-                    "user/tenant/org value. A filter on a literal (e.g. "
-                    "`scope = 'user'`, `deletedAt IS NULL`) constrains WHICH rows, "
-                    "not WHOSE. Treated as unscoped for the rules below.",
+                    (f"Collection `{rid}` declares row_scope={scope} for entity "
+                     f"`{entity}` citing a predicate that does NOT appear at "
+                     f"{ev.get('file')}:{ev.get('line')}. The source there reads "
+                     f"{actual.strip()[:120]!r}. A cited predicate that is not in "
+                     "the cited file is not evidence."
+                     if fabricated else
+                     f"Collection `{rid}` declares row_scope={scope} for entity "
+                     f"`{entity}`, but the predicate at its scope_evidence "
+                     f"({str(pred).strip()[:160] or 'absent'!r}) references no "
+                     "session/user/tenant/org value. A filter on a literal (e.g. "
+                     "`scope = 'user'`, `deletedAt IS NULL`) constrains WHICH "
+                     "rows, not WHOSE.") + " Treated as unscoped for the rules below.",
                     hf, ln,
                     surface_id=r.get("surface_id"),
                     preconditions=pre, postconditions=post,
@@ -562,7 +634,11 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
             except OSError:
                 src = ""
             m = _PERMISSION_FIELD_RE.search(src)
-            if m and not re.search(r"\.filter\s*\(|filter\s*\(lambda|\bselect\s*\{", src):
+            # Search for the filter only AFTER the permission is computed. A
+            # whole-file scan let any unrelated `.filter(` elsewhere in the
+            # handler suppress the finding — the false-negative direction.
+            after = src[m.end():] if m else ""
+            if m and not re.search(r"\.filter\s*\(|filter\s*\(lambda|\bselect\s*\{", after):
                 seq += 1
                 findings.append(_finding(
                     seq, partition, "C2", "MEDIUM", "POSSIBLE", "CWE-863",

@@ -387,7 +387,8 @@ python3 "$SKILL_DIR/lib/validate-egress.py" \
   .claude-audit/current/phase-00-profile.json \
   --source-root . \
   --partition global \
-  --out .claude-audit/current/phase-06-egress.jsonl
+  --out .claude-audit/current/phase-06-egress.jsonl \
+  || { echo "phase-06 §6.19 FAILED (coverage gate or HIGH+ deficit) — resolve before advancing" >&2; exit 1; }
 ```
 
 The script (a) re-extracts egress candidates from source and **FAILS the run if
@@ -468,7 +469,8 @@ python3 "$SKILL_DIR/lib/validate-collection-scoping.py" \
   .claude-audit/current/phase-02-surface.json \
   --source-root . \
   --partition global \
-  --out .claude-audit/current/phase-06-collections.jsonl
+  --out .claude-audit/current/phase-06-collections.jsonl \
+  || { echo "phase-06 §6.20 FAILED (coverage gate or HIGH+ deficit) — resolve before advancing" >&2; exit 1; }
 ```
 
 The script (a) re-extracts list-query candidates from the handler files and
@@ -493,6 +495,12 @@ scoping deficit via rules C1-C5:
 - **C5** — a `caller_bound`/`visibility_filtered` claim whose `scope_evidence`
   predicate references no session/user/tenant/org value. The row is rewritten to
   `unscoped` and C1 then fires. **The inventory cannot launder a false claim.**
+
+The `|| { ...; exit 1; }` guard is not decoration. Without it the only thing
+stopping the run is prose telling the orchestrator to stop, and an orchestrator
+that reads a wall of `!` lines and continues anyway turns a "fail-closed" gate
+into a suggestion. The shell exit is the part that does not depend on the model
+being conscientious.
 
 If the coverage gate fails, return to Phase 2 §2.12 and account for the missing
 candidates. Do not proceed on an incomplete inventory.

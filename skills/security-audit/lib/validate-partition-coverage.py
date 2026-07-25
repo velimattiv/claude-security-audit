@@ -130,6 +130,10 @@ def main():
                     help="Also fail when a file matches more than one partition. "
                          "Off by default — workflow.md §1.6 resolves overlaps by "
                          "highest risk, but the overlap is always reported.")
+    ap.add_argument("--allow-catch-all", action="store_true",
+                    help="Permit a catch-all glob alongside specific partitions. "
+                         "Off by default: a catch-all makes the coverage gate "
+                         "report success unconditionally.")
     ap.add_argument("--max-report", type=int, default=40)
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
@@ -242,6 +246,29 @@ def main():
         args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
         if not args.quiet:
             print(f"\nwrote coverage report -> {args.out}")
+
+    # A catch-all glob alongside specific partitions makes EVERY file "matched",
+    # so `unmatched` stays empty and the gate returns 0 — in exactly the case its
+    # own docstring says it exists to prevent. Reporting it while passing the run
+    # is theatre: the prose in phase-01 §1.6b says "do not paper over it with a
+    # catch-all", and until this check existed nothing enforced that.
+    # A single-partition repo (the documented `kind: repo` fallback) legitimately
+    # owns everything, so the check only fires when other partitions exist.
+    if catch_alls and len(parts) > 1:
+        if not args.quiet:
+            print(f"\n{'WARN' if args.allow_catch_all else 'FAIL'}: a catch-all "
+                  f"glob sits alongside {len(parts) - 1} specific partition(s). "
+                  "It matches every file, so this gate reports full coverage no "
+                  "matter what was omitted. Give the swallowed paths their own "
+                  "partition and their own risk score."
+                  + (" Accepted because --allow-catch-all was passed; coverage "
+                     "below is therefore not evidence of anything."
+                     if args.allow_catch_all else
+                     " Pass --allow-catch-all only if the partition genuinely "
+                     "owns the whole tree."))
+        result["catch_all_accepted"] = bool(args.allow_catch_all)
+        if not args.allow_catch_all:
+            return 1
 
     if unmatched or (args.fail_on_multi and multi):
         return 1
