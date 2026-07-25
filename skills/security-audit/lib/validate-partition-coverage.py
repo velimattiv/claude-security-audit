@@ -213,9 +213,22 @@ def main():
     # Second, tree-relative check: a glob can be narrower than the probes above
     # and still swallow this particular repo (`**/*.ts` in a TypeScript project).
     if total and len(parts) > 1:
+        # Dominance is necessary but NOT sufficient: `backend: src/**` owning
+        # 96/100 files in a backend-heavy monorepo is correct partitioning, not a
+        # catch-all. Require the glob to ALSO be unanchored — no literal path
+        # segment before the first wildcard — so a directory-scoped glob is never
+        # flagged no matter how much of the tree it happens to own.
+        unanchored = {}
+        for p in parts:
+            for g in (p.get("paths_included") or []):
+                head = str(g).strip().lstrip("./").split("*")[0].strip("/")
+                if not head:
+                    unanchored.setdefault(p.get("id", "?"), g)
         for pid, count in per_partition.items():
-            if count >= total * 0.95 and not any(c[0] == pid for c in catch_alls):
-                catch_alls.append((pid, f"<matches {count}/{total} files>"))
+            if (count >= total * 0.95 and pid in unanchored
+                    and not any(c[0] == pid for c in catch_alls)):
+                catch_alls.append(
+                    (pid, f"{unanchored[pid]} <unanchored, matches {count}/{total} files>"))
 
     depth = {p.get("id"): p.get("depth", "unknown") for p in parts}
     risk = {p.get("id"): (p.get("risk") or {}).get("score") for p in parts}

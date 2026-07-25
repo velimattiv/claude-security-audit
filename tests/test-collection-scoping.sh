@@ -269,6 +269,81 @@ $V $FIX/omitted/collections.json $FIX/tree-bug/profile.json \
   && ok "a failed coverage gate leaves an .incomplete sidecar" \
   || bad "no in-artifact signal that the gate failed"
 
+# --- 4l. R3-F1: a method-chain continuation must not be truncated -----------
+# The R2 forward-only window stopped at the cited line when its own brackets
+# balanced, dropping the .where() on the NEXT line and flagging a correctly
+# scoped handler.
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+chain = ["const rows = await db.select().from(decks)",
+         "  .where(and(eq(decks.userId, session.user.id), isNull(decks.deletedAt)))"]
+assert m.predicate_binds_caller(m._statement_at(chain, 0)), "chain continuation truncated"
+# ...and the auth gate ABOVE the query still cannot leak in.
+leak = ["  const session = await requireRole(event, 'reader')",
+        "  const rows = await db.select().from(decks)",
+        "    .where(and(eq(decks.scope, 'user'), isNull(decks.deletedAt)))"]
+assert not m.predicate_binds_caller(m._statement_at(leak, 1)), "auth gate leaked"
+EOF
+then ok "method-chain predicate read forward; auth gate above still excluded"
+else bad "statement window regression (truncation or leak)"
+fi
+
+# --- 4m. R3-F4: generic caller words need an identity token beside them ------
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+# camelCase splitting made a bare generic word match unrelated compounds.
+for p in ("eq(c.callerName,'x')", "eq(c.callerPhoneNumber,'x')",
+          "eq(s.sessionType,'live')", "eq(s.sessionRegionId, 3)"):
+    assert not m.predicate_binds_caller(p), p
+for p in ("eq(decks.ownerId, session.user.id)", "eq(d.o, viewerId)",
+          "eq(d.o, callerId)", "eq(decks.owner, authUserId)"):
+    assert m.predicate_binds_caller(p), p
+EOF
+then ok "generic caller words require an adjacent identity token"
+else bad "generic-word matching too permissive or too strict"
+fi
+
+# --- 4n. R3-F5: handler boundary covers the common Express/Lambda shapes ----
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+for shape in ("export function list(req,res) {", "exports.handler = async (e) => {",
+              "const handler = async (req,res) => {", "module.exports = async (r) => {"):
+    assert m._NEXT_HANDLER_RE.search(shape), shape
+EOF
+then ok "C2b handler boundary matches export/exports/arrow-const shapes"
+else bad "_NEXT_HANDLER_RE misses a common handler declaration"
+fi
+
+# --- 4o. R3-F6: a passing run clears a stale .incomplete sidecar ------------
+$V $FIX/omitted/collections.json $FIX/tree-bug/profile.json \
+   --source-root $FIX/tree-bug/source-app --partition om --out /tmp/cs-side.jsonl --quiet
+$V $FIX/tree-bug/collections.json $FIX/tree-bug/profile.json \
+   --source-root $FIX/tree-bug/source-app --partition ok --out /tmp/cs-side.jsonl --quiet
+[ ! -f /tmp/cs-side.jsonl.incomplete ] \
+  && ok "a later passing run clears the stale .incomplete sidecar" \
+  || bad "stale .incomplete sidecar survives a clean run"
+
+# --- 4p. R3-F3: a backend-heavy monorepo is not a catch-all -----------------
+tmp_mono=$(mktemp -d "${TMPDIR:-/tmp}/mono-XXXXXX")
+mkdir -p "$tmp_mono/src/a" "$tmp_mono/web"
+i=1; while [ $i -le 24 ]; do printf 'export const x=%d\n' "$i" > "$tmp_mono/src/a/f$i.ts"; i=$((i+1)); done
+printf 'export const w=1\n' > "$tmp_mono/web/app.ts"
+cat > "$tmp_mono/parts.json" <<'EOF'
+{"partitions":[{"id":"backend","path":"src","paths_included":["src/**"],"risk":{"score":7},"depth":"full"},
+               {"id":"frontend","path":"web","paths_included":["web/**"],"risk":{"score":3},"depth":"full"}]}
+EOF
+$P "$tmp_mono/parts.json" --source-root "$tmp_mono" --ignore /dev/null --quiet
+[ $? -eq 0 ] \
+  && ok "a dominant but directory-anchored partition is not a catch-all" \
+  || bad "95%-of-tree backstop misfires on a backend-heavy monorepo"
+case "$tmp_mono" in /tmp/mono-*|"${TMPDIR%/}"/mono-*) rm -rf "$tmp_mono" ;; esac
+
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
      --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \

@@ -113,6 +113,16 @@ _ADMIN_ROLE_TOKENS = {"admin", "administrator", "superuser", "superadmin",
 # A "scoped" claim whose predicate contains none of these is not scoping — it is
 # a filter on a literal (`scope = 'user'`, `deletedAt IS NULL`), which is exactly
 # the shape the missed handler used.
+# Single generic words that are caller-binding ONLY when adjacent to an identity
+# token. camelCase splitting made these match `callerName`, `sessionType`,
+# `callerPhoneNumber` — plausible column names with nothing to do with the
+# authenticated caller, which would suppress real C1 findings.
+_GENERIC_CALLER_WORDS = {"session", "caller", "me", "viewer", "principal",
+                         "claims", "jwt", "acl"}
+_IDENTITY_NEIGHBOURS = {"id", "uid", "sub", "user", "users", "email", "owner",
+                        "tenant", "org", "organization", "account", "workspace",
+                        "member", "membership"}
+
 _CALLER_TOKENS = (
     "session", "current_user", "currentuser", "req.user", "request.user",
     "ctx.user", "context.user", "auth.uid", "authuser", "principal", "claims",
@@ -429,10 +439,19 @@ def _statement_at(lines, idx):
         ln = lines[i]
         out.append(ln)
         depth += ln.count("(") + ln.count("[") - ln.count(")") - ln.count("]")
-        if depth <= 0 and i > idx:
-            break
-        if depth <= 0 and i == idx and ("(" in ln or ")" in ln):
-            break
+        if depth > 0:
+            continue
+        # Brackets balance here, but a fluent query is written as a method chain
+        # across lines, each of which balances on its own:
+        #     const rows = await db.select().from(decks)
+        #       .where(and(eq(decks.userId, session.user.id), ...))
+        # Stopping at the cited line would drop the predicate entirely and flag a
+        # correctly-scoped handler. Keep going while the NEXT line continues the
+        # chain — still forward-only, so the auth gate above can never leak in.
+        nxt = lines[i + 1].lstrip() if i + 1 < len(lines) else ""
+        if nxt.startswith((".", "?.", ")", ",")) or nxt.startswith("->"):
+            continue
+        break
     return "\n".join(out)
 
 
@@ -481,8 +500,15 @@ def predicate_binds_caller(text):
             continue
         n = len(want)
         for i in range(len(toks) - n + 1):
-            if toks[i:i + n] == want:
-                return True
+            if toks[i:i + n] != want:
+                continue
+            if n == 1 and want[0] in _GENERIC_CALLER_WORDS:
+                # Require an identity token immediately either side.
+                prev = toks[i - 1] if i > 0 else ""
+                nxt = toks[i + 1] if i + 1 < len(toks) else ""
+                if prev not in _IDENTITY_NEIGHBOURS and nxt not in _IDENTITY_NEIGHBOURS:
+                    continue
+            return True
     return False
 
 
@@ -790,7 +816,10 @@ _OTHER_PRINCIPAL_RE = re.compile(
 # Start of the NEXT handler in a multi-route file — the boundary C2b's filter
 # search must not cross.
 _NEXT_HANDLER_RE = re.compile(
-    r"defineEventHandler\s*\(|export\s+default\b|export\s+async\s+function\b"
+    r"defineEventHandler\s*\(|export\s+default\b"
+    r"|export\s+(?:async\s+)?function\b|^\s*(?:async\s+)?function\s+\w+\s*\("
+    r"|exports\.\w+\s*=|module\.exports\s*="
+    r"|^\s*(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?\("
     r"|@(?:Get|Post|Put|Patch|Delete)\s*\(|router\.(?:get|post|put|patch|delete)\s*\("
     r"|app\.(?:get|post|put|patch|delete)\s*\(|^\s*(?:async\s+)?def\s+\w+\s*\(",
     re.MULTILINE)
@@ -1026,9 +1055,13 @@ def main():
         args.out.write_text(
             "".join(json.dumps(f, sort_keys=False) + "\n" for f in findings),
             encoding="utf-8")
+        sidecar = args.out.with_suffix(args.out.suffix + ".incomplete")
         if cov:
-            args.out.with_suffix(args.out.suffix + ".incomplete").write_text(
-                "\n".join(cov) + "\n", encoding="utf-8")
+            sidecar.write_text("\n".join(cov) + "\n", encoding="utf-8")
+        else:
+            # Remove a sidecar left by an earlier failing run, or a later clean
+            # run looks incomplete forever.
+            sidecar.unlink(missing_ok=True)
         if not args.quiet:
             print(f"\nwrote {len(findings)} finding(s) -> {args.out}")
 

@@ -171,6 +171,43 @@ echo "$out" | grep -q "disappeared_unexplained" \
   || bad "out-of-range change accepted as an explanation"
 rm -f "$tmp_drift" "$tmp_ch"
 
+# --- 4c. R3-F2: baseline slots go to the BEST match, not the first one ------
+# First-come-first-served let a weaker nearby decoy consume the baseline entry,
+# leaving the true continuation with base=None — silently exempt from R4, the one
+# gate it most needed.
+tmp_b=$(mktemp /tmp/ap-b-XXXX.json); tmp_f=$(mktemp /tmp/ap-f-XXXX.jsonl)
+python3 - "$tmp_b" "$tmp_f" <<'EOF'
+import json, sys
+base = {"schema_version":2,"audit_id":"b","skill_version":"2.4.0","git_head":"x",
+ "created_at":"2026-03-15T00:00:00Z","repo_topology":{},"partition_manifest":[],
+ "surface":[],"keystone_files":[],"config":{},"scanner_versions":{},
+ "methodology_coverage":{},"ignored":[],
+ "findings_carryover":[{"fingerprint":"ffffffffffff",
+   "title":"Unscoped collection returns other users decks","severity":"HIGH",
+   "confidence":"CONFIRMED","file":"r.ts","line":100,"cwe":"CWE-1220",
+   "category":"collection_scope","first_seen_at":"2026-03-15T00:00:00Z"}]}
+json.dump(base, open(sys.argv[1],'w'))
+def mk(i,line,title):
+    return {"id":f"a:collection_scope:{i:04d}","severity":"LOW","confidence":"CONFIRMED",
+      "category":"collection_scope","partition":"a","file":"r.ts","line":line,
+      "cwe":"CWE-1220","owasp_ids":["A01:2025"],"title":title,"description":"d",
+      "sources":[{"kind":"grep"}],"preconditions":[],"postconditions":["knows:any_x_id"]}
+rows=[mk(1,110,"Totally different problem about decks collection"),   # decoy FIRST
+      mk(2,101,"Unscoped collection returns other users decks")]      # true continuation
+with open(sys.argv[2],'w') as f:
+    for r in rows: f.write(json.dumps(r)+"\n")
+EOF
+out="$($C "$tmp_f" --baseline "$tmp_b" --run-id r --now "$NOW" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && echo "$out" | grep -q "a:collection_scope:0002"; } \
+  && ok "the near-exact match wins the baseline slot, not the earlier decoy" \
+  || bad "baseline assignment is order-dependent (rc=$rc)"
+# Scope the check to the R4 line: the decoy legitimately appears in the persona
+# reachability listing, which says nothing about baseline assignment.
+echo "$out" | grep "Unjustified severity downgrade" | grep -q "0001" \
+  && bad "the decoy consumed the baseline entry" \
+  || ok "the decoy did not consume the baseline entry"
+rm -f "$tmp_b" "$tmp_f"
+
 # --- 5. negative control ----------------------------------------------------
 $C $FIX/clean/findings.jsonl --now "$NOW" --quiet
 [ $? -eq 0 ] && ok "clean fixture exits 0 (gate is not a permanent red)" \

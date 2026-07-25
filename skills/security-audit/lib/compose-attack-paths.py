@@ -479,9 +479,46 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
         gov.append(g)
         return g
 
+    # Two-pass drift assignment. Pass 1 scores every (finding, candidate) pair
+    # and assigns greedily by quality (title similarity desc, then line distance
+    # asc). First-come-first-served by findings order let a weaker match consume
+    # the entry that a near-exact match needed, and a finding with no `base` is
+    # silently exempt from R4.
     seen_fps, consumed = set(), set()
-    for f in findings:
-        base, fp, matched_by = match_baseline(f, bidx, bdrift, consumed)
+    drift_assign, taken = {}, set()
+    cands = []
+    for fi, f in enumerate(findings):
+        if fingerprint_of(f) in bidx:
+            continue
+        key = (str(f.get("file", "")).lstrip("./"), f.get("cwe"))
+        for bline, bfp, b in bdrift.get(key, []):
+            if bline is None or f.get("line") is None:
+                continue
+            bcat, fcat = b.get("category"), f.get("category")
+            if bcat and fcat and bcat != fcat:
+                continue
+            sim = _title_sim(f.get("title"), b.get("title"))
+            if sim < _TITLE_SIM_FLOOR:
+                continue
+            d = abs(int(bline) - int(f["line"]))
+            if d <= _FP_LINE_TOLERANCE:
+                cands.append((-sim, d, fi, bfp, b))
+    for _nsim, _d, fi, bfp, b in sorted(cands, key=lambda c: (c[0], c[1], c[2])):
+        if fi in drift_assign or bfp in taken:
+            continue
+        drift_assign[fi] = (b, bfp)
+        taken.add(bfp)
+
+    for fi, f in enumerate(findings):
+        fp0 = fingerprint_of(f)
+        if fp0 in bidx:
+            base, fp, matched_by = bidx[fp0], fp0, "exact"
+        elif fi in drift_assign:
+            base, bfp = drift_assign[fi]
+            fp, matched_by = bfp, "line-drift"
+            consumed.add(bfp)
+        else:
+            base, fp, matched_by = None, fp0, None
         # Record the BASELINE's fingerprint when matched by drift, so the
         # disappearance sweep below does not also report this finding as vanished.
         seen_fps.add(fp)

@@ -122,8 +122,21 @@ principle bind to each other. A title-similarity floor (Jaccard ≥ 0.34) and a
 one-baseline-entry-to-one-consumer rule guard against it, but a routes file with
 several near-identical unscoped-collection findings — this release's own primary
 output shape — is exactly where a similarity floor is weakest, because the titles
-genuinely are near-identical. Cross-check the R4 section of the report after a
-refactor that moves several same-CWE findings at once.
+genuinely are near-identical. Assignment is two-pass and best-first (title
+similarity desc, then line distance asc, one baseline entry to one consumer), so
+a weaker nearby decoy can no longer take the slot the true continuation needed —
+but a genuine tie between two near-identical findings is resolved arbitrarily.
+Cross-check the R4 section of the report after a refactor that moves several
+same-CWE findings at once.
+
+### 22. `Model.find(variableFilter)` is not a candidate
+The ODM anchor requires a `)` or `{` after `find(` — that is what separates
+`User.find({})` from an in-memory `Roles.find(r => r.id === x)` on a capitalised
+constant array, which is ubiquitous in real TypeScript and would otherwise fail
+the coverage gate on every run. The cost is that `User.find(filter)` with a
+variable filter is missed: a variable is indistinguishable from a predicate
+callback without type information. Accepted deliberately — a gate that cries wolf
+gets disabled, and a disabled gate catches nothing.
 
 ### 21. `--changed-files` line ranges are near-exact by design
 Range matching pads by ±2 lines, not by the fingerprint window's ±25. That is

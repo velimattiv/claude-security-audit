@@ -163,13 +163,40 @@ argument for the two-round rule being mandatory rather than advisory:
   "precise" option barely tighter than a bare path. Now ±2, with a visible note
   when the match relied on padding.
 
+**Round 3** was a targeted verification pass on round 2's fixes, and found two
+more HIGH regressions plus three MEDIUMs — while confirming two round-2 fixes
+CLEAN. The pattern is why the two-round rule is a floor, not a ceiling:
+
+- The forward-only statement window stopped at the cited line whenever its own
+  brackets balanced, so `const rows = await db.select().from(decks)` never read
+  the `.where(...)` on the next line and flagged a **correctly scoped** handler.
+  Now continues across a method chain, still forward-only.
+- Baseline drift assignment was first-come-first-served by findings order: a
+  weaker nearby decoy could consume the entry the true continuation needed,
+  leaving it with no baseline match and therefore silently exempt from R4. Now
+  two-pass, best-first.
+- The ≥95%-of-tree catch-all backstop fired on any backend-heavy monorepo
+  (`backend: src/**` owning 96/100 files), a permanent red that trains operators
+  to pass `--allow-catch-all` reflexively. Now requires dominance **and** an
+  unanchored glob.
+- camelCase splitting made bare generic words match `callerName`,
+  `sessionType`, `callerPhoneNumber`. Generic words now need an adjacent
+  identity token.
+- The C2b handler boundary missed `export function`, `exports.handler =` and
+  arrow-const handlers — the most common Express/Lambda shapes.
+- The `.incomplete` sidecar was never cleared, so one failing run marked the
+  artifact incomplete forever.
+
+**Round 4** re-verified round 3's fixes and returned no new HIGH or MEDIUM.
+
 One round-1 finding was **refuted with evidence** rather than fixed: the claimed
 `_ID_TOKEN` ReDoS is linear (0.0 / 0.1 / 1.2 ms at 400 / 4k / 40k chars) because
 the separator class is disjoint from the alphanumeric class, so there is no
 ambiguity to backtrack on.
 
-Every fix from both rounds is pinned by a regression test. Suite totals: 21
-(egress) + 30 (collection scoping + partition coverage) + 23 (severity gate).
+Every fix from every round is pinned by a regression test. Suite totals: 21
+(egress) + 35 (collection scoping + partition coverage) + 25 (severity gate) =
+**81 deterministic assertions**, all wired into CI.
 
 ### Honest scope
 
