@@ -30,9 +30,12 @@ install. See `docs/EPIC-v2.5-sufficiency-severity.md`.
   - **C3** `coverage: incomplete|caveat` surfaced as an open question, not a pass.
   - **C4** a sibling **test** asserting another principal's row is *present*
     rather than absent/404 — high-signal because it was written deliberately.
-  - **C5** a `caller_bound` claim whose evidence predicate names no
-    session/user/tenant/org value is rewritten to `unscoped`. **The inventory
-    cannot launder a false claim into a pass.**
+  - **C5** a `caller_bound` claim is checked against the source at the cited
+    `file:line` — a predicate that is not there, or one that names no
+    session/user/tenant/org value, is rewritten to `unscoped`. Together with
+    **C2b** (a denied decoration the handler plainly performs) this closes the
+    two inventory claims most likely to be wrong. It is **not** a general proof
+    that an agent-written inventory is honest; see `docs/KNOWN-GAPS.md` #12.
 - **Deep-dive category 12, `collection_scope`** (`steps/deepdive/cat-12-collection-scoping.md`)
   — BOLA at the **list** level (API1:2023 + API3:2023, A01:2025). Deliberately a
   separate category, not a cat-02 subsection: see Fixed below for why cat-02
