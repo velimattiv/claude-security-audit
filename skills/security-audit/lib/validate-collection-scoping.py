@@ -449,7 +449,12 @@ def _statement_at(lines, idx):
         # correctly-scoped handler. Keep going while the NEXT line continues the
         # chain — still forward-only, so the auth gate above can never leak in.
         nxt = lines[i + 1].lstrip() if i + 1 < len(lines) else ""
-        if nxt.startswith((".", "?.", ")", ",")) or nxt.startswith("->"):
+        # NOT ",": with brackets already balanced, a leading comma introduces a
+        # second declarator (`, unused = session.user.id`), and absorbing it
+        # leaked a caller token from unrelated code into the score. Inside an
+        # argument list depth is still > 0, so genuine multi-line arguments are
+        # already handled above and never reach here.
+        if nxt.startswith((".", "?.", ")")) or nxt.startswith("->"):
             continue
         break
     return "\n".join(out)
@@ -494,21 +499,41 @@ def predicate_binds_caller(text):
     toks = _tokenize(text)
     if not toks:
         return False
+    # Identifier components (split on punctuation only), each with its camelCase
+    # parts. A bare generic word means the caller when it stands alone as a
+    # component (`=== principal`, `session.user.id`); when it is only a camel
+    # fragment of a longer name it is a modifier, and whether it means the caller
+    # depends on what it modifies: `viewerId` yes, `callerName` no.
+    components = [c for c in re.split(r"[^A-Za-z0-9_]+", str(text)) if c]
+    standalone, camel_ctx = set(), []
+    for comp in components:
+        parts = _tokenize(comp)
+        if len(parts) == 1:
+            standalone.add(parts[0])
+        else:
+            camel_ctx.append(parts)
+
     for raw in _CALLER_TOKENS:
         want = _tokenize(raw)
         if not want:
             continue
         n = len(want)
+        if n == 1 and want[0] in _GENERIC_CALLER_WORDS:
+            w = want[0]
+            if w in standalone:
+                return True
+            for parts in camel_ctx:
+                for i, part in enumerate(parts):
+                    if part != w:
+                        continue
+                    prev = parts[i - 1] if i > 0 else ""
+                    nxt = parts[i + 1] if i + 1 < len(parts) else ""
+                    if prev in _IDENTITY_NEIGHBOURS or nxt in _IDENTITY_NEIGHBOURS:
+                        return True
+            continue
         for i in range(len(toks) - n + 1):
-            if toks[i:i + n] != want:
-                continue
-            if n == 1 and want[0] in _GENERIC_CALLER_WORDS:
-                # Require an identity token immediately either side.
-                prev = toks[i - 1] if i > 0 else ""
-                nxt = toks[i + 1] if i + 1 < len(toks) else ""
-                if prev not in _IDENTITY_NEIGHBOURS and nxt not in _IDENTITY_NEIGHBOURS:
-                    continue
-            return True
+            if toks[i:i + n] == want:
+                return True
     return False
 
 
@@ -817,9 +842,14 @@ _OTHER_PRINCIPAL_RE = re.compile(
 # search must not cross.
 _NEXT_HANDLER_RE = re.compile(
     r"defineEventHandler\s*\(|export\s+default\b"
-    r"|export\s+(?:async\s+)?function\b|^\s*(?:async\s+)?function\s+\w+\s*\("
-    r"|exports\.\w+\s*=|module\.exports\s*="
-    r"|^\s*(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?\("
+    r"|export\s+(?:async\s+)?function\b|^(?:async\s+)?function\s+\w+\s*\("
+    r"|^exports\.\w+\s*=|^module\.exports\s*="
+    # Column 0 ONLY. `^\s*` matched an indented local helper
+    # (`  const formatDate = (d) => ...`) inside a handler body, truncating the
+    # C2b search before the real `.filter(` and flagging a correctly-filtered
+    # collection. A top-level declaration is the boundary; an indented one is
+    # part of the handler we are still inside.
+    r"|^(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?\("
     r"|@(?:Get|Post|Put|Patch|Delete)\s*\(|router\.(?:get|post|put|patch|delete)\s*\("
     r"|app\.(?:get|post|put|patch|delete)\s*\(|^\s*(?:async\s+)?def\s+\w+\s*\(",
     re.MULTILINE)
@@ -1061,7 +1091,10 @@ def main():
         else:
             # Remove a sidecar left by an earlier failing run, or a later clean
             # run looks incomplete forever.
-            sidecar.unlink(missing_ok=True)
+            try:
+                sidecar.unlink(missing_ok=True)
+            except OSError:
+                pass   # a stale sidecar is a reporting nit; never fail the gate on it
         if not args.quiet:
             print(f"\nwrote {len(findings)} finding(s) -> {args.out}")
 

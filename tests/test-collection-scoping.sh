@@ -344,6 +344,45 @@ $P "$tmp_mono/parts.json" --source-root "$tmp_mono" --ignore /dev/null --quiet
   || bad "95%-of-tree backstop misfires on a backend-heavy monorepo"
 case "$tmp_mono" in /tmp/mono-*|"${TMPDIR%/}"/mono-*) rm -rf "$tmp_mono" ;; esac
 
+# --- 4q. R4: the three vectors round 4 found outside the suite's coverage ----
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+
+# R4-F1: an INDENTED local arrow helper is not a handler boundary. Treating it as
+# one truncated C2b's window and flagged a correctly-filtered collection.
+assert not m._NEXT_HANDLER_RE.search("  const formatDate = (d) => d.toISOString()")
+assert m._NEXT_HANDLER_RE.search("const handler = async (req,res) => {")
+assert m._NEXT_HANDLER_RE.search("exports.handler = async (e) => {")
+
+# R4-F2: a bare generic word standing alone as an identifier IS the caller,
+# whatever the column it is compared against is called.
+for p in ("row.subject === jwt", "row.author === principal", "row.actor === claims",
+          "row.editor === viewer", "row.creator === me", "row.requester === caller"):
+    assert m.predicate_binds_caller(p), p
+# ...but as a camelCase fragment it depends on what it modifies.
+for p in ("eq(c.callerName,'x')", "eq(s.sessionType,'live')",
+          "eq(c.callerPhoneNumber,'x')", "eq(s.sessionRegionId, 3)"):
+    assert not m.predicate_binds_caller(p), p
+for p in ("eq(d.o, viewerId)", "eq(d.o, callerId)", "eq(decks.owner, authUserId)",
+          "eq(decks.ownerId, session.user.id)"):
+    assert m.predicate_binds_caller(p), p
+
+# R4-F3: a comma-continued SECOND declarator must not be absorbed into the
+# statement being scored (it leaked session.user.id from unrelated code).
+comma = ["const rows = db.select().from(decks).where(eq(decks.scope,'user'))",
+         "  , unused = session.user.id;"]
+assert not m.predicate_binds_caller(m._statement_at(comma, 0)), "comma leak"
+# ...while a genuine method-chain continuation is still read.
+chain = ["const rows = await db.select().from(decks)",
+         "  .where(and(eq(decks.userId, session.user.id), isNull(decks.deletedAt)))"]
+assert m.predicate_binds_caller(m._statement_at(chain, 0)), "chain truncated"
+EOF
+then ok "R4 vectors: indented helper, standalone generic word, comma declarator"
+else bad "R4 regression (handler boundary / generic word / comma continuation)"
+fi
+
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
      --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \

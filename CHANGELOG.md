@@ -187,7 +187,23 @@ CLEAN. The pattern is why the two-round rule is a floor, not a ceiling:
 - The `.incomplete` sidecar was never cleared, so one failing run marked the
   artifact incomplete forever.
 
-**Round 4** re-verified round 3's fixes and returned no new HIGH or MEDIUM.
+**Round 4** found that round 3 had done it again — 1 HIGH + 2 MEDIUM, all
+outside the suite's coverage at the time:
+
+- The new arrow-const handler boundary used `^\s*`, so an *indented* local
+  helper (`const formatDate = (d) => ...`) counted as the start of the next
+  handler and truncated C2b's search before the real `.filter(`, flagging a
+  correctly-filtered collection. Now column-0 only.
+- Requiring an adjacent identity token for generic caller words fixed
+  `callerName` but broke `row.author === principal`, `row.subject === jwt` and
+  four more — a narrow false positive traded for a much wider false negative.
+  Now resolved at identifier granularity: a bare generic word standing alone IS
+  the caller; as a camelCase fragment it depends on what it modifies.
+- `_statement_at`'s comma continuation absorbed a second declarator
+  (`, unused = session.user.id`), leaking a caller token from unrelated code —
+  the same leak the forward-only rule exists to prevent, arriving from below.
+
+**Round 5** re-verified round 4's fixes and returned no new HIGH or MEDIUM.
 
 One round-1 finding was **refuted with evidence** rather than fixed: the claimed
 `_ID_TOKEN` ReDoS is linear (0.0 / 0.1 / 1.2 ms at 400 / 4k / 40k chars) because
