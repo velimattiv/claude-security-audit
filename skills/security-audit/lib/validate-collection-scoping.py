@@ -486,6 +486,18 @@ def _tokenize(text):
     return [t for t in re.split(r"[^a-z0-9]+", spaced.lower()) if t]
 
 
+_STRING_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"|`[^`]*`")
+
+
+def _strip_literals(text):
+    """Blank the contents of string literals, preserving length.
+
+    A quoted value is data, never a caller reference. Without this,
+    `eq(decks.scope, 'session')` scores as caller-bound: the component splitter
+    discards the quotes and `session` becomes an ordinary standalone token."""
+    return _STRING_LITERAL_RE.sub(lambda mo: " " * len(mo.group(0)), str(text))
+
+
 def predicate_binds_caller(text):
     """Does this predicate reference a value derived from the CALLER?
 
@@ -496,6 +508,7 @@ def predicate_binds_caller(text):
     are the expensive direction here, so the match is anchored to whole tokens."""
     if not text:
         return False
+    text = _strip_literals(text)
     toks = _tokenize(text)
     if not toks:
         return False
@@ -851,7 +864,9 @@ _NEXT_HANDLER_RE = re.compile(
     # part of the handler we are still inside.
     r"|^(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?\("
     r"|@(?:Get|Post|Put|Patch|Delete)\s*\(|router\.(?:get|post|put|patch|delete)\s*\("
-    r"|app\.(?:get|post|put|patch|delete)\s*\(|^\s*(?:async\s+)?def\s+\w+\s*\(",
+    r"|app\.(?:get|post|put|patch|delete)\s*\("
+    r"|^(?:async\s+)?def\s+\w+\s*\("
+    r"|^\s+(?:async\s+)?def\s+\w+\s*\(\s*(?:self|cls)\b",
     re.MULTILINE)
 
 _COMMENT_LINE_RE = re.compile(r"^\s*(//|#|\*|/\*)")

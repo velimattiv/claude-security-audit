@@ -383,6 +383,34 @@ then ok "R4 vectors: indented helper, standalone generic word, comma declarator"
 else bad "R4 regression (handler boundary / generic word / comma continuation)"
 fi
 
+# --- 4r. R5: string literals are data, not caller references ----------------
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+
+# R5-F1: the identifier-component split strips quotes, so a literal enum value
+# scored as a real identifier — the founding `scope = 'user'` bug wearing a
+# different literal. A quoted value can never bind the caller.
+for p in ("eq(decks.scope, 'session')", 'eq(decks.status, "viewer")',
+          "eq(d.role,'principal')", "eq(decks.scope,'user')", "eq(x, `caller`)"):
+    assert not m.predicate_binds_caller(p), p
+for p in ("eq(decks.ownerId, session.user.id)", "row.author === principal",
+          "eq(d.o, viewerId)", "where(userId = req.user.id)"):
+    assert m.predicate_binds_caller(p), p
+
+# R5-F2: the Python def boundary kept the ^\s* that R4 removed everywhere else.
+# Column 0 is a module-level handler; an indented def is a handler only when it
+# takes self/cls (a class-based view), not when it is a local helper.
+assert not m._NEXT_HANDLER_RE.search("    def format_row(row):")
+assert m._NEXT_HANDLER_RE.search("def list_items(request):")
+assert m._NEXT_HANDLER_RE.search("    def get(self, request):")
+assert m._NEXT_HANDLER_RE.search("    async def post(self, req):")
+EOF
+then ok "quoted literals are not caller refs; python def boundary anchored"
+else bad "R5 regression (literal laundering / python def boundary)"
+fi
+
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
      --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \

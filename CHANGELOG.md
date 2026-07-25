@@ -203,7 +203,23 @@ outside the suite's coverage at the time:
   (`, unused = session.user.id`), leaking a caller token from unrelated code —
   the same leak the forward-only rule exists to prevent, arriving from below.
 
-**Round 5** re-verified round 4's fixes and returned no new HIGH or MEDIUM.
+**Round 5** found one more HIGH and one MEDIUM, both side effects of round 4's
+mechanism rather than its reasoning:
+
+- The identifier-component split discards quote characters along with all other
+  punctuation, so `eq(decks.scope, 'session')` produced a standalone component
+  `session` indistinguishable from a real identifier and scored as caller-bound.
+  That is the founding `scope = 'user'` bug wearing a different literal, and it
+  would have laundered an unscoped PII-bearing collection past C1. String
+  literals are now blanked before analysis.
+- The Python `def` alternative kept the `^\s*` that round 4 removed from every
+  JS alternative for exactly this reason, so an indented local helper truncated
+  C2b's window. Now column 0, with an indented `def` counting only when it takes
+  `self`/`cls` — the signal that distinguishes a class-based-view handler from a
+  local helper.
+
+**Round 6** re-verified round 5's fixes and returned no new HIGH or MEDIUM:
+**CONVERGED at HIGH=0, MEDIUM=0.**
 
 One round-1 finding was **refuted with evidence** rather than fixed: the claimed
 `_ID_TOKEN` ReDoS is linear (0.0 / 0.1 / 1.2 ms at 400 / 4k / 40k chars) because
