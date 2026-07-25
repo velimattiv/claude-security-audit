@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.5.0",
+  "notes": [
+    "Fixture: a partition manifest that looks complete and is not. server/api/** matches no partition glob, so an entire directory of HTTP handlers leaves the audit without a word. This is the exact bookkeeping failure behind one of the three reasons a CRITICAL authorization defect was missed — 'explicit partition membership: NONE'."
+  ],
+  "deep_dive_budget": { "top_n": 2, "full_depth_count": 2, "inventory_only_count": 1 },
+  "partitions": [
+    {
+      "id": "services-api",
+      "kind": "service",
+      "path": "services/api",
+      "paths_included": ["services/api/**"],
+      "risk": { "score": 7, "rationale": "public ingress, touches auth" },
+      "depth": "full"
+    },
+    {
+      "id": "services-worker",
+      "kind": "service",
+      "path": "services/worker",
+      "paths_included": ["services/worker/**"],
+      "risk": { "score": 5, "rationale": "internal queue consumer" },
+      "depth": "full"
+    },
+    {
+      "id": "packages-ui",
+      "kind": "workspace",
+      "path": "packages/ui",
+      "paths_included": ["packages/ui/**"],
+      "risk": { "score": 2, "rationale": "presentational components" },
+      "depth": "inventory-only"
+    }
+  ]
+}

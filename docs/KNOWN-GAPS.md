@@ -76,3 +76,131 @@ New v2.1 deferrals (see `docs/EPIC-v2.1-refresh.md` §4 + `docs/ROADMAP.md`):
 ## Reporting a new gap
 
 If you find a scenario the suite silently passes but should fail, open an issue with `tests/e2e/` label + a minimal repro (a diff that should break something but doesn't). PRs that add tolerated drift to fixtures without a justification paragraph in the fixture's `rationale` are rejected.
+
+---
+
+## v2.5 — collection scoping and severity arithmetic
+
+These gates close specific, observed failures. They are not general solutions,
+and the boundaries below are deliberate rather than aspirational.
+
+### 12. Both reconciliations trust an agent-populated inventory
+`validate-collection-scoping.py` and `validate-egress.py` reconcile an inventory
+that a sub-agent wrote. Rule **C5** (a scoping claim with no caller-derived
+predicate is rewritten to `unscoped`) and **C2b** (a handler with a
+permission-shaped field and no filter, inventoried as un-decorated) re-check the
+two claims most likely to be wrong, and the fail-closed coverage gates make an
+*absent* entry loud. But an agent that mislabels an entity, or records a
+plausible-looking predicate that is not actually applied on the query path, is
+not caught mechanically. C5 verifies that a claimed predicate actually appears
+within ±3 lines of the cited location, and C2b verifies a denied decoration
+against the source — but an agent that cites a *real* predicate from an
+unrelated code path, or mislabels the entity, still passes. **Mitigation
+available:** the §6.20 adversarial pass must name the file:line of the scope it
+claims to have found; a refutation with no line is not a refutation.
+
+### 19. The partition-coverage escape hatch is a full bypass
+`--allow-catch-all` permits a bare `**` glob alongside specific partitions. A
+catch-all matches every file, so coverage is trivially "complete" and the gate
+proves nothing. The flag prints a WARN saying exactly that and records
+`catch_all_accepted` in the JSON report, but nothing stops an operator from
+wiring it into CI and forgetting. It exists because a genuine single-partition
+repo needs it; treat its presence in a config as a finding of its own.
+
+### 20. Fingerprints are line-anchored
+`sha1(file:line:cwe:category)` moves when code above the finding moves. v2.5 adds
+a `(file, cwe)` line-window fallback (±25 lines) so R4 and L1 survive ordinary
+edits, but a finding that moves further than that window — a large refactor, a
+file split — still un-matches from its baseline entry. The consequences are a
+reset `first_seen_at` and an R4 check that has nothing to compare against.
+Changing the formula outright would invalidate every existing baseline, so the
+window is the compromise. **Watch for it after a big refactor.**
+
+The fallback carries its own residual risk, disclosed here rather than buried:
+two DIFFERENT findings of the same CWE in the same file within 25 lines could in
+principle bind to each other. A title-similarity floor (Jaccard ≥ 0.34) and a
+one-baseline-entry-to-one-consumer rule guard against it, but a routes file with
+several near-identical unscoped-collection findings — this release's own primary
+output shape — is exactly where a similarity floor is weakest, because the titles
+genuinely are near-identical. Assignment is two-pass and best-first (title
+similarity desc, then line distance asc, one baseline entry to one consumer), so
+a weaker nearby decoy can no longer take the slot the true continuation needed —
+but a genuine tie between two near-identical findings is resolved arbitrarily.
+Cross-check the R4 section of the report after a refactor that moves several
+same-CWE findings at once.
+
+### 22. `Model.find(variableFilter)` is not a candidate
+The ODM anchor requires a `)` or `{` after `find(` — that is what separates
+`User.find({})` from an in-memory `Roles.find(r => r.id === x)` on a capitalised
+constant array, which is ubiquitous in real TypeScript and would otherwise fail
+the coverage gate on every run. The cost is that `User.find(filter)` with a
+variable filter is missed: a variable is indistinguishable from a predicate
+callback without type information. Accepted deliberately — a gate that cries wolf
+gets disabled, and a disabled gate catches nothing.
+
+### 21. `--changed-files` line ranges are near-exact by design
+Range matching pads by ±2 lines, not by the fingerprint window's ±25. That is
+deliberate (a 25-line pad made ranges barely tighter than bare paths while being
+sold as the precise option), but it means a genuine fix whose diff hunk lands
+more than 2 lines from the reported line is NOT accepted as an explanation, and
+the finding reports as `disappeared_unexplained`. That is the intended failure
+direction: a false alarm you close by recording the reason, rather than a
+vanished HIGH nobody notices.
+
+### 13. Base scopes are the main false-positive mode
+A `default_scope`, a tenant-injecting repository, a Prisma client extension, or
+database row-level security **is** valid row scoping, and none of them appear in
+the handler. C1 will over-flag when Phase 2 misses one. This is deliberate — the
+failure direction is toward triage, not toward silence — but on a codebase that
+scopes centrally, expect noise on the first run until the scopes are recorded as
+`scope_evidence`. **Not automated:** there is no detector for "a scope exists
+somewhere else".
+
+### 14. Runtime-assembled queries are out of mechanical reach
+A query built by string concatenation at request time, or dispatched through a
+generic query-service abstraction, cannot be statically decided. These are
+recorded as `coverage: caveat` and surfaced in the report. They are **not**
+counted as scoped.
+
+### 15. The composer can only compose what was tagged
+`compose-attack-paths.py` chains `preconditions`/`postconditions`. A capability
+nobody wrote down joins nothing, so a real chain between two untagged findings is
+invisible to R1 and R3. **Mitigations available:** R2 fires on prose that names
+another finding (no tags needed); `--require-capabilities` enforces tags on the
+four access-control categories; the ORPHAN CAPABILITIES report makes a
+half-composed chain visible. None of these makes chain analysis complete — they
+make the gap loud. **A clean gate with a long orphan list is not a clean gate.**
+
+### 16. Personas and crown jewels are derived, not verified
+Phase 0 §0.14 derives them by rule from the profile. If it mis-classifies the
+lowest self-provisionable role as privileged, R3 stops firing for the persona
+that matters most. The composer falls back to capability *patterns* when the
+lexicon is absent, but it cannot detect a lexicon that is present and wrong.
+**Review the persona list in the report** — it is printed for that reason.
+
+### 17. L1's threshold is policy, not physics
+30 days is a default (`--max-age-days`). It is not derived from anything. The
+claim is only that *a* threshold now exists and is enforced mechanically, which
+is strictly more than the previous state, where a CONFIRMED finding aged 96 days
+without any mechanism noticing.
+
+### 18. R4 cannot distinguish a fixed finding from an unlooked-for one
+A HIGH+ that disappears between runs is matched against `--changed-files`. If the
+fix landed in a file the audit did not diff (a config change, an infrastructure
+control, a dependency bump), the run reports `disappeared_unexplained` — a false
+positive that must be closed by recording the reason. The inverse (a finding that
+disappears because Phase 5 silently under-covered) is the failure this accepts
+noise to catch.
+
+### 23. Literal stripping is a scanner, not a parser
+`predicate_binds_caller` blanks string literals and line comments before scoring,
+because a quoted value can never bind the caller and treating one as an
+identifier laundered an unscoped collection past C1. The scanner handles
+backslash escapes and treats an *unterminated* quote as an ordinary apostrophe
+rather than pairing it with the next unrelated quote. It is still not a language
+parser: a `//` inside a string that was itself opened by an unterminated quote,
+or a nested template-literal interpolation carrying the only caller reference
+(`` sql`... ${session.user.id} ...` ``), can be blanked. The failure direction is
+a **false positive** — a correctly-scoped collection reported as unscoped, which
+a human closes — not a silent pass. Record the predicate as `scope_evidence` on a
+plain line if a template literal is the only place your scoping lives.

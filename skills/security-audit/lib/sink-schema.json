@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/velimattiv/claude-security-audit/lib/sink-schema.json",
   "title": "Phase-02 Egress-Sink Inventory",
-  "description": "Path-sensitive inventory of every code path that can emit a resource's bytes to a caller. Consumed by scripts/validate-egress.py. The unit of analysis is the BRANCH (guarded_paths[]), not the handler — this is what makes a conditional unauthenticated-bypass branch expressible. Every deterministic candidate from lib/egress-detection.md MUST appear here as a sink OR in dismissed[] with a reason (fail-closed coverage).",
+  "description": "Path-sensitive inventory of every code path that can emit a resource's bytes to a caller. Consumed by lib/validate-egress.py. The unit of analysis is the BRANCH (guarded_paths[]), not the handler — this is what makes a conditional unauthenticated-bypass branch expressible. Every deterministic candidate from lib/egress-detection.md MUST appear here as a sink OR in dismissed[] with a reason (fail-closed coverage).",
   "type": "object",
   "required": ["schema_version", "sinks"],
   "properties": {
@@ -23,7 +23,9 @@
           "kind": {
             "enum": ["file", "stream", "db_entity", "proxy", "static",
                      "graphql_field", "presigned_url", "websocket", "sse",
-                     "template", "redirect", "async_job", "cdn"]
+                     "template", "redirect", "async_job", "cdn",
+                     "json_collection", "json_metadata", "identifier_list"],
+            "description": "v2.5 widened this from byte-emitting sinks only. A JSON list of other principals' identifiers IS an egress of sensitive data — UUIDs plus titles were the discovery half of a real incident, and because the v2.4 enum admitted only byte sinks, the handler serving them never entered this inventory and the §6.19 reconciliation never evaluated it. Use json_collection for a list of entity rows, json_metadata for a single row's descriptive fields, identifier_list for bare ids/paths/slugs."
           },
           "framework": { "type": "string" },
           "serves_resource": {

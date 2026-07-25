@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "data_model": {
+    "orm": "drizzle",
+    "schema_files": ["server/db/schema.ts"],
+    "entities": [
+      { "name": "Deck", "id": "Deck", "owner_cols": ["ownerId"], "pii_cols": [] },
+      { "name": "User", "id": "User", "owner_cols": ["id"], "pii_cols": ["email"] },
+      { "name": "Product", "id": "Product", "owner_cols": [], "pii_cols": [] }
+    ]
+  },
+  "pii": { "detected": true, "columns": ["users.email"] },
+  "public_resources": ["Product"],
+  "capability_lexicon": {
+    "personas": {
+      "anonymous": [],
+      "lowest_tier_user": ["authenticated", "role:reader"],
+      "authenticated_user": ["authenticated"]
+    },
+    "unprivileged": ["anonymous", "lowest_tier_user"],
+    "crown_jewels": ["reads:any_deck_content", "reads:any_user_pii", "escalates:admin"]
+  }
+}

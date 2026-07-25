@@ -187,6 +187,11 @@ category names (applied during `categories:` parsing):
 | `agentic` | `agentic` |
 | `mcp` | `agentic` |
 | `agent` | `agentic` |
+| `collection_scope` | `collection_scope` |
+| `collection` | `collection_scope` |
+| `collections` | `collection_scope` |
+| `list` | `collection_scope` |
+| `row_scope` | `collection_scope` |
 
 Aliases are case-insensitive. Unknown tokens → warn and stop.
 
@@ -223,13 +228,13 @@ Before any phase runs:
 | # | Phase | Instruction file | Output artifact |
 |---|---|---|---|
 | 0 | Discovery & Recon | `steps/phase-00-discovery.md` | `phase-00-profile.json` |
-| 1 | Partition & Risk Rank | `steps/phase-01-partition.md` | `partitions.json` |
-| 2 | Attack Surface Inventory | `steps/phase-02-surface.md` | `phase-02-surface.json` |
+| 1 | Partition & Risk Rank | `steps/phase-01-partition.md` | `partitions.json`, `phase-01-coverage.json` |
+| 2 | Attack Surface Inventory | `steps/phase-02-surface.md` | `phase-02-surface.json`, `phase-02-sinks.json`, `phase-02-credentials.json`, `phase-02-collections.json` |
 | 3 | Keystone File Index | `steps/phase-03-keystone.md` | `cache/keystone-files.json` |
 | 4 | External Inputs (scanners) | `steps/phase-04-scanners.md` | `phase-04-scanners/*.sarif` |
-| 5 | Parallel Deep Dives (11 cat) | `steps/phase-05-deepdives.md` | `phase-05-<cat>-<partition>.jsonl` |
+| 5 | Parallel Deep Dives (12 cat) | `steps/phase-05-deepdives.md` | `phase-05-<cat>-<partition>.jsonl` |
 | 6 | Config + Methodology Spine | `steps/phase-06-config.md` | `phase-06-config.json`, `asvs.jsonl` |
-| 7 | Synthesis & Report | `steps/phase-07-synthesis.md` | `phase-07-report.md`, `findings.sarif` |
+| 7 | Synthesis & Report | `steps/phase-07-synthesis.md` | `phase-07-report.md`, `findings.sarif`, `phase-07-severity-gate.json` |
 | 8 | Baseline Persistence | `steps/phase-08-baseline.md` | `baseline.json`, `<output_dir>/security-audit-baseline.json` |
 
 Phases beyond M1 are tracked as **not yet implemented** until their
@@ -354,7 +359,9 @@ For each top-N partition × each deep-dive category:
   sub-agent returns, the orchestrator re-runs
   After loading `SKILL_DIR=$(cat .claude-audit/.skill-dir)`, run:
   `python3 "$SKILL_DIR/lib/validate-findings.py" --schema "$SKILL_DIR/lib/finding-schema.json"
-  --cwe-map "$SKILL_DIR/lib/cwe-map.json" <artifact>` against the emitted JSONL.
+  --cwe-map "$SKILL_DIR/lib/cwe-map.json"
+  --require-capabilities auth,idor,token_scope,collection_scope <artifact>`
+  against the emitted JSONL.
   The sub-agent is *told* to validate before returning; the
   orchestrator's re-run catches cases where the sub-agent skipped
   the self-check. Validation failure triggers one retry with the

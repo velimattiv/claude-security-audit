@@ -95,7 +95,10 @@ fi
 PY="${PYTHON:-python3}"
 recall="$($PY - <<'EOF'
 import importlib.util
-spec = importlib.util.spec_from_file_location("ve", "scripts/validate-egress.py")
+# Load the CANONICAL module, not the scripts/ shim: only skills/security-audit/
+# is installed, so that is the file an audit actually executes.
+spec = importlib.util.spec_from_file_location(
+    "ve", "skills/security-audit/lib/validate-egress.py")
 ve = importlib.util.module_from_spec(spec); spec.loader.exec_module(ve)
 kinds = {c["kind"] for c in ve.extract_candidates("tests/fixtures/egress/source-app")}
 need = {"file", "proxy", "graphql_field", "presigned_url", "sse", "db_entity", "credential"}

@@ -4,6 +4,7 @@
 
 📋 **This phase MUST produce, on disk, before advancing:**
 - `.claude-audit/current/partitions.json` (list of partition structs with id, path, risk score, depth, paths_included)
+- `.claude-audit/current/phase-01-coverage.json` (§1.6b coverage gate report — proves every source file maps to a partition)
 - `.claude-audit/current/phase-01.done`
 
 ⛔ **DO NOT advance to Phase 2** until both files exist AND the Verify block at the bottom prints `phase-01 verified`.
@@ -180,7 +181,46 @@ Emit:
 
 ## 1.5 — Emit the Partition Manifest
 
-Write to `.claude-audit/current/partitions.json` and `phase-01.done`.
+Write to `.claude-audit/current/partitions.json`.
+
+## 1.6b — Coverage gate (MANDATORY, v2.5) — assert partition coverage
+
+**Why this exists.** In the audit that missed a CRITICAL authorization defect,
+one of the three independent reasons was pure bookkeeping: `server/api/content/`
+matched **no** partition path-glob and fell through silently — *"explicit
+partition membership: NONE"*. An entire directory of HTTP handlers left the audit
+without a word. Coverage was assumed; it was never asserted.
+
+Run, before writing `phase-01.done`:
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/validate-partition-coverage.py" \
+  .claude-audit/current/partitions.json \
+  --source-root . \
+  --ignore .claude-audit/ignore.txt \
+  --out .claude-audit/current/phase-01-coverage.json \
+  || { echo "phase-01 FAILED the partition coverage gate — do NOT advance" >&2; exit 1; }
+```
+
+Non-zero exit means at least one source file belongs to **no** partition.
+**That fails Phase 1.** Do not paper over it with a catch-all `**` partition —
+the script reports catch-alls separately for exactly that reason, and a
+catch-all converts "unmatched" into "silently swallowed", which is strictly
+worse. Fix it by adding the missing partition (usually the right answer: an
+unglobbed handler directory deserves its own partition and its own risk score)
+or by adding a deliberate `ignore.txt` entry.
+
+The script also prints the **deep-dive cut line** — which partitions fell below
+`top_n` and how many source files they hold. A budget decision is legitimate; an
+*invisible* budget decision is how a partition ranked #9 against a default
+`top_n: 8` quietly became inventory-only. Read the cut line before proceeding: if
+an inventory-only partition holds request handlers, raise `top_n`. Phase 2 §2.13
+will additionally promote it on surface evidence, but that is a backstop, not a
+substitute for looking.
+
+Then write `phase-01.done`.
 
 Report to the user:
 > Phase 1 complete — <N> partitions identified, <K> at full depth. Top risk:
@@ -203,6 +243,7 @@ Before declaring this phase complete and proceeding, run:
 
 ```bash
 test -f .claude-audit/current/partitions.json  \
+  && test -f .claude-audit/current/phase-01-coverage.json \
   && test -f .claude-audit/current/phase-01.done \
   && echo "phase-01 verified" \
   || { echo "phase-01 INCOMPLETE — re-write artifact + .done marker before proceeding" >&2; exit 1; }

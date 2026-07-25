@@ -61,10 +61,20 @@ full audit unless the user passes `categories: "<subset>"`.
 | 9 | LLM-specific | `cat-09-llm.md` | only if `profile.llm_usage.detected == true` and `kind != "internal"` |
 | 10 | Supply Chain & CI/CD Integrity | `cat-10-supply-chain.md` | always |
 | 11 | MCP / Agentic | `cat-11-mcp-agentic.md` | only if `profile.mcp_agentic.detected == true` |
+| 12 | Collection Scoping (BOLA at list level) | `cat-12-collection-scoping.md` | always |
 
-**11 categories total** (9 always-on, incl. supply_chain; `llm` and `agentic`
-are gated). With the concurrency cap of 8, `(category, partition)` pairs queue
-into successive waves — the cap bounds in-flight sub-agents, not total pairs.
+**12 categories total** (10 always-on, incl. supply_chain and collection_scope;
+`llm` and `agentic` are gated). With the concurrency cap of 8, `(category,
+partition)` pairs queue into successive waves — the cap bounds in-flight
+sub-agents, not total pairs.
+
+> **Why 12 and not "fold it into cat-02".** cat-02's candidate filter requires an
+> id-shaped parameter, so a collection route with no params never becomes a
+> candidate — its own "list endpoints must filter by scope" invariant was
+> unreachable in practice, and an unscoped list endpoint passed a full v2.4 audit
+> as a result. A separate category guarantees the attention and makes the
+> coverage countable in the Phase-7 matrix, so the next miss is visible rather
+> than inferred.
 
 ## 5.2 — Fan-out procedure
 
@@ -126,6 +136,7 @@ SKILL_DIR=$(cat .claude-audit/.skill-dir)
 python3 "$SKILL_DIR/lib/validate-findings.py" \
     --schema "$SKILL_DIR/lib/finding-schema.json" \
     --cwe-map "$SKILL_DIR/lib/cwe-map.json" \
+    --require-capabilities auth,idor,token_scope,collection_scope \
     .claude-audit/current/phase-05-<c.id>-<p.id>.jsonl
 ```
 
@@ -168,6 +179,19 @@ populate:
 Strongly encouraged: `suggested_fix`, `attack_scenario`, `surface_id`,
 `remediation_effort`, `fingerprint` (stable across title drift; see
 `phase-07-synthesis.md §7.2`).
+
+**Capability tagging — REQUIRED for `auth`, `idor`, `token_scope`, and
+`collection_scope`** (v2.5). Every finding in those categories must carry
+`preconditions[]` and a **non-empty** `postconditions[]` in the
+[`lib/capability-lexicon.md`](../lib/capability-lexicon.md) grammar. Validate
+with `--require-capabilities auth,idor,token_scope,collection_scope`.
+
+This is not bookkeeping. `preconditions` is where the prose mitigation goes: if
+you are about to write *"only exploitable if the attacker knows the UUID"*, write
+`preconditions: ["knows:any_<entity>_id"]` instead. The Phase-7 gate then checks
+whether another finding in this same report **supplies** that capability — and if
+it does, the mitigation is undischarged and cannot lower the severity. That
+exact sentence, left in prose, cost 96 days of exposure on a CONFIRMED finding.
 
 **Enforcement.** Every sub-agent MUST run the schema validator before
 emitting its RETURN SHAPE.

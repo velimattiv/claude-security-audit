@@ -6,9 +6,10 @@
 - `.claude-audit/current/phase-02-surface.json` (one row per attack-surface item: route, handler file+line, method, auth status, trust zone)
 - `.claude-audit/current/phase-02-sinks.json` (egress-sink inventory — §2.11; ALWAYS written, empty `sinks: []` if none)
 - `.claude-audit/current/phase-02-credentials.json` (credential mint/consume ledger — §2.11; ALWAYS written, empty `credentials: []` if none)
+- `.claude-audit/current/phase-02-collections.json` (collection row-scoping inventory — §2.12; ALWAYS written, empty `collections: []` if none)
 - `.claude-audit/current/phase-02.done`
 
-⛔ **DO NOT advance to Phase 3** until both files exist AND the Verify block at the bottom prints `phase-02 verified`.
+⛔ **DO NOT advance to Phase 3** until all four artifacts exist AND the Verify block at the bottom prints `phase-02 verified`.
 
 📖 Phase 5's auth + IDOR categories and Phase 6's API Top 10 mapping both read `phase-02-surface.json`. A skipped surface row is a missed auth check.
 
@@ -196,9 +197,26 @@ While enumerating, pre-tag surfaces with any of:
   `server/api/x.ts` handling ALL methods).
 - `ADMIN_NO_ROLE` — path matches `/admin|/actuator|/debug` and
   `roles_required` is empty.
+- `RETURNS_OTHER_PRINCIPALS_ROWS` (v2.5) — the handler returns a **list** of an
+  entity with `owner_cols`/`pii_cols` and the query applies **no caller-derived
+  predicate**. Set this even when `auth_required` is `true` and `roles_required`
+  is populated — **especially** then. This flag exists because every other field
+  on the surface row records gate *presence*, and the defect being caught is
+  authentication used where per-row authorization was required.
+- `PERMISSION_DECORATION` (v2.5) — the handler computes a per-row permission
+  (`can*`, `is*Allowed`, `*Permitted`) and attaches it to the response without
+  filtering on it.
 
 These tags go in the surface row's `flags[]` field. They are **not** findings
 yet — Phase 5 turns them into severities.
+
+> **Data breadth outranks the trust-zone label.** An "internal" endpoint whose
+> query can return rows owned by principals other than the caller is higher risk
+> than a "public" endpoint returning one row the caller owns. Where
+> `RETURNS_OTHER_PRINCIPALS_ROWS` is set, it dominates the zone weight: Phase 7
+> §7.4 treats it as a promotion signal that also vetoes any dev-zone demotion,
+> and §2.13 below uses it to promote the whole partition into the deep-dive
+> budget.
 
 ## 2.8 — Emit the inventory
 
@@ -217,8 +235,10 @@ Write the consolidated surface document to
 }
 ```
 
-Then run §2.11 to write `phase-02-sinks.json` and `phase-02-credentials.json`.
-Write `phase-02.done` marker only after all three artifacts exist.
+Then run §2.11 to write `phase-02-sinks.json` and `phase-02-credentials.json`,
+and §2.12 to write `phase-02-collections.json`. Apply §2.13 (evidence-based
+partition promotion) before writing the marker. Write `phase-02.done` only after
+all four artifacts exist.
 
 ## 2.9 — Report to user
 
@@ -283,6 +303,106 @@ proceeding.
 > it does NOT prove no unauthorized path exists. New modality found ⇒ extend
 > `lib/egress-detection.md`.
 
+> **v2.5 — sinks are not only byte sinks.** The sink inventory's `kind` enum now
+> admits `json_collection`, `json_metadata`, and `identifier_list`. A JSON list
+> of other principals' identifiers **is** an egress of sensitive data: UUIDs plus
+> titles were the discovery half of a real incident, and because the v2.4 sink
+> inventory admitted only byte-emitting sinks, the handler that served them never
+> entered `phase-02-sinks.json` and §6.19 never evaluated it. If a surface emits
+> a resource's *identity or metadata* to someone who should not know the resource
+> exists, inventory it.
+
+## 2.12 — Collection inventory (v2.5, GLOBAL) — row scoping, not gate presence
+
+§2.11 catalogues egress by **modality**. This section catalogues egress by
+**row scope**, and it exists because a gate can be present, correct-looking, and
+still wrong:
+
+```ts
+const session = await requireRole(event, 'reader')             // gate EXISTS
+  .where(and(eq(decks.scope, 'user'), isNull(decks.deletedAt))) // no owner predicate
+const tree = applyCanWrite(rawTree, session)                    // decorates, never filters
+```
+
+Every field in §2.4 records gate **presence**. None can express *"authentication
+was used where per-row authorization was required"*. `phase-02-collections.json`
+is that field.
+
+**Method — deterministic-candidate-first (fail-closed), same discipline as §2.11:**
+
+1. **Extract candidates.** For every handler in this partition, find every
+   list-shaped query (`findMany`, `findAll`, `.select().from()`, `.objects.filter`,
+   `session.query`, `Model.where`, `::all()`, `findAll(`, `.ToListAsync`,
+   `SELECT … FROM`, GraphQL list fields). The Phase-6 §6.20 coverage gate
+   re-derives this candidate set from source, so anything skipped here is raised
+   against you there.
+2. **Account for EVERY candidate** — a `collections[]` row or a `dismissed[]`
+   row with a reason. Silence fails the run.
+3. **Answer the row-scope question honestly.** `row_scope` describes how ROWS are
+   constrained, *independent of the endpoint's auth gate*:
+   - `caller_bound` — a predicate binds to caller identity. **Record
+     `scope_evidence` with the actual predicate text.** A claim with no
+     caller-derived token in its evidence is rewritten to `unscoped` by the
+     reconciliation (rule C5), so an unevidenced claim buys nothing.
+   - `visibility_filtered` — a per-row visibility helper is invoked **and its
+     result filters** the collection.
+   - `public_allowlisted` — the entity is on `profile.public_resources` (§0.12b).
+   - `role_restricted` — the only constraint is a role check. This is **not** row
+     scoping and is accepted only for admin-tier roles; `reader`, `member`,
+     `user`, `contributor` do not qualify.
+   - `unscoped` — no predicate references any caller-derived value. Filters on
+     literals (`scope = 'user'`, `deletedAt IS NULL`, `status = 'active'`)
+     constrain *which* rows, not *whose*.
+   - `unknown` — could not be determined from the read region. Fail-closed:
+     treated as unscoped, rated one rung lower with `POSSIBLE` confidence.
+4. **Record the decoration antipattern.** Set `decorates_permission` when a
+   per-row permission is computed and attached, and `filters_after_decoration`
+   only when that permission actually filters the collection.
+5. **Look for a base scope before flagging.** A `default_scope`, a repository
+   that always injects the tenant, a Prisma client extension, or database
+   row-level security **is** valid scoping — find it and record it as
+   `scope_evidence`. Missing one is the main false-positive risk here.
+
+Write `phase-02-collections.json` (schema
+[`../lib/collection-schema.json`](../lib/collection-schema.json)). ALWAYS
+written — `{"collections": [], "dismissed": []}` if the partition has no list
+endpoints. Validate against the schema before proceeding.
+
+## 2.13 — Evidence-based partition promotion (v2.5)
+
+Phase 1 ranked partitions on *a-priori* signals (exposure, sensitivity, age)
+because Phase 2 had not run yet. Phase 2 now holds *evidence*. Use it.
+
+After the surface, sink, and collection inventories are written, scan every
+partition currently marked `depth: "inventory-only"`. **Promote it to
+`depth: "full"`** if any of its surfaces carries:
+
+- `RETURNS_OTHER_PRINCIPALS_ROWS`, or
+- `PERMISSION_DECORATION`, or
+- `NO_AUTH_WRITE`, or
+- `NO_AUTH_READ_SENSITIVE`, or
+- `ADMIN_NO_ROLE`,
+
+or if it contains any `collections[]` row with `row_scope ∈ {unscoped, unknown}`
+on a non-allowlisted entity.
+
+Rewrite `partitions.json` with the promoted depths, and record each promotion:
+
+```json
+{ "promotions": [
+    { "partition": "server-api-content", "from": "inventory-only",
+      "to": "full", "reason": "RETURNS_OTHER_PRINCIPALS_ROWS on app:http:0001",
+      "evidence": "server/api/content/tree.get.ts:231" } ] }
+```
+
+**Why.** The partition holding the missed defect ranked #9 against a default
+`top_n: 8`. It received a deep dive in that run *only* because a human promoted
+it by hand on external-reachability grounds. A budget cut that lands on a
+partition full of unscoped collection handlers is not a budget decision, it is a
+coin flip — and one that had a 92-day cost. Promotion is uncapped by `top_n`:
+evidence outranks the budget. Report the promotions to the user so the extra
+runtime is explained rather than mysterious.
+
 ---
 
 ## Verify before exit (MANDATORY)
@@ -293,6 +413,7 @@ Before declaring this phase complete and proceeding, run:
 test -f .claude-audit/current/phase-02-surface.json  \
   && test -f .claude-audit/current/phase-02-sinks.json \
   && test -f .claude-audit/current/phase-02-credentials.json \
+  && test -f .claude-audit/current/phase-02-collections.json \
   && test -f .claude-audit/current/phase-02.done \
   && echo "phase-02 verified" \
   || { echo "phase-02 INCOMPLETE — re-write artifact(s) + .done marker before proceeding" >&2; exit 1; }

@@ -63,6 +63,19 @@ From `phase-02-surface.json`, filter to surfaces where:
 
 Every candidate must be verified — do not sample.
 
+> ⚠ **Scope boundary (v2.5 — read this).** The id-param requirement above makes
+> this lens **object**-centric, and that is deliberate. It also means a
+> collection route (`GET /resources`, no id param at all) **never becomes a
+> candidate here** — which is precisely how an unscoped list endpoint passed a
+> full v2.4 audit while invariant #2 above sat unreachable on the page.
+>
+> Collection endpoints are covered by **[cat-12 Collection
+> Scoping](cat-12-collection-scoping.md)**, which takes the complementary filter
+> (`data_ops` contains `read` AND the handler runs a list-shaped query, **no id
+> param required**). If your partition has list endpoints and cat-12 did not run,
+> say so in your notes rather than silently leaving them unaudited — and cover
+> them here.
+
 ## Detection patterns
 
 ### Query without ownership filter
@@ -120,6 +133,13 @@ ownership. → **HIGH** / CWE-639.
 
 Handler calls `.findAll()` / `.all()` / `.list()` without a user scope.
 Flag → **HIGH** / CWE-284. Suggest: `.where(userId = currentUser.id)`.
+
+Note that a `WHERE` clause being **present** proves nothing: `scope = 'user'` and
+`deletedAt IS NULL` constrain *which* rows, not *whose*. The test is whether any
+predicate references a caller-derived value. Full treatment — including the
+authorization-by-decoration antipattern and the "a test pins the bug" signal —
+is in [cat-12](cat-12-collection-scoping.md); flag it here too if cat-12 is not
+running for this partition.
 
 ### GraphQL resolvers
 

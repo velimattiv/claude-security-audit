@@ -30,21 +30,27 @@ jobs:
       fail-fast: false
       matrix:
         language: [python]
-        # We could add 'javascript-typescript' if we add JS/TS to the
-        # repo. Currently only Python (scripts/*.py) and shell scripts
-        # (not CodeQL-supported) carry real logic.
+        # Only Python (scripts/*.py, skills/security-audit/lib/*.py) and shell
+        # scripts (not CodeQL-supported) carry real logic.
+        #
+        # Do NOT add 'javascript-typescript' without a paths-ignore for
+        # tests/fixtures/**: those .ts files are DELIBERATELY vulnerable
+        # reproductions (unscoped collection queries, ungated byte sinks) used
+        # as regression fixtures. Scanning them would produce a permanent wall
+        # of true-positive alerts against code that is supposed to be broken,
+        # and an alert list nobody can clear is an alert list nobody reads.
 
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4.37.3
         with:
           languages: ${{ matrix.language }}
           queries: security-extended,security-and-quality
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4.37.3
         with:
           category: "/language:${{ matrix.language }}"

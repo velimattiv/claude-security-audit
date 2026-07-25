@@ -28,22 +28,60 @@
       "pattern": "^[a-f0-9]{12}$",
       "description": "Optional but strongly encouraged. Stable identifier for baseline carryover / delta-mode. Formula: first 12 chars of sha1(handler_file:line:cwe:category). If omitted, Phase 7 synthesis computes it. Replaces the title-based fingerprint from v2.0.0 which was unstable under title drift."
     },
-    "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
-    "confidence": { "enum": ["CONFIRMED", "LIKELY", "POSSIBLE"] },
-    "category": {
+    "severity": {
       "enum": [
-        "auth", "idor", "token_scope", "mitm", "crypto",
-        "secret_sprawl", "deployment", "injection", "llm",
-        "supply_chain", "agentic",
-        "config", "scanner", "methodology"
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
       ]
     },
-    "partition": { "type": "string" },
-    "file": { "type": "string" },
-    "line": { "type": "integer", "minimum": 1 },
-    "line_end": { "type": "integer", "minimum": 1 },
+    "confidence": {
+      "enum": [
+        "CONFIRMED",
+        "LIKELY",
+        "POSSIBLE"
+      ]
+    },
+    "category": {
+      "enum": [
+        "auth",
+        "idor",
+        "token_scope",
+        "collection_scope",
+        "mitm",
+        "crypto",
+        "secret_sprawl",
+        "deployment",
+        "injection",
+        "llm",
+        "supply_chain",
+        "agentic",
+        "config",
+        "scanner",
+        "methodology"
+      ]
+    },
+    "partition": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string"
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "line_end": {
+      "type": "integer",
+      "minimum": 1
+    },
     "surface_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Phase 2 surface row this finding belongs to, if applicable."
     },
     "cwe": {
@@ -59,41 +97,266 @@
       },
       "description": "e.g., ASVS-V6.2.1, API1:2023, LLM02:2025, A03:2025 (web Top 10), ASI01:2026 (agentic)"
     },
-    "title": { "type": "string", "maxLength": 120 },
-    "description": { "type": "string", "maxLength": 800 },
+    "title": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 800
+    },
     "sources": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["kind"],
+        "required": [
+          "kind"
+        ],
         "properties": {
-          "kind": { "enum": ["grep", "scanner", "manual", "subagent"] },
-          "detail": { "type": "string", "description": "grep pattern name or scanner rule id" }
+          "kind": {
+            "enum": [
+              "grep",
+              "scanner",
+              "manual",
+              "subagent"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "grep pattern name or scanner rule id"
+          }
         }
       },
       "minItems": 1
     },
-    "suggested_fix": { "type": ["string", "null"] },
-    "code_owner": { "type": ["string", "null"], "description": "From CODEOWNERS if present; else null." },
-    "attack_scenario": { "type": ["string", "null"] },
+    "suggested_fix": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "code_owner": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "From CODEOWNERS if present; else null."
+    },
+    "attack_scenario": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "verification_probe": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Executable proof for access-control findings (RCA §11: 'show me the request that should fail'). The exact unauthorized request an attacker would make, and the expected denial. Emitted by the Authorized-Egress reconciliation and by Phase-6 §6.19 confirmation. `actual` is filled only if the audit ran the probe against a live system.",
       "properties": {
-        "request": { "type": "string", "description": "e.g. a curl with the attacker's exact capability (id, no credential)." },
-        "expected": { "type": "string", "description": "The denial that proves the control holds (e.g. '401 or 404')." },
-        "actual": { "type": ["string", "null"], "description": "Observed result if probed live; null for static audits." }
+        "request": {
+          "type": "string",
+          "description": "e.g. a curl with the attacker's exact capability (id, no credential)."
+        },
+        "expected": {
+          "type": "string",
+          "description": "The denial that proves the control holds (e.g. '401 or 404')."
+        },
+        "actual": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Observed result if probed live; null for static audits."
+        }
       }
     },
     "remediation_effort": {
-      "type": ["string", "null"],
-      "enum": ["trivial", "small", "medium", "large", null]
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "trivial",
+        "small",
+        "medium",
+        "large",
+        null
+      ]
     },
     "related_partitions": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Cross-partition finding spans (monorepo ingress/handler split)."
     },
-    "notes": { "type": "string", "maxLength": 400 }
+    "notes": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "display_id": {
+      "type": "string",
+      "description": "Optional short id used in the human report (e.g. 'H1', 'M6'). The R2 prose rule resolves references written in this form, which is how analysts actually cite each other's findings."
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Additional identifiers this finding has been known by (prior report ids). Lets R2 resolve a chain reference written against an older naming scheme."
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Capabilities an attacker must ALREADY hold to exploit this finding, in the lib/capability-lexicon.md grammar (<verb>:<scope>_<object>). An empty array is a strong claim: anonymous-reachable. REQUIRED for auth / idor / token_scope / collection_scope findings. This is the field that replaces the prose mitigation 'only exploitable if the attacker knows the UUID' — written here, rule R1 can check whether another finding SUPPLIES it, in which case the mitigation is undischarged and cannot lower severity."
+    },
+    "postconditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Capabilities this finding GRANTS the attacker, same grammar. Must be non-empty for access-control categories — a finding that grants nothing is not a finding. An unscoped list endpoint grants both `knows:any_<entity>_id` and `reads:any_<entity>_metadata`; the first is what chains."
+    },
+    "severity_asserted": {
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
+      ],
+      "description": "What the analyst/sub-agent rated it in isolation. Retained for provenance; NOT authoritative."
+    },
+    "severity_computed": {
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
+      ],
+      "description": "What the attack-path arithmetic says (compose-attack-paths.py, rules R1-R3). AUTHORITATIVE — `severity` is set from this at Phase 7. The historical failure this exists for: a CONFIRMED finding whose own description said 'combined with H1 …' was filed one rung below the HIGH it chained to, and prose had no power over the rating."
+    },
+    "escalation_rules": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "R1",
+          "R2",
+          "R3"
+        ]
+      },
+      "description": "Which severity rules fired to produce severity_computed."
+    },
+    "severity_history": {
+      "type": "array",
+      "description": "Append-only. Every severity change across runs, with the reason. Rule R4 (ratchet) FAILS a run in which severity decreased without a new entry here — the mechanism by which a CONFIRMED MEDIUM silently became LOW and then 'well-defended (INFO)' while remaining exploitable.",
+      "items": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "severity",
+          "reason"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "CRITICAL",
+              "HIGH",
+              "MEDIUM",
+              "LOW",
+              "INFO"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 400
+          },
+          "reason_kind": {
+            "enum": [
+              "fix_commit",
+              "compensating_control",
+              "disproven_exploitability",
+              "rescoped",
+              "chain_escalation"
+            ],
+            "description": "A DOWNGRADE is only accepted for fix_commit / compensating_control / disproven_exploitability / rescoped. chain_escalation is emitted by the composer for upgrades."
+          },
+          "fix_commit": {
+            "type": "string",
+            "description": "Required when reason_kind is fix_commit."
+          },
+          "at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "first_seen_at": {
+      "type": "string",
+      "description": "ISO-8601 timestamp of the first run that reported this fingerprint. Carried forward by Phase 8, never reset. Without it the L1 age gate cannot tell a fresh finding from one that has been open for 96 days."
+    },
+    "lifecycle": {
+      "type": "object",
+      "description": "R1-R4 fix the rating; this forces the action. State machine: open -> accepted(owner, expiry, rationale) -> fixed(fix_commit) -> verified(verified_by_test).",
+      "properties": {
+        "state": {
+          "enum": [
+            "open",
+            "accepted",
+            "fixed",
+            "verified"
+          ]
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Required to accept a HIGH+ finding (gate L2)."
+        },
+        "expiry": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ISO-8601. Required to accept a HIGH+ finding; an expired acceptance is not an acceptance (gate L2)."
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 400
+        },
+        "fix_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verified_by_test": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Test id/path of a regression test that FAILS against the vulnerable code. Required for state=verified (gate L3). In the incident this gate exists for, the fix shipped with no denial test and a sibling test mocked the very gate it should have pinned — so 'fixed' was never mechanically proven and the class recurred on a different endpoint."
+        }
+      }
+    },
+    "coverage_gate": {
+      "enum": [
+        "passed",
+        "failed"
+      ],
+      "description": "Stamped by the fail-closed reconciliations (validate-collection-scoping.py / validate-egress.py). `failed` means the run's candidate coverage was incomplete, so this finding set is NOT a complete picture. Present so a consumer reading the JSONL directly can tell, without re-deriving it from a shell exit code that may not have propagated."
+    }
   }
 }

@@ -7,6 +7,255 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.5.0] — 2026-07-25
+
+**Sufficiency & severity arithmetic.** A live v2.4.0 run (all six scanners, no
+degraded mode) returned a clean bill for an endpoint disclosing every user's
+private data to any authenticated caller. Two methodology gaps let that happen,
+and a third defect meant v2.4's flagship control could not run at all from a real
+install. See `docs/EPIC-v2.5-sufficiency-severity.md`.
+
+### Added
+
+- **Collection-scoping reconciliation** (`lib/validate-collection-scoping.py`) —
+  the answer to *gate presence ≠ gate sufficiency*. Rules C1–C5 over a new
+  Phase-2 inventory (`phase-02-collections.json`, `lib/collection-schema.json`)
+  with a fail-closed coverage gate:
+  - **C1** unscoped collection of a sensitive entity (CWE-1220). A `WHERE` clause
+    being present proves nothing — `scope = 'user'` constrains *which* rows, not
+    *whose*. `role_restricted` counts as unscoped unless the role is admin-tier.
+  - **C2** authorization by decoration — a per-row permission computed and
+    attached instead of applied (CWE-863). Write-permission decoration on a
+    collection never read-filtered is a finding by construction.
+  - **C3** `coverage: incomplete|caveat` surfaced as an open question, not a pass.
+  - **C4** a sibling **test** asserting another principal's row is *present*
+    rather than absent/404 — high-signal because it was written deliberately.
+  - **C5** a `caller_bound` claim is checked against the source at the cited
+    `file:line` — a predicate that is not there, or one that names no
+    session/user/tenant/org value, is rewritten to `unscoped`. Together with
+    **C2b** (a denied decoration the handler plainly performs) this closes the
+    two inventory claims most likely to be wrong. It is **not** a general proof
+    that an agent-written inventory is honest; see `docs/KNOWN-GAPS.md` #12.
+- **Deep-dive category 12, `collection_scope`** (`steps/deepdive/cat-12-collection-scoping.md`)
+  — BOLA at the **list** level (API1:2023 + API3:2023, A01:2025). Deliberately a
+  separate category, not a cat-02 subsection: see Fixed below for why cat-02
+  could never have caught it.
+- **Attack-path severity gate** (`lib/compose-attack-paths.py`, Phase 7 §7.15) —
+  severity becomes a **computed** function. `severity_asserted` is retained only
+  as the analyst's opinion.
+  - **R1** a finding's precondition supplied by another finding's postcondition
+    is an *undischarged* mitigation; severity floor = the supplier's. Fixpoint,
+    so multi-hop chains propagate.
+  - **R2** prose matching `combined with|chained|together with|…` that names
+    another finding binds severity ≥ that finding's. Fires with **zero**
+    capability tags — five lines of regex that alone would have caught the
+    historical case.
+  - **R3** any path from an *unprivileged* persona to a crown jewel is CRITICAL,
+    applied via a **backward slice** so bystanders are not escalated.
+  - **R4** severity may not decrease across runs without a `severity_history`
+    entry naming what changed; a HIGH+ that disappears unexplained is itself a
+    finding.
+  - **L1–L3** lifecycle: a CONFIRMED HIGH+ open past `--max-age-days` (default
+    30) with no fix and no owned, unexpired acceptance **fails the run**;
+    acceptance requires owner + live expiry; `verified` requires a regression
+    test id.
+  - **ORPHAN CAPABILITIES** report — preconditions nothing supplies and
+    postconditions nothing consumes. The drift alarm that tells you the gate is
+    quietly inert rather than genuinely clean.
+- **Capability lexicon** (`lib/capability-lexicon.md`, Phase 0 §0.14) — one
+  vocabulary (`<verb>:<scope>_<object>`), project-derived personas and crown
+  jewels, and the containment rule (`any` subsumes narrower scopes).
+- **Partition coverage gate** (`lib/validate-partition-coverage.py`, Phase 1
+  §1.6b) — every non-ignored source file must map to a partition. Unmatched files
+  **fail Phase 1** instead of vanishing into a catch-all. Also reports catch-all
+  partitions and the **deep-dive cut line**, so a budget decision is visible
+  rather than silent.
+- **Evidence-based partition promotion** (Phase 2 §2.13) — a partition holding an
+  unscoped collection or a high-risk surface flag is promoted into the deep-dive
+  budget regardless of its a-priori rank, uncapped by `top_n`.
+- **Surface flags** `RETURNS_OTHER_PRINCIPALS_ROWS` and `PERMISSION_DECORATION`
+  (§2.7). The first dominates the trust-zone weight in §7.4 and vetoes any
+  dev-zone demotion: data breadth outranks a declared zone label.
+- **Finding-schema fields**: `preconditions`, `postconditions`,
+  `severity_asserted`, `severity_computed`, `escalation_rules`,
+  `severity_history[]`, `first_seen_at`, `lifecycle{state,owner,expiry,rationale,fix_commit,verified_by_test}`,
+  `display_id`, `aliases`. Baseline schema carries the same forward.
+- **`validate-findings.py --require-capabilities`** — enforces
+  `preconditions` + non-empty `postconditions` on `auth`, `idor`, `token_scope`,
+  `collection_scope`. Without tags the severity arithmetic silently has nothing
+  to compose.
+- **Tests**: `tests/test-collection-scoping.sh`, `tests/test-attack-paths.sh` and
+  fixtures under `tests/fixtures/{collection-scoping,attack-paths,partition-coverage}/`
+  — including a faithful reproduction of the handler that passed the v2.4 audit.
+  Each gate has a negative control; a gate that fires on everything gets
+  disabled, and a disabled gate catches nothing. Both wired into CI.
+
+### Fixed
+
+- **`$SKILL_DIR/scripts/validate-egress.py` never existed in an install.**
+  Installation copies only `skills/security-audit/`; the repo-root `scripts/`
+  directory is not part of it. v2.4's flagship deterministic control was
+  unreachable at audit time — a control with no enforcer, which is the exact bug
+  class it was written to detect. All audit-time validators now live in
+  `skills/security-audit/lib/`; `scripts/` keeps thin shims so existing
+  invocations, CI, and docs keep working. **New CI step** asserts every
+  `$SKILL_DIR/<path>` referenced in the skill resolves inside the shipped
+  directory.
+- **`validate-findings.py` existed as two byte-divergent copies**, only one of
+  which shipped. Consolidated to one implementation behind a shim.
+- **cat-02's candidate filter made its own list-endpoint invariant
+  unreachable.** It requires a path/query param matching
+  `^(id|[a-z]+Id|[a-z]+_id)$`; a collection route has no id param, so invariant
+  #2 ("list endpoints filter the result set by the authenticated scope") and the
+  "Search / list endpoints" detection pattern could never fire in practice. The
+  scope boundary is now stated explicitly and cross-referenced to cat-12.
+- **`validate-patterns.py` misread JSON/JSONC key-value lines as regexes**
+  (a `["a", "b"]` value looks like a character class). Added JSON-key and
+  comment-line recognition to the code heuristic.
+- **Egress sink inventory admitted only byte-emitting sinks**, so a JSON list of
+  other principals' identifiers never entered `phase-02-sinks.json` and §6.19
+  never evaluated it. `kind` now includes `json_collection`, `json_metadata`,
+  and `identifier_list`.
+
+### Changed
+
+- **Phase 8 refuses to write a baseline** while the §7.15 gate reports unresolved
+  governance failures. This is what makes the ratchet a ratchet: without it, a
+  run carrying an unexplained downgrade would persist that downgrade as the new
+  baseline and the next run would have nothing to compare against. **You cannot
+  launder a downgrade by re-running the audit.**
+- **Phase 8 carries `first_seen_at`, `severity_history[]` and `lifecycle`
+  forward, never resetting them.** Resetting `first_seen_at` silently zeroes a
+  finding's age and disables the L1 gate.
+- Phase 5 fan-out is now **12 categories** (10 always-on). Phase 7 report gains
+  a Collection Scoping section, a Severity Gate section, and an
+  `AUDIT GATE: FAILED` banner that must open the Executive Summary when
+  governance failures stand.
+- Dependency pins refreshed (Dependabot): `actions/checkout` 6.0.3→7.0.1,
+  `actions/setup-python` 6.2.0→7.0.0, `github/codeql-action/{init,analyze}`
+  4.36.2→4.37.3, `debian:bookworm-slim` digest `67b30a6`→`96e378d`.
+
+### Adversarial review (two rounds, external executor)
+
+Both rounds ran through GitHub Copilot CLI rather than self-review, because
+author-blindness is the structural failure mode for a diff this size. **Round 2
+found that three of round 1's fixes had introduced new defects** — the strongest
+argument for the two-round rule being mandatory rather than advisory:
+
+- The R1 fix for C5 (read the source instead of trusting the claimed predicate)
+  scored a ±3-line window, which absorbed the `const session = await
+  requireRole(...)` line sitting two lines above the query — **reintroducing the
+  exact motivating bug**, verified passing clean at exit 0. Now scored on the
+  cited statement, extended FORWARD only: the gate is always above the query.
+- The R1 catch-all fix shipped a four-string spelling allowlist. `*/**` matches
+  every file below any top-level directory and evaded it entirely. Now
+  behavioural (probe globs + a ≥95%-of-tree check).
+- The R1 token-exact caller matching (fixing the `"me."`-in-`scheme.name`
+  substring fail-open) scored `authUserId`, `currentUserId`, `viewerId` and
+  `callerId` as NOT caller-bound, flagging correctly-scoped handlers. Now
+  camelCase-aware.
+- The Mongoose anchor added in R1 matched `Roles.find(r => r.id === x)` on any
+  capitalised constant array — a false-positive storm that trains operators to
+  dismiss the gate. Now requires a `(` `)` or `{` tail.
+- The baseline drift fallback could bind two unrelated same-CWE findings within
+  25 lines; added a title-similarity floor and one-entry-one-consumer.
+- `--changed-files` ranges reused the ±25 fingerprint tolerance, making the
+  "precise" option barely tighter than a bare path. Now ±2, with a visible note
+  when the match relied on padding.
+
+**Round 3** was a targeted verification pass on round 2's fixes, and found two
+more HIGH regressions plus three MEDIUMs — while confirming two round-2 fixes
+CLEAN. The pattern is why the two-round rule is a floor, not a ceiling:
+
+- The forward-only statement window stopped at the cited line whenever its own
+  brackets balanced, so `const rows = await db.select().from(decks)` never read
+  the `.where(...)` on the next line and flagged a **correctly scoped** handler.
+  Now continues across a method chain, still forward-only.
+- Baseline drift assignment was first-come-first-served by findings order: a
+  weaker nearby decoy could consume the entry the true continuation needed,
+  leaving it with no baseline match and therefore silently exempt from R4. Now
+  two-pass, best-first.
+- The ≥95%-of-tree catch-all backstop fired on any backend-heavy monorepo
+  (`backend: src/**` owning 96/100 files), a permanent red that trains operators
+  to pass `--allow-catch-all` reflexively. Now requires dominance **and** an
+  unanchored glob.
+- camelCase splitting made bare generic words match `callerName`,
+  `sessionType`, `callerPhoneNumber`. Generic words now need an adjacent
+  identity token.
+- The C2b handler boundary missed `export function`, `exports.handler =` and
+  arrow-const handlers — the most common Express/Lambda shapes.
+- The `.incomplete` sidecar was never cleared, so one failing run marked the
+  artifact incomplete forever.
+
+**Round 4** found that round 3 had done it again — 1 HIGH + 2 MEDIUM, all
+outside the suite's coverage at the time:
+
+- The new arrow-const handler boundary used `^\s*`, so an *indented* local
+  helper (`const formatDate = (d) => ...`) counted as the start of the next
+  handler and truncated C2b's search before the real `.filter(`, flagging a
+  correctly-filtered collection. Now column-0 only.
+- Requiring an adjacent identity token for generic caller words fixed
+  `callerName` but broke `row.author === principal`, `row.subject === jwt` and
+  four more — a narrow false positive traded for a much wider false negative.
+  Now resolved at identifier granularity: a bare generic word standing alone IS
+  the caller; as a camelCase fragment it depends on what it modifies.
+- `_statement_at`'s comma continuation absorbed a second declarator
+  (`, unused = session.user.id`), leaking a caller token from unrelated code —
+  the same leak the forward-only rule exists to prevent, arriving from below.
+
+**Round 5** found one more HIGH and one MEDIUM, both side effects of round 4's
+mechanism rather than its reasoning:
+
+- The identifier-component split discards quote characters along with all other
+  punctuation, so `eq(decks.scope, 'session')` produced a standalone component
+  `session` indistinguishable from a real identifier and scored as caller-bound.
+  That is the founding `scope = 'user'` bug wearing a different literal, and it
+  would have laundered an unscoped PII-bearing collection past C1. String
+  literals are now blanked before analysis.
+- The Python `def` alternative kept the `^\s*` that round 4 removed from every
+  JS alternative for exactly this reason, so an indented local helper truncated
+  C2b's window. Now column 0, with an indented `def` counting only when it takes
+  `self`/`cls` — the signal that distinguishes a class-based-view handler from a
+  local helper.
+
+**Rounds 6 and 7** each returned HIGH=0 with two MEDIUMs — at the bar both
+times, and fixed rather than shipped at the ceiling. Round 6: the literal regex
+had no escape handling and paired a prose apostrophe with an unrelated quote;
+the indented-`def` boundary required `self`, missing `@staticmethod` handlers.
+Round 7: comment stripping blanked to end of *string* rather than end of *line*,
+erasing the `.where()` two lines below in a fluent chain; and a bare `@\w+`
+decorator boundary matched `@property` / `@Input()` inside the current handler.
+Every one of these is the **false-positive** direction — a correctly-scoped
+collection reported as unscoped, which a human closes — never a silent pass.
+
+**Round 8** re-verified round 7's fixes: **CONVERGED at HIGH=0, MEDIUM=0.**
+
+The trajectory across eight rounds (6H/4M → 4H/5M → 2H/3M → 1H/2M → 1H/1M →
+0H/2M → 0H/2M → 0H/0M) is itself the argument for the two-round minimum being a
+floor: **six** of the eight rounds found a defect introduced by the previous
+round's fix, and every HIGH after round 1 was a regression rather than an
+original miss.
+
+One round-1 finding was **refuted with evidence** rather than fixed: the claimed
+`_ID_TOKEN` ReDoS is linear (0.0 / 0.1 / 1.2 ms at 400 / 4k / 40k chars) because
+the separator class is disjoint from the alphanumeric class, so there is no
+ambiguity to backtrack on.
+
+Every fix from every round is pinned by a regression test. Suite totals: 21
+(egress) + 35 (collection scoping + partition coverage) + 25 (severity gate) =
+**81 deterministic assertions**, all wired into CI.
+
+### Honest scope
+
+A clean C1–C5 run means every *known* list-query candidate was accounted for and
+scoped — **not** that no unscoped path exists. A scope applied by an un-modelled
+mechanism (base scope, tenant-injecting repository, database RLS) is missed in
+the conservative direction and retired by the §6.20 adversarial pass. The
+composer can only compose what was tagged; R2 backstops untagged chains named in
+prose and the orphan list backstops R2. Both reconciliations operate on an
+agent-populated inventory: C5 and the coverage gates make a dishonest or absent
+inventory **loud**, not impossible.
+
 ## [2.4.0] — 2026-06-19
 
 **Authorized-Egress detection** — catch the control-with-no-enforcer /

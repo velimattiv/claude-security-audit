@@ -18,6 +18,22 @@ empty ones. Keep the executive summary to one page.
 
 ## Executive Summary
 
+{{audit_gate_banner}}
+
+<!-- v2.5: when the Phase-7 §7.15 gate reports unresolved governance failures
+     (R4 ratchet / L1-L3 lifecycle), this banner MUST be the first thing in the
+     summary, verbatim:
+
+       > ## ⛔ AUDIT GATE: FAILED
+       > <n> unresolved governance failure(s). No baseline was written for this
+       > run — an unexplained downgrade cannot persist itself as the new truth.
+       > <bulleted list of the failures with rule ids>
+
+     When the gate is clean, replace this placeholder with the empty string.
+     Do NOT soften or omit the banner: a report that reads as a clean bill while
+     a CONFIRMED HIGH ages past its threshold is the exact artifact that made a
+     92-day exposure look like normal operation. -->
+
 - **Total findings:** {{n_total}}
   — CRITICAL {{n_critical}} · HIGH {{n_high}} · MEDIUM {{n_medium}} · LOW {{n_low}} · INFO {{n_info}}
 - **Confidence mix:** CONFIRMED {{n_confirmed}} · LIKELY {{n_likely}} · POSSIBLE {{n_possible}}
@@ -26,6 +42,9 @@ empty ones. Keep the executive summary to one page.
 - **Unique-to-skill findings:** {{n_unique}} (not flagged by any scanner or built-in review)
 - **CWE Top 25 (2025) hits:** {{cwe_top25_hits}} (highest-ranked #{{cwe_top25_top_rank}})
 - **Exploit-likely (EPSS ≥ 0.10 or CISA-KEV):** {{exploit_likely_count}}
+- **Severity escalated by attack-path arithmetic:** {{gate_escalations}} (§7.15 — computed, not asserted)
+- **Unscoped collections (rows not bound to the caller):** {{collection_unscoped}} (§6.20)
+- **Oldest unremediated CONFIRMED HIGH+:** {{gate_oldest_days}} days
 
 ### Top Risks
 
@@ -124,6 +143,55 @@ sensitive resource's bytes enforce that resource's strongest intended gate?
 > high-signal but **NOT a proof of absence**. CDN-edge egress with no code path,
 > and any modality outside the catalogue, are out of mechanical reach and listed
 > here as caveats, never silently dropped: {{egress_caveats}}
+
+---
+
+## Collection Scoping (row-level access control)
+
+Result of the Phase 6 §6.20 reconciliation — for every endpoint that returns a
+list, are the rows constrained to the caller? A gate being *present* does not
+answer this question; that is the whole point of the section.
+
+- **Collections inventoried:** {{collection_count}} · **candidates dismissed:** {{collection_dismissed_count}}
+- **By row scope:** caller_bound {{collection_caller_bound}} · visibility_filtered {{collection_visibility_filtered}} · public_allowlisted {{collection_public}} · role_restricted {{collection_role_restricted}} · **unscoped {{collection_unscoped}}** · unknown {{collection_unknown}}
+- **Coverage gate:** {{collection_coverage_status}} (fail-closed — a silently-omitted list query fails the run)
+- **Findings:** C1 unscoped {{collection_c1}} · C2 decoration {{collection_c2}} · C3 coverage {{collection_c3}} · C4 test-pinned {{collection_c4}} · C5 unevidenced claim {{collection_c5}}
+- **Public-resource allowlist (review this):** {{collection_public_list}}
+
+{{collection_findings_block}}
+
+> **Scope & honesty.** A clean reconciliation means every *known* list-query
+> candidate was accounted for and scoped — high-signal, **not** a proof of
+> absence. A scope applied by an un-modelled mechanism (a base scope, a
+> tenant-injecting repository, database row-level security) is missed in the
+> conservative direction — the §6.20 adversarial pass exists to retire those.
+> Runtime-assembled queries are recorded as caveats, never as silent passes:
+> {{collection_caveats}}
+
+---
+
+## Severity Gate (computed severity + finding lifecycle)
+
+Result of the Phase 7 §7.15 gate. Severity here is **computed over composed
+attack paths**, not asserted per finding — `severity_asserted` is retained only
+as the analyst's opinion.
+
+- **Findings carrying capability tags:** {{gate_tagged}} / {{gate_total}}
+- **Escalations applied:** {{gate_escalations}} — {{gate_escalation_list}}
+- **Personas evaluated:** {{gate_personas}}
+- **Crown jewels reached from an unprivileged persona:** {{gate_jewels}}
+- **Governance failures (R4 ratchet, L1–L3 lifecycle):** {{gate_blocking}}
+- **Oldest unremediated CONFIRMED HIGH+:** {{gate_oldest_days}} days ({{gate_oldest_id}})
+
+{{gate_governance_block}}
+
+**Orphan capabilities** (vocabulary drift — a chain that should have composed and
+did not): {{gate_orphans}}
+
+> **Scope & honesty.** The composer can only compose what was tagged. R2 (prose
+> naming another finding) backstops untagged chains; the orphan list backstops
+> R2. None of this makes chain analysis complete — it makes the gaps loud, and it
+> stops a tagged chain from being out-voted by instinct.
 
 ---
 

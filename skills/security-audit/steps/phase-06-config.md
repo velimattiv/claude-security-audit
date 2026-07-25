@@ -12,6 +12,7 @@
 - `.claude-audit/current/phase-06-linddun.jsonl` — ALWAYS written. If `profile.pii.detected == false`, write a zero-byte file.
 - `.claude-audit/current/phase-06-stride/*.md` — one Markdown file per top-N partition (filename uses the partition id, e.g. `services-api.md`)
 - `.claude-audit/current/phase-06-egress.jsonl` — Authorized-Egress reconciliation findings (§6.19). ALWAYS written; zero-byte only when `phase-02-sinks.json` has no sinks.
+- `.claude-audit/current/phase-06-collections.jsonl` — collection-scoping reconciliation findings (§6.20). ALWAYS written; zero-byte only when `phase-02-collections.json` has no collections.
 - `.claude-audit/current/phase-06.done`
 
 🔁 **Methodology fan-out is MANDATORY (per §6.9, §6.12, §6.13):**
@@ -379,14 +380,15 @@ Load `SKILL_DIR=$(cat .claude-audit/.skill-dir)` and run:
 ```bash
 SKILL_DIR=$(cat .claude-audit/.skill-dir)
 [ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
-python3 "$SKILL_DIR/scripts/validate-egress.py" \
+python3 "$SKILL_DIR/lib/validate-egress.py" \
   .claude-audit/current/phase-02-sinks.json \
   .claude-audit/current/phase-02-credentials.json \
   .claude-audit/current/phase-02-surface.json \
   .claude-audit/current/phase-00-profile.json \
   --source-root . \
   --partition global \
-  --out .claude-audit/current/phase-06-egress.jsonl
+  --out .claude-audit/current/phase-06-egress.jsonl \
+  || { echo "phase-06 §6.19 FAILED (coverage gate or HIGH+ deficit) — resolve before advancing" >&2; exit 1; }
 ```
 
 The script (a) re-extracts egress candidates from source and **FAILS the run if
@@ -448,14 +450,102 @@ turns "the inventory says weak" into "here is the request that proves it".
 > `lib/egress-detection.md`, remain out of mechanical reach and are surfaced as
 > report caveats, never silently.
 
+## 6.20 — Collection-Scoping Reconciliation (v2.5)
+
+**Always runs.** §6.19 asks whether every path that emits a resource's *bytes* is
+gated. This asks a different question that §6.19 structurally cannot: **does the
+query bind rows to the caller?** The handler that motivated this returns JSON, so
+it never entered the sink inventory at all; and its gate *is* consumed — just at
+the wrong granularity.
+
+### Step 1 — deterministic reconciliation + fail-closed coverage gate
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/validate-collection-scoping.py" \
+  .claude-audit/current/phase-02-collections.json \
+  .claude-audit/current/phase-00-profile.json \
+  .claude-audit/current/phase-02-surface.json \
+  --source-root . \
+  --partition global \
+  --out .claude-audit/current/phase-06-collections.jsonl \
+  || { echo "phase-06 §6.20 FAILED (coverage gate or HIGH+ deficit) — resolve before advancing" >&2; exit 1; }
+```
+
+The script (a) re-extracts list-query candidates from the handler files and
+**FAILS the run if any candidate was neither inventoried nor dismissed** in Phase
+2 §2.12 (line-scoped, same discipline as §6.19), and (b) emits one finding per
+scoping deficit via rules C1-C5:
+
+- **C1** — a collection of a sensitive entity with no caller-bound predicate,
+  no filtering visibility helper, and no `public_resources` entry (CWE-1220).
+  `role_restricted` counts as unscoped unless the role is admin-tier.
+  **This is the primary rule.**
+- **C2** — authorization by decoration: a per-row permission computed and
+  attached rather than applied (CWE-863). Write-permission decoration on a
+  collection that was never read-filtered is a finding by construction.
+- **C3** — `coverage: incomplete|caveat`: a fail-closed deficit, surfaced as an
+  open question rather than a silent pass.
+- **C4** — a sibling **test** that asserts another principal's row is *present*
+  (rather than absent/404), especially with a permission field asserted false.
+  High-signal because someone wrote it deliberately: the insecure behaviour is
+  encoded as the expected behaviour, so a correct fix will look like a broken
+  test.
+- **C5** — a `caller_bound`/`visibility_filtered` claim whose `scope_evidence`
+  predicate references no session/user/tenant/org value. The row is rewritten to
+  `unscoped` and C1 then fires. **The inventory cannot launder a false claim.**
+
+The `|| { ...; exit 1; }` guard is not decoration. Without it the only thing
+stopping the run is prose telling the orchestrator to stop, and an orchestrator
+that reads a wall of `!` lines and continues anyway turns a "fail-closed" gate
+into a suggestion. The shell exit is the part that does not depend on the model
+being conscientious.
+
+If the coverage gate fails, return to Phase 2 §2.12 and account for the missing
+candidates. Do not proceed on an incomplete inventory.
+
+### Step 2 — adversarial confirmation (attack, don't summarize)
+
+For each C1/C2 deficit, invoke the **Agent tool** (concurrency cap 8) per
+`(handler, entity)` with a task that is an attack, not a review:
+
+- `description`: `"Collection probe: <entity> via <handler_file>"`.
+- `subagent_type`: `"general-purpose"`. Do NOT pass a `model` parameter.
+- `prompt`: *"Handler `<handler_file>` returns a list of `<entity>` and the
+  reconciliation says its rows are not bound to the caller (`<row_scope>`,
+  gate `<endpoint_gate>`). **Trace the query from construction to response and
+  either (a) produce the concrete request that returns another principal's rows,
+  or (b) prove every row is scoped** by naming the file:line of the predicate —
+  including any base scope, default_scope, tenant-injecting repository, ORM
+  client extension, or database row-level-security policy. Read the actual query
+  builder; do NOT trust the inventory's summary. Return the
+  `verification_probe` (the request an attacker runs + the expected denial) and
+  a confidence: CONFIRMED if you produced a cross-principal read, REFUTED if you
+  found the scope."*
+
+Merge each result back into `phase-06-collections.jsonl`: promote to
+`CONFIRMED` with the probe when the sub-agent constructs a cross-principal read;
+**demote to INFO with the refuting line** when it finds the base scope. Missing a
+base scope is this rule's main false-positive mode, and this pass is what
+retires it.
+
+> Honest framing (carries into the report): a clean §6.20 means every *known*
+> list-query candidate was accounted for and scoped. It is high-signal but
+> **NOT a proof of absence** — a scope applied by an un-modelled mechanism can
+> still be missed in the conservative direction (over-flagging), and a query
+> assembled entirely at runtime is recorded as `coverage: caveat`, never as a
+> silent pass.
+
 ## 6.14 — Emit
 
-Run §6.16-6.19 (web Top 10 roll-up, agentic coverage lens, SSDF meta-check,
-Authorized-Egress reconciliation) after the §6.1-6.13 work, then write all JSONL
-files (including `phase-06-web-top10.jsonl`, `phase-06-agentic-top10.jsonl`, and
-`phase-06-egress.jsonl`), the STRIDE Markdown files, and `phase-06-config.json`
-(the §6.1-6.8 config findings plus the §6.18 `ssdf` meta-check block, in
-structured form). Write `phase-06.done`.
+Run §6.16-6.20 (web Top 10 roll-up, agentic coverage lens, SSDF meta-check,
+Authorized-Egress reconciliation, collection-scoping reconciliation) after the
+§6.1-6.13 work, then write all JSONL files (including
+`phase-06-web-top10.jsonl`, `phase-06-agentic-top10.jsonl`,
+`phase-06-egress.jsonl`, and `phase-06-collections.jsonl`), the STRIDE Markdown
+files, and `phase-06-config.json` (the §6.1-6.8 config findings plus the §6.18
+`ssdf` meta-check block, in structured form). Write `phase-06.done`.
 
 ## 6.15 — Report to user
 
@@ -473,6 +563,7 @@ Before declaring this phase complete and proceeding, run:
 ```bash
 test -f .claude-audit/current/phase-06-config.json  \
   && test -f .claude-audit/current/phase-06-egress.jsonl \
+  && test -f .claude-audit/current/phase-06-collections.jsonl \
   && test -f .claude-audit/current/phase-06.done \
   && echo "phase-06 verified" \
   || { echo "phase-06 INCOMPLETE — re-write artifact(s) + .done marker before proceeding" >&2; exit 1; }

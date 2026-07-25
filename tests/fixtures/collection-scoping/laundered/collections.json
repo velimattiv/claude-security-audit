@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.5.0",
+  "audit_id": "fixture-laundered",
+  "generated_at": "2026-07-25T00:00:00Z",
+  "notes": [
+    "Fixture: an inventory that CLAIMS row scoping it cannot evidence. The whole design depends on an agent populating this file honestly, so the reconciliation must not take the claim on trust: C5 checks the predicate for a caller-derived token and, finding none, rewrites the row to unscoped and lets C1 fire."
+  ],
+  "collections": [
+    {
+      "id": "reports-index",
+      "partition": "server-api",
+      "handler_file": "server/api/reports/index.get.ts",
+      "line": 13,
+      "entity": "Report",
+      "returns": "collection",
+      "row_scope": "caller_bound",
+      "scope_evidence": {
+        "file": "server/api/reports/index.get.ts",
+        "line": 15,
+        "predicate": "and(eq(reports.status, 'published'), isNull(reports.deletedAt))"
+      },
+      "endpoint_gate": "requireAuth(event) — authenticated session",
+      "roles_required": [],
+      "decorates_permission": false,
+      "filters_after_decoration": false,
+      "row_owner_col": "authorId",
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}

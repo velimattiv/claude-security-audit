@@ -102,6 +102,32 @@ CONSTRAINTS (read carefully, all apply):
     Optional but strongly encouraged:
       suggested_fix, code_owner, attack_scenario, remediation_effort.
 
+  - CAPABILITY TAGGING — REQUIRED for categories auth, idor, token_scope and
+    collection_scope; strongly encouraged elsewhere when the finding chains.
+    Grammar and vocabulary: {{skill_dir}}/lib/capability-lexicon.md
+
+      "preconditions":  ["authenticated"],              # [] means anonymous-reachable
+      "postconditions": ["knows:any_deck_id", "reads:any_deck_metadata"]
+
+    preconditions = what an attacker must ALREADY hold. postconditions = what
+    this finding GRANTS (must be non-empty for the four categories above — a
+    finding that grants nothing is not a finding).
+
+    THE RULE THAT MATTERS: if you are about to write a mitigation in prose —
+    "only exploitable if the attacker knows the UUID", "requires an existing
+    session", "assumes the id is unguessable" — STOP and write it as a
+    precondition instead. Phase 7 then checks whether another finding in the
+    same report SUPPLIES that capability; if it does, the mitigation is
+    undischarged and cannot lower your severity. Left in prose, that exact
+    sentence cost 96 days of exposure on a CONFIRMED finding whose own
+    description said "combined with H1..." while H1 was a HIGH two pages up.
+
+    Use the closed verb set (knows / reads / writes / deletes / executes /
+    escalates / impersonates / bypasses / authenticates) and the closed scope
+    set (any / own / other / cross_tenant / self). Inventing vocabulary breaks
+    the join silently — the composer reports orphans, but a chain that never
+    composed is a chain nobody rated.
+
 EXIT:
   When finished, emit only the single JSON RETURN SHAPE object. Nothing
   before or after.

@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "audit_id": "fixture-ratchet-baseline",
+  "skill_version": "2.4.0",
+  "git_head": "fbe04245",
+  "created_at": "2026-03-15T00:00:00Z",
+  "repo_topology": { "kind": "repo", "tool": null, "partitions": ["app"] },
+  "partition_manifest": [],
+  "surface": [],
+  "keystone_files": [],
+  "config": {},
+  "scanner_versions": {},
+  "methodology_coverage": {},
+  "ignored": [],
+  "findings_carryover": [
+    {
+      "fingerprint": "aaaaaaaaaaaa",
+      "title": "Build output bypasses publish-link verification",
+      "severity": "MEDIUM",
+      "confidence": "CONFIRMED",
+      "file": "server/api/decks/[id]/build-output.get.ts",
+      "line": 40,
+      "cwe": "CWE-284",
+      "partition": "app",
+      "first_seen_at": "2026-03-15T00:00:00Z"
+    },
+    {
+      "fingerprint": "bbbbbbbbbbbb",
+      "title": "Asset proxy accepted an unauthenticated branch",
+      "severity": "MEDIUM",
+      "confidence": "CONFIRMED",
+      "file": "server/api/assets/proxy.get.ts",
+      "line": 22,
+      "cwe": "CWE-284",
+      "partition": "app",
+      "first_seen_at": "2026-03-15T00:00:00Z"
+    },
+    {
+      "fingerprint": "cccccccccccc",
+      "title": "Share cookie scoped at Path=/ leaks across shares",
+      "severity": "HIGH",
+      "confidence": "CONFIRMED",
+      "file": "server/api/s/[shortId]/verify.get.ts",
+      "line": 61,
+      "cwe": "CWE-1004",
+      "partition": "app",
+      "first_seen_at": "2026-03-15T00:00:00Z"
+    }
+  ]
+}

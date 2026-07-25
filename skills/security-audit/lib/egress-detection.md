@@ -1,7 +1,7 @@
 # Egress-Sink & Credential Detection — anchor catalogue (v2.4)
 
 This file is the **deterministic ground truth** for the Authorized-Egress analysis
-(`scripts/validate-egress.py`). It enumerates, per framework, the code shapes that
+(`lib/validate-egress.py`). It enumerates, per framework, the code shapes that
 can **emit a resource's bytes to a caller** (egress sinks) and the shapes that
 **mint or consume a credential/claim** (the credential ledger). The extractor in
 `validate-egress.py` greps these anchors to produce a *candidate* set; the Phase-2
@@ -26,6 +26,19 @@ emits sensitive bytes* and check **every branch** of every emitter against the s
 resource's **strongest intended gate** (computed per resource across all paths).
 
 ## Sink kinds (the `kind` enum in `lib/sink-schema.json`)
+
+> **v2.5 — a metadata sink is a sink.** v2.4 admitted only byte-emitting sinks,
+> and that scoping decision is *why* a handler returning a JSON tree of every
+> user's private deck UUIDs, titles and owner rosters never entered this
+> inventory and was never reconciled. Identifiers plus titles were the discovery
+> half of a real incident. The enum now includes `json_collection` (a list of
+> entity rows), `json_metadata` (one row's descriptive fields), and
+> `identifier_list` (bare ids/paths/slugs). **If a surface tells a caller that a
+> resource exists when they should not know it exists, inventory it.**
+> Row-scoping itself is analysed separately by
+> [`collection-schema.json`](collection-schema.json) + §6.20 — the two are
+> complementary, not redundant: §6.19 asks "is this emission gated?", §6.20 asks
+> "are these rows the caller's?".
 
 `file`, `stream`, `db_entity`, `proxy`, `static`, `graphql_field`, `presigned_url`,
 `websocket`, `sse`, `template`, `redirect`, `async_job`, `cdn`.

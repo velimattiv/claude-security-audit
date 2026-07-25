@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "data_model": {
+    "orm": "drizzle",
+    "entities": [
+      { "name": "Report", "id": "Report", "owner_cols": ["authorId"], "pii_cols": [] }
+    ]
+  },
+  "public_resources": []
+}
