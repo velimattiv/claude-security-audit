@@ -55,7 +55,7 @@ as the `phase-specific-method-body`.
     confused-deputy class. Do NOT treat "the identifier (deckId/UUID/token) is
     hard to guess" as a gate — it is handed to clients and is not secret. This
     invariant is checked mechanically by the Phase 6 §6.19 Authorized-Egress
-    reconciliation (`scripts/validate-egress.py`) over the global sink +
+    reconciliation (`lib/validate-egress.py`) over the global sink +
     credential inventories; cat-01 corroborates it per-handler.
 
 ## Detection patterns (polyglot)

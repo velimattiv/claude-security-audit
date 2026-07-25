@@ -8,19 +8,47 @@ A thorough, multi-phase security audit skill for [Claude Code](https://code.clau
 Goes beyond generic vulnerability scanning by enumerating every attack
 surface (HTTP, gRPC, GraphQL, WebSocket, queue consumers, serverless
 handlers, mobile/desktop IPC — polyglot across 60+ frameworks), running an
-OWASP-methodology-tagged scanner bundle, and executing 11 parallel deep-dive
-categories (Auth/Authz, IDOR/BOLA, Token Scope, MITM, Crypto, Secrets,
-Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD, MCP/Agentic).
+OWASP-methodology-tagged scanner bundle, and executing 12 parallel deep-dive
+categories (Auth/Authz, IDOR/BOLA, Token Scope, Collection Scoping, MITM,
+Crypto, Secrets, Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD,
+MCP/Agentic). Severity is **computed** over composed attack paths rather than
+asserted per finding.
 
 **Supported runtime:** Claude Code only. Other harnesses are not supported.
 
 ## Version
 
-- **v2.4.0** (current) — **Authorized-Egress detection**: catches the
+- **v2.5.0** (current) — **Sufficiency & severity arithmetic.** Two gaps, both
+  from a real audit that returned a clean bill for an endpoint disclosing every
+  user's private data to any authenticated caller:
+  - *Gate presence ≠ gate sufficiency.* A new **collection-scoping** category
+    (cat-12) + `phase-02-collections.json` inventory + deterministic
+    reconciliation (`lib/validate-collection-scoping.py`, rules C1–C5, fail-closed
+    coverage) catch BOLA at the **list** level — including the
+    "authorization by decoration" antipattern and tests that pin the insecure
+    behaviour. Rule C5 re-checks the inventory's own scoping claims against
+    source, so a wrong inventory cannot launder a gap into a pass. Phase 1 now
+    **asserts** partition coverage (an unmatched handler directory fails the
+    phase instead of vanishing into a catch-all), and Phase 2 promotes partitions
+    into the deep-dive budget on surface evidence rather than a-priori rank.
+  - *Severity was asserted, not computed.* Findings declare
+    `preconditions`/`postconditions`; `lib/compose-attack-paths.py` composes them
+    into attack paths and re-rates — **R1** undischarged mitigations, **R2**
+    prose that says "combined with X", **R3** unprivileged path to a crown jewel
+    ⇒ CRITICAL, **R4** no silent downgrade across runs. **L1–L3** force action: a
+    CONFIRMED HIGH+ open past 30 days with no fix and no owned, unexpired
+    acceptance fails the run, and Phase 8 refuses to write a baseline while
+    governance failures stand — a downgrade cannot launder itself by re-running.
+  - *Also fixed:* `$SKILL_DIR/scripts/validate-egress.py` never existed in a real
+    install (installation copies only `skills/security-audit/`), so v2.4's
+    flagship control could not run. All audit-time validators now live in
+    `lib/`, with a CI check that every `$SKILL_DIR` reference resolves inside the
+    shipped directory. See `docs/EPIC-v2.5-sufficiency-severity.md` + CHANGELOG.
+- **v2.4.0** — **Authorized-Egress detection**: catches the
   control-with-no-enforcer / confused-deputy / capability-URL class (a credential
   minted at one layer but never enforced on the byte-serving path). A
   path-sensitive egress-sink inventory + credential mint/consume ledger feed a
-  deterministic reconciliation (`scripts/validate-egress.py`, rules R1–R5) with a
+  deterministic reconciliation (`lib/validate-egress.py`, rules R1–R5) with a
   **fail-closed coverage gate** so a silently-omitted sink breaks the run. Design
   was adversarially reviewed before build. Honest scope: reliably catches the
   class + raises recall — a clean run is **not** a proof of absence. See
@@ -98,16 +126,16 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.4.0 \
+git clone --depth 1 --branch v2.5.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.4.0
+cat ~/.claude/skills/security-audit/VERSION   # → 2.5.0
 ```
 
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.4.0 \
+git clone --depth 1 --branch v2.5.0 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -152,7 +180,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.4.0 \
+git clone --depth 1 --branch v2.5.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 

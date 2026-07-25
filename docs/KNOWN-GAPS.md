@@ -76,3 +76,67 @@ New v2.1 deferrals (see `docs/EPIC-v2.1-refresh.md` §4 + `docs/ROADMAP.md`):
 ## Reporting a new gap
 
 If you find a scenario the suite silently passes but should fail, open an issue with `tests/e2e/` label + a minimal repro (a diff that should break something but doesn't). PRs that add tolerated drift to fixtures without a justification paragraph in the fixture's `rationale` are rejected.
+
+---
+
+## v2.5 — collection scoping and severity arithmetic
+
+These gates close specific, observed failures. They are not general solutions,
+and the boundaries below are deliberate rather than aspirational.
+
+### 12. Both reconciliations trust an agent-populated inventory
+`validate-collection-scoping.py` and `validate-egress.py` reconcile an inventory
+that a sub-agent wrote. Rule **C5** (a scoping claim with no caller-derived
+predicate is rewritten to `unscoped`) and **C2b** (a handler with a
+permission-shaped field and no filter, inventoried as un-decorated) re-check the
+two claims most likely to be wrong, and the fail-closed coverage gates make an
+*absent* entry loud. But an agent that mislabels an entity, or records a
+plausible-looking predicate that is not actually applied on the query path, is
+not caught mechanically. **Mitigation available:** the §6.20 adversarial pass
+must name the file:line of the scope it claims to have found; a refutation with
+no line is not a refutation.
+
+### 13. Base scopes are the main false-positive mode
+A `default_scope`, a tenant-injecting repository, a Prisma client extension, or
+database row-level security **is** valid row scoping, and none of them appear in
+the handler. C1 will over-flag when Phase 2 misses one. This is deliberate — the
+failure direction is toward triage, not toward silence — but on a codebase that
+scopes centrally, expect noise on the first run until the scopes are recorded as
+`scope_evidence`. **Not automated:** there is no detector for "a scope exists
+somewhere else".
+
+### 14. Runtime-assembled queries are out of mechanical reach
+A query built by string concatenation at request time, or dispatched through a
+generic query-service abstraction, cannot be statically decided. These are
+recorded as `coverage: caveat` and surfaced in the report. They are **not**
+counted as scoped.
+
+### 15. The composer can only compose what was tagged
+`compose-attack-paths.py` chains `preconditions`/`postconditions`. A capability
+nobody wrote down joins nothing, so a real chain between two untagged findings is
+invisible to R1 and R3. **Mitigations available:** R2 fires on prose that names
+another finding (no tags needed); `--require-capabilities` enforces tags on the
+four access-control categories; the ORPHAN CAPABILITIES report makes a
+half-composed chain visible. None of these makes chain analysis complete — they
+make the gap loud. **A clean gate with a long orphan list is not a clean gate.**
+
+### 16. Personas and crown jewels are derived, not verified
+Phase 0 §0.14 derives them by rule from the profile. If it mis-classifies the
+lowest self-provisionable role as privileged, R3 stops firing for the persona
+that matters most. The composer falls back to capability *patterns* when the
+lexicon is absent, but it cannot detect a lexicon that is present and wrong.
+**Review the persona list in the report** — it is printed for that reason.
+
+### 17. L1's threshold is policy, not physics
+30 days is a default (`--max-age-days`). It is not derived from anything. The
+claim is only that *a* threshold now exists and is enforced mechanically, which
+is strictly more than the previous state, where a CONFIRMED finding aged 96 days
+without any mechanism noticing.
+
+### 18. R4 cannot distinguish a fixed finding from an unlooked-for one
+A HIGH+ that disappears between runs is matched against `--changed-files`. If the
+fix landed in a file the audit did not diff (a config change, an infrastructure
+control, a dependency bump), the run reports `disappeared_unexplained` — a false
+positive that must be closed by recording the reason. The inverse (a finding that
+disappears because Phase 5 silently under-covered) is the failure this accepts
+noise to catch.

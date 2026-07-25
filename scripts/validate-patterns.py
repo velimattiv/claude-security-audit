@@ -63,6 +63,8 @@ CODE_INDICATOR = re.compile(r"""
       | ^\s*\|             # markdown table
       | \{\{                # template placeholder
       | ^\s*\{              # JSON object start
+      | ^\s*"[A-Za-z_][\w.-]*"\s*:   # JSON/JSONC key-value line
+      | ^\s*//              # JSONC / JS comment line
     )
 """, re.VERBOSE)
 

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.5.0",
+  "audit_id": "fixture-omitted",
+  "generated_at": "2026-07-25T00:00:00Z",
+  "notes": [
+    "Fixture: the agent inventoried only the endpoints it found interesting and silently dropped server/api/content/tree.get.ts and server/api/decks/index.get.ts. Run against the tree-bug source-app, the fail-closed coverage gate must make that omission LOUD. Silence is exactly how the original bug survived three separate mechanisms."
+  ],
+  "collections": [
+    {
+      "id": "me-decks",
+      "partition": "server-api",
+      "handler_file": "server/api/me/decks.get.ts",
+      "line": 11,
+      "entity": "Deck",
+      "returns": "collection",
+      "row_scope": "caller_bound",
+      "scope_evidence": {
+        "file": "server/api/me/decks.get.ts",
+        "line": 13,
+        "predicate": "eq(decks.ownerId, session.user.id)"
+      },
+      "endpoint_gate": "requireAuth(event) — authenticated session",
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": [
+    {
+      "candidate": "server/api/products/index.get.ts:8",
+      "reason": "Product is on profile.public_resources — a published catalogue."
+    }
+  ]
+}

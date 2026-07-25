@@ -17,8 +17,11 @@ Dependencies:
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+
+_CAP_GRAMMAR = re.compile(r"^[a-z][a-z0-9_]*(:[a-z0-9_]+)?$")
 
 
 def load_schema(schema_path: Path) -> dict:
@@ -65,7 +68,46 @@ def load_cwe_map(cwe_map_path: Path | None) -> set[str] | None:
     return set(mappings.keys())
 
 
-def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None):
+def capability_errors(lineno: int, finding: dict, require_cats: set[str]) -> list[str]:
+    """Access-control findings must declare what an attacker needs and what they
+    gain, or the Phase-7 attack-path arithmetic has nothing to compose.
+
+    `preconditions` may legitimately be empty (that is the strong claim:
+    anonymous-reachable) but must be PRESENT. `postconditions` must be non-empty
+    — a finding that grants the attacker nothing is not a finding.
+
+    See lib/capability-lexicon.md. The historical cost of leaving this in prose
+    was a CONFIRMED finding rated one rung below the HIGH it chained to, and 96
+    days of exposure."""
+    if not require_cats or finding.get("category") not in require_cats:
+        return []
+    errs = []
+    if "preconditions" not in finding:
+        errs.append(
+            f"line {lineno}: category `{finding.get('category')}` requires "
+            "`preconditions` (use [] for anonymous-reachable) — see "
+            "lib/capability-lexicon.md")
+    post = finding.get("postconditions")
+    if not post:
+        errs.append(
+            f"line {lineno}: category `{finding.get('category')}` requires a "
+            "non-empty `postconditions` — state what the attacker gains "
+            "(e.g. [\"knows:any_deck_id\"]); see lib/capability-lexicon.md")
+    # `<verb>:<scope>_<object>` (knows:any_deck_id, role:reader) OR a bare
+    # state token (authenticated, verified) — personas hold the bare form. The
+    # check exists to reject free prose ("attacker knows the UUID"), which joins
+    # nothing and silently breaks the chain, not to police style.
+    for field in ("preconditions", "postconditions"):
+        for cap in finding.get(field) or []:
+            if not isinstance(cap, str) or not _CAP_GRAMMAR.match(cap):
+                errs.append(
+                    f"line {lineno}: {field} entry {cap!r} is not in the "
+                    "<verb>:<scope>_<object> grammar (lib/capability-lexicon.md)")
+    return errs
+
+
+def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None,
+                             require_cats: set[str] | None = None):
     import jsonschema  # type: ignore
     validator = jsonschema.Draft202012Validator(schema)
     errors = []
@@ -83,13 +125,16 @@ def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None):
                     f"line {lineno}: cwe `{cwe}` not in cwe-map.json "
                     f"(schema pattern allows any CWE-\\d+; semantic check requires map entry)"
                 )
+        errors.extend(capability_errors(lineno, finding, require_cats or set()))
     return errors
 
 
-def validate_manual(schema: dict, findings, cwe_ids: set[str] | None):
+def validate_manual(schema: dict, findings, cwe_ids: set[str] | None,
+                    require_cats: set[str] | None = None):
     """Minimal manual validator used when jsonschema is unavailable.
-    Checks only the top-level `required` list + CWE-in-map when
-    provided. Not a substitute for jsonschema — CI must install it."""
+    Checks only the top-level `required` list + CWE-in-map + capability
+    requirements when provided. Not a substitute for jsonschema — CI must
+    install it."""
     required = schema.get("required", [])
     errors = []
     for lineno, finding in findings:
@@ -103,6 +148,7 @@ def validate_manual(schema: dict, findings, cwe_ids: set[str] | None):
             cwe = finding.get("cwe")
             if cwe and cwe not in cwe_ids:
                 errors.append(f"line {lineno}: cwe `{cwe}` not in cwe-map.json")
+        errors.extend(capability_errors(lineno, finding, require_cats or set()))
     return errors
 
 
@@ -114,6 +160,16 @@ def main():
         type=Path,
         default=None,
         help="Optional path to cwe-map.json. If provided, every finding's `cwe` must exist in the map (semantic check beyond the schema's regex).",
+    )
+    parser.add_argument(
+        "--require-capabilities",
+        default=None,
+        help="Comma-separated categories whose findings MUST carry "
+             "`preconditions` and a non-empty `postconditions` "
+             "(lib/capability-lexicon.md). Phase 5 passes "
+             "auth,idor,token_scope,collection_scope. Without capability tags "
+             "the Phase-7 attack-path arithmetic has nothing to compose, and "
+             "chained findings silently keep their in-isolation severity.",
     )
     parser.add_argument("jsonl", type=Path, help="Path to a findings JSONL file")
     parser.add_argument("--quiet", action="store_true", help="Only emit non-zero exit; no stderr")
@@ -133,11 +189,14 @@ def main():
     findings = list(iter_findings(args.jsonl))
     cwe_ids = load_cwe_map(args.cwe_map)
 
+    require_cats = {c.strip() for c in args.require_capabilities.split(",")
+                    if c.strip()} if args.require_capabilities else set()
+
     try:
-        errors = validate_with_jsonschema(schema, findings, cwe_ids)
+        errors = validate_with_jsonschema(schema, findings, cwe_ids, require_cats)
         backend = "jsonschema"
     except ImportError:
-        errors = validate_manual(schema, findings, cwe_ids)
+        errors = validate_manual(schema, findings, cwe_ids, require_cats)
         backend = "manual-fallback"
         if not args.quiet:
             print(

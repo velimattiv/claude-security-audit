@@ -7,6 +7,142 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.5.0] — 2026-07-25
+
+**Sufficiency & severity arithmetic.** A live v2.4.0 run (all six scanners, no
+degraded mode) returned a clean bill for an endpoint disclosing every user's
+private data to any authenticated caller. Two methodology gaps let that happen,
+and a third defect meant v2.4's flagship control could not run at all from a real
+install. See `docs/EPIC-v2.5-sufficiency-severity.md`.
+
+### Added
+
+- **Collection-scoping reconciliation** (`lib/validate-collection-scoping.py`) —
+  the answer to *gate presence ≠ gate sufficiency*. Rules C1–C5 over a new
+  Phase-2 inventory (`phase-02-collections.json`, `lib/collection-schema.json`)
+  with a fail-closed coverage gate:
+  - **C1** unscoped collection of a sensitive entity (CWE-1220). A `WHERE` clause
+    being present proves nothing — `scope = 'user'` constrains *which* rows, not
+    *whose*. `role_restricted` counts as unscoped unless the role is admin-tier.
+  - **C2** authorization by decoration — a per-row permission computed and
+    attached instead of applied (CWE-863). Write-permission decoration on a
+    collection never read-filtered is a finding by construction.
+  - **C3** `coverage: incomplete|caveat` surfaced as an open question, not a pass.
+  - **C4** a sibling **test** asserting another principal's row is *present*
+    rather than absent/404 — high-signal because it was written deliberately.
+  - **C5** a `caller_bound` claim whose evidence predicate names no
+    session/user/tenant/org value is rewritten to `unscoped`. **The inventory
+    cannot launder a false claim into a pass.**
+- **Deep-dive category 12, `collection_scope`** (`steps/deepdive/cat-12-collection-scoping.md`)
+  — BOLA at the **list** level (API1:2023 + API3:2023, A01:2025). Deliberately a
+  separate category, not a cat-02 subsection: see Fixed below for why cat-02
+  could never have caught it.
+- **Attack-path severity gate** (`lib/compose-attack-paths.py`, Phase 7 §7.15) —
+  severity becomes a **computed** function. `severity_asserted` is retained only
+  as the analyst's opinion.
+  - **R1** a finding's precondition supplied by another finding's postcondition
+    is an *undischarged* mitigation; severity floor = the supplier's. Fixpoint,
+    so multi-hop chains propagate.
+  - **R2** prose matching `combined with|chained|together with|…` that names
+    another finding binds severity ≥ that finding's. Fires with **zero**
+    capability tags — five lines of regex that alone would have caught the
+    historical case.
+  - **R3** any path from an *unprivileged* persona to a crown jewel is CRITICAL,
+    applied via a **backward slice** so bystanders are not escalated.
+  - **R4** severity may not decrease across runs without a `severity_history`
+    entry naming what changed; a HIGH+ that disappears unexplained is itself a
+    finding.
+  - **L1–L3** lifecycle: a CONFIRMED HIGH+ open past `--max-age-days` (default
+    30) with no fix and no owned, unexpired acceptance **fails the run**;
+    acceptance requires owner + live expiry; `verified` requires a regression
+    test id.
+  - **ORPHAN CAPABILITIES** report — preconditions nothing supplies and
+    postconditions nothing consumes. The drift alarm that tells you the gate is
+    quietly inert rather than genuinely clean.
+- **Capability lexicon** (`lib/capability-lexicon.md`, Phase 0 §0.14) — one
+  vocabulary (`<verb>:<scope>_<object>`), project-derived personas and crown
+  jewels, and the containment rule (`any` subsumes narrower scopes).
+- **Partition coverage gate** (`lib/validate-partition-coverage.py`, Phase 1
+  §1.6b) — every non-ignored source file must map to a partition. Unmatched files
+  **fail Phase 1** instead of vanishing into a catch-all. Also reports catch-all
+  partitions and the **deep-dive cut line**, so a budget decision is visible
+  rather than silent.
+- **Evidence-based partition promotion** (Phase 2 §2.13) — a partition holding an
+  unscoped collection or a high-risk surface flag is promoted into the deep-dive
+  budget regardless of its a-priori rank, uncapped by `top_n`.
+- **Surface flags** `RETURNS_OTHER_PRINCIPALS_ROWS` and `PERMISSION_DECORATION`
+  (§2.7). The first dominates the trust-zone weight in §7.4 and vetoes any
+  dev-zone demotion: data breadth outranks a declared zone label.
+- **Finding-schema fields**: `preconditions`, `postconditions`,
+  `severity_asserted`, `severity_computed`, `escalation_rules`,
+  `severity_history[]`, `first_seen_at`, `lifecycle{state,owner,expiry,rationale,fix_commit,verified_by_test}`,
+  `display_id`, `aliases`. Baseline schema carries the same forward.
+- **`validate-findings.py --require-capabilities`** — enforces
+  `preconditions` + non-empty `postconditions` on `auth`, `idor`, `token_scope`,
+  `collection_scope`. Without tags the severity arithmetic silently has nothing
+  to compose.
+- **Tests**: `tests/test-collection-scoping.sh`, `tests/test-attack-paths.sh` and
+  fixtures under `tests/fixtures/{collection-scoping,attack-paths,partition-coverage}/`
+  — including a faithful reproduction of the handler that passed the v2.4 audit.
+  Each gate has a negative control; a gate that fires on everything gets
+  disabled, and a disabled gate catches nothing. Both wired into CI.
+
+### Fixed
+
+- **`$SKILL_DIR/scripts/validate-egress.py` never existed in an install.**
+  Installation copies only `skills/security-audit/`; the repo-root `scripts/`
+  directory is not part of it. v2.4's flagship deterministic control was
+  unreachable at audit time — a control with no enforcer, which is the exact bug
+  class it was written to detect. All audit-time validators now live in
+  `skills/security-audit/lib/`; `scripts/` keeps thin shims so existing
+  invocations, CI, and docs keep working. **New CI step** asserts every
+  `$SKILL_DIR/<path>` referenced in the skill resolves inside the shipped
+  directory.
+- **`validate-findings.py` existed as two byte-divergent copies**, only one of
+  which shipped. Consolidated to one implementation behind a shim.
+- **cat-02's candidate filter made its own list-endpoint invariant
+  unreachable.** It requires a path/query param matching
+  `^(id|[a-z]+Id|[a-z]+_id)$`; a collection route has no id param, so invariant
+  #2 ("list endpoints filter the result set by the authenticated scope") and the
+  "Search / list endpoints" detection pattern could never fire in practice. The
+  scope boundary is now stated explicitly and cross-referenced to cat-12.
+- **`validate-patterns.py` misread JSON/JSONC key-value lines as regexes**
+  (a `["a", "b"]` value looks like a character class). Added JSON-key and
+  comment-line recognition to the code heuristic.
+- **Egress sink inventory admitted only byte-emitting sinks**, so a JSON list of
+  other principals' identifiers never entered `phase-02-sinks.json` and §6.19
+  never evaluated it. `kind` now includes `json_collection`, `json_metadata`,
+  and `identifier_list`.
+
+### Changed
+
+- **Phase 8 refuses to write a baseline** while the §7.15 gate reports unresolved
+  governance failures. This is what makes the ratchet a ratchet: without it, a
+  run carrying an unexplained downgrade would persist that downgrade as the new
+  baseline and the next run would have nothing to compare against. **You cannot
+  launder a downgrade by re-running the audit.**
+- **Phase 8 carries `first_seen_at`, `severity_history[]` and `lifecycle`
+  forward, never resetting them.** Resetting `first_seen_at` silently zeroes a
+  finding's age and disables the L1 gate.
+- Phase 5 fan-out is now **12 categories** (10 always-on). Phase 7 report gains
+  a Collection Scoping section, a Severity Gate section, and an
+  `AUDIT GATE: FAILED` banner that must open the Executive Summary when
+  governance failures stand.
+- Dependency pins refreshed (Dependabot): `actions/checkout` 6.0.3→7.0.1,
+  `actions/setup-python` 6.2.0→7.0.0, `github/codeql-action/{init,analyze}`
+  4.36.2→4.37.3, `debian:bookworm-slim` digest `67b30a6`→`96e378d`.
+
+### Honest scope
+
+A clean C1–C5 run means every *known* list-query candidate was accounted for and
+scoped — **not** that no unscoped path exists. A scope applied by an un-modelled
+mechanism (base scope, tenant-injecting repository, database RLS) is missed in
+the conservative direction and retired by the §6.20 adversarial pass. The
+composer can only compose what was tagged; R2 backstops untagged chains named in
+prose and the orphan list backstops R2. Both reconciliations operate on an
+agent-populated inventory: C5 and the coverage gates make a dishonest or absent
+inventory **loud**, not impossible.
+
 ## [2.4.0] — 2026-06-19
 
 **Authorized-Egress detection** — catch the control-with-no-enforcer /

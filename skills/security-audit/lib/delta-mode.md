@@ -147,6 +147,45 @@ rerun_egress_global = True   # unconditional, every delta run
   `serves_resource` would silently stop joining to `protects_resources` and the
   class would look "fixed". Detect via a diff of `profile.data_model.entities[].id`.
 
+#### 2g — Collection scoping + the severity gate: ALWAYS global (v2.5)
+
+Same reasoning as 2f, for the same reason it applied there. An unscoped
+collection is a **pre-existing** condition, not a delta: the handler that
+disclosed every user's private decks had been wrong since it was written, and
+"nothing in this partition changed" would have carried it forward untouched
+forever.
+
+```
+rerun_collections_global = True   # unconditional, every delta run
+rerun_severity_gate      = True   # unconditional, every delta run
+```
+
+- Phase 2 §2.12 re-enumerates `phase-02-collections.json` **across the whole
+  repo**, even when the surface inventory is partition-scoped.
+- Phase 6 §6.20 (`validate-collection-scoping.py`, incl. the fail-closed coverage
+  gate) **always runs in full**.
+- `category == collection_scope` findings are **never** carried forward via
+  §4; they are recomputed every run.
+- **Entity-rename invalidation** applies identically: a renamed `data_model`
+  entity id would stop joining to `public_resources` and to `owner_cols`,
+  making an unscoped collection look allowlisted. Invalidate all collection
+  findings when any entity id changes.
+
+The **Phase-7 §7.15 severity gate always runs**, over the union of new and
+carried-forward findings — never over the new ones alone. Three of its rules are
+meaningless otherwise:
+
+- **R1** must see a carried-forward enumeration finding to discover that a *new*
+  finding's "only if the id is known" precondition is already supplied.
+- **R4** compares against the baseline by definition.
+- **L1** ages carried-forward findings; a delta run that skipped it would let a
+  finding age past its threshold precisely because nothing near it changed —
+  which is the shape of the 96-day failure, not a defence against it.
+
+Carried-forward findings keep their `first_seen_at`, `severity_history[]` and
+`lifecycle` verbatim (§4). Losing those in carryover silently disables the
+ratchet and the age gate.
+
 ### Step 3 — Scope computation
 
 ```

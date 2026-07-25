@@ -7,7 +7,7 @@
 - `<output_dir>/security-audit-baseline.json` (pruned baseline; checked in)
 - `.claude-audit/current/phase-08.done`
 
-⛔ **SKIP Phase 8 ONLY IF** mode=delta OR `phase-07.done` is absent OR `audit.log` has CRITICAL runtime errors (`findings` CRITICAL-severity is fine and expected — that's the audit's job; the gate is on runtime errors, not findings severity).
+⛔ **SKIP Phase 8 ONLY IF** mode=delta OR `phase-07.done` is absent OR `audit.log` has CRITICAL runtime errors (`findings` CRITICAL-severity is fine and expected — that's the audit's job; the gate is on runtime errors, not findings severity) OR **the §7.15 severity gate reports unresolved governance failures** (v2.5 — see §8.1 gate 4).
 
 📖 In full mode, without a baseline, **delta mode is permanently unavailable to the user**. Skipping Phase 8 when it shouldn't be skipped silently eliminates the sub-minute incremental re-audit capability.
 
@@ -37,6 +37,26 @@ Phase 8 runs **only if**:
 2. Phase 7 completed successfully (`phase-07.done` exists).
 3. No hard errors (gate: count of CRITICAL runtime errors in audit.log
    must be zero; findings CRITICAL-severity is fine and expected).
+4. **The §7.15 severity gate has no unresolved governance failures** (v2.5):
+
+   ```bash
+   blocking=$(jq -r '.governance_blocking // 0' \
+     .claude-audit/current/phase-07-severity-gate.json 2>/dev/null || echo 0)
+   if [ "$blocking" -gt 0 ]; then
+     echo "Phase 8 SKIPPED — $blocking unresolved governance failure(s) (R4/L1-L3)."
+     echo "The existing baseline is left untouched deliberately."
+     exit 0
+   fi
+   ```
+
+   **This is the load-bearing gate, not a formality.** R4 forbids a severity
+   downgrade with no recorded reason — but that rule is worthless if a run
+   carrying an unexplained downgrade is allowed to *persist itself as the new
+   baseline*, because the next run would then have nothing to compare against
+   and the downgrade becomes the truth. Refusing to write a baseline is what
+   makes the ratchet a ratchet: **you cannot launder a downgrade by re-running
+   the audit.** The remedy is to record the reason (or fix the finding), not to
+   re-run until it goes quiet.
 
 If any gate fails, skip Phase 8 and note in `notes[]`. The existing
 baseline (if any) stays untouched.
@@ -99,7 +119,11 @@ Committed to the user's repo. Keeps only:
 - `keystone_files` (paths + reason-count only)
 - `findings_carryover`: finding fingerprints + titles + severities
   (no body, no attack scenarios — users who want the full text read
-  from the full baseline)
+  from the full baseline), **plus `first_seen_at`, `severity_history[]`,
+  `severity_asserted`/`severity_computed`, and `lifecycle`** (v2.5). These are
+  small and they are the ratchet's memory — prune the prose, never the
+  provenance. A pruned baseline without them makes R4 and L1 inert on the next
+  run, which is the failure mode they exist to prevent.
 - `methodology_coverage`
 - `ignored`
 
@@ -108,6 +132,21 @@ multi-MB; the pruned file is lightweight enough to diff in PRs.
 
 ## 8.4 — Write procedure
 
+0. **Carry the lifecycle forward (v2.5) — do this FIRST, and never reset it.**
+   For every finding entering `findings_carryover`, match it to the previous
+   baseline by `fingerprint` and copy forward:
+   - `first_seen_at` — the timestamp of the run that **first** reported this
+     fingerprint. If the previous baseline has one, copy it verbatim. Only when
+     there is no prior match do you set it to this run's `created_at`.
+     **Resetting `first_seen_at` on an existing finding silently zeroes its age
+     and disables the L1 gate** — that single field is the difference between
+     "found this morning" and "open for 96 days".
+   - `severity_history[]` — append-only. Concatenate the prior baseline's
+     entries with any added this run; never truncate or rewrite.
+   - `lifecycle` — carry `state`, `owner`, `expiry`, `rationale`, `fix_commit`,
+     `verified_by_test` forward unless this run has newer information.
+   Also record `severity_asserted` and `severity_computed` alongside `severity`
+   so the next run's R4 check compares like with like.
 1. Read all inputs listed above.
 2. Assemble the full baseline struct in memory.
 3. Validate against `lib/baseline-schema.json` (re-read your JSON).

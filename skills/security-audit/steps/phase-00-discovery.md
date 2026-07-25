@@ -374,6 +374,53 @@ Emit the canonical entity ids at the top level:
 This list is surfaced in the Phase 7 report for human review — it is the one
 place where "we decided this is public" is auditable.
 
+## 0.14 — Capability lexicon (personas + crown jewels) — v2.5
+
+The Phase-7 severity gate (`lib/compose-attack-paths.py`) composes findings into
+attack paths and recomputes severity over them. It needs two project-specific
+inputs, and it needs them expressed in one vocabulary — see
+[`../lib/capability-lexicon.md`](../lib/capability-lexicon.md) for the grammar.
+
+Derive them **by rule, not by taste**, and emit at the top level of the profile:
+
+```json
+{
+  "capability_lexicon": {
+    "personas": {
+      "anonymous":            [],
+      "external_link_holder": ["external:link_holder"],
+      "lowest_tier_user":     ["authenticated", "role:reader"],
+      "authenticated_user":   ["authenticated"]
+    },
+    "unprivileged": ["anonymous", "external_link_holder", "lowest_tier_user"],
+    "crown_jewels": ["reads:any_deck_content", "reads:any_user_pii", "escalates:admin"]
+  }
+}
+```
+
+**Personas.** Always include `anonymous`. Then add one per externally-obtainable
+credential class:
+- a persona per share / capability-URL / 2FA-link mechanism found in §0.11d
+  (holds `external:link_holder`);
+- **the lowest role an outsider can self-provision.** If SSO auto-provisions a
+  role on first login, that role is `lowest_tier_user` and it belongs in
+  `unprivileged` regardless of how the organisation describes it internally.
+  Getting this wrong is what makes an "internal, authenticated-only" endpoint
+  look safe when in practice anyone with a corporate email reaches it.
+
+**Crown jewels.** Emit:
+- `reads:any_<e>_content`, `reads:any_<e>_pii` (when `pii_cols` is non-empty),
+  and `writes:any_<e>` for every `data_model` entity with non-empty `owner_cols`
+  or `pii_cols`, **excluding** anything on `public_resources` (§0.12b);
+- `reads:any_user_pii` when `pii.detected`;
+- `reads:cross_tenant_<x>` when a tenant/org column exists;
+- `escalates:admin`, always.
+
+If you cannot derive these, emit the object with the defaults above and add a
+`notes[]` entry — the composer falls back to built-in patterns, but a
+project-specific list is materially more precise, and a silently-absent lexicon
+is a silently-weakened gate.
+
 ## 0.13 — Ignore list
 
 Produce `ignore.txt` at `.claude-audit/ignore.txt` — patterns downstream

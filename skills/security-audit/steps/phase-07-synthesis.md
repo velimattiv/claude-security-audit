@@ -6,12 +6,15 @@
 - `.claude-audit/current/phase-07-report.md` (full structured human-readable report)
 - `.claude-audit/current/findings.sarif` (SARIF 2.1.0 — see ⚠ below for per-result requirements)
 - `.claude-audit/current/findings.cyclonedx.json` (SBOM, minimal skeleton if no scanner SBOM available)
+- `.claude-audit/current/phase-07-findings-computed.jsonl` (§7.15 — findings with `severity_computed` applied; AUTHORITATIVE input to the report and SARIF)
+- `.claude-audit/current/phase-07-governance.jsonl` (§7.15 — R4/L1-L3 governance findings; empty file if clean)
+- `.claude-audit/current/phase-07-severity-gate.json` (§7.15 — gate summary incl. `blocking`, read by Phase 8)
 - `.claude-audit/current/phase-07.done`
 
 ⚠ **EVERY `results[]` row in the synthetic `security-audit-skill` SARIF run MUST carry these properties:**
 - `properties.security-severity`: CVSS-style numeric string. CRITICAL→`"9.0"`, HIGH→`"7.0"`, MEDIUM→`"5.0"`, LOW→`"3.0"`, INFO→`"1.0"`. Required for the GitHub Security tab.
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required for fixture matching, baseline delta, and GitHub Security tab grouping. Look up the CWE in `lib/cwe-map.json`; if absent, use your best judgement and add an entry in a follow-up.
-- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`.
+- `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `collection_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`.
 
 Per-scanner SARIF runs are copied through verbatim — do NOT rewrite
 scanner results. Scanner CWE lives in `tags[]` / `rule.properties.tags` /
@@ -33,7 +36,9 @@ consolidated SARIF 2.1.0 document, and a CycloneDX SBOM.
 - `phase-05-*.jsonl` (all deep-dive category findings)
 - `phase-06-config.json`, `phase-06-asvs.jsonl`, etc.
 - `phase-06-egress.jsonl` (Authorized-Egress reconciliation findings, §6.19)
+- `phase-06-collections.jsonl` (collection-scoping reconciliation findings, §6.20)
 - `phase-02-sinks.json`, `phase-02-credentials.json` (egress inventories, for the report's coverage counts)
+- `phase-02-collections.json` (collection inventory, for the report's row-scope counts)
 - `phase-00-profile.json`, `partitions.json`, `phase-02-surface.json`
 
 **Outputs.**
@@ -128,9 +133,18 @@ not a stacking modifier.
    | `data_ops ∩ {write, delete, exec} ≠ ∅` | **+1** (promotion) |
    | `trust_zone == "dev"` | **−1** (demotion) |
 
+   | `RETURNS_OTHER_PRINCIPALS_ROWS` on the surface (v2.5) | **+1, and VETOES any demotion** |
+
 2. Sum the signals. If net > 0, promote by exactly one rung. If net
    < 0, demote by one rung. If net == 0, no change. **Regardless of
    magnitude, the adjustment is at most one rung in either direction.**
+
+   **`RETURNS_OTHER_PRINCIPALS_ROWS` dominates the zone weight** (v2.5): when
+   set, the net can never be negative, so a dev-zone label cannot demote a
+   finding on an endpoint that returns other principals' rows. Data breadth
+   outranks a declared trust zone — an "internal" endpoint returning every
+   tenant's rows outranks a "public" endpoint returning one. The ±1 cap still
+   holds; this only removes the demotion, it does not stack a second rung.
 
 3. Bounds: never exceed CRITICAL at the high end; never fall below
    INFO at the low end.
@@ -177,6 +191,9 @@ Build a table for the report:
 | STRIDE | partitions covered | Markdown tables |
 | CWE | unique CWEs seen | N |
 | CWE Top 25 (2025) | hits / 25 (highest-ranked: #R) | N |
+| Authorized-Egress (§6.19) | sinks reconciled / coverage-gate status | N |
+| Collection scoping (§6.20) | collections reconciled by row_scope / coverage-gate status | N |
+| Severity gate (§7.15) | escalations applied; governance failures outstanding | N |
 
 - **OWASP Top 10:2025 (web)** row reads `phase-06-web-top10.jsonl` (§6.16);
   count categories whose `count > 0`. **Agentic (2026)** row reads
@@ -242,6 +259,98 @@ that are still only MEDIUM by the rubric stay MEDIUM but are flagged
 If `grype.json` is absent, skip silently (grype is optional) and note
 "EPSS/KEV: grype not run" in the report's coverage section.
 
+## 7.15 — Severity gate (v2.5) — MANDATORY, runs BEFORE the report is written
+
+**Severity stops being asserted here and starts being computed.**
+
+Everything above rates findings *in isolation*. That is the step that failed: a
+CONFIRMED finding whose own description read *"…if the deck UUID is known.
+Combined with H1, an attacker can identify published decks and access output
+directly"* was filed MEDIUM — while `H1`, a **HIGH in the same document**,
+supplied exactly the capability the mitigation assumed nobody had. It went
+unremediated for 96 days, was downgraded to LOW at the next baseline, and its
+sibling endpoint was affirmatively described as "well-defended (INFO)".
+
+Chain **detection** was not the failure. The chain was written down, in prose, by
+a human. Chain **arithmetic** was. This section is the arithmetic.
+
+### Step 1 — run the gate
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/compose-attack-paths.py" \
+  .claude-audit/current/phase-05-*.jsonl \
+  .claude-audit/current/phase-06-*.jsonl \
+  --profile   .claude-audit/current/phase-00-profile.json \
+  --baseline  .claude-audit/baseline.json \
+  --run-id    "$(jq -r .audit_id .claude-audit/current/phase-00-profile.json)" \
+  --max-age-days 30 \
+  --out          .claude-audit/current/phase-07-governance.jsonl \
+  --rewrite      .claude-audit/current/phase-07-findings-computed.jsonl \
+  --json-summary .claude-audit/current/phase-07-severity-gate.json
+```
+
+(`--baseline` is omitted on a first run — R4 and the lifecycle gates need a prior
+baseline to compare against. Pass `--changed-files` with
+`git diff --name-only <baseline.git_head> HEAD` when a baseline exists, so a
+finding that disappeared because its file changed is explained rather than
+flagged.)
+
+### Step 2 — apply, then converge
+
+Two distinct classes of exit-1, handled differently:
+
+**(a) Escalations (R1/R2/R3) are auto-applicable.** Replace your in-memory
+finding set with `phase-07-findings-computed.jsonl` — it carries
+`severity_computed` (authoritative), `severity_asserted` (the analyst's
+opinion, retained for provenance), an appended `severity_history` entry, and
+`escalation_rules`. **Re-run the gate against the rewritten file.** It must now
+exit 0 on the escalation count. If it does not, you did not apply the rewrite.
+
+**(b) Governance failures (R4, L1-L3) are NOT auto-applicable.** They require a
+human decision — a fix, an owned acceptance, a recorded reason, or a linked
+commit. They must **not** silently disappear:
+
+- The report is still written, but it is **stamped `AUDIT GATE: FAILED` at the
+  top of the Executive Summary**, listing each unresolved governance failure.
+- **Phase 8 does NOT write a baseline** while governance failures stand (see
+  §8.1). This is the load-bearing part: without it, a run that silently
+  downgrades a finding would persist that downgrade as the new baseline, and the
+  next run would have nothing to ratchet against. **You cannot launder a
+  downgrade by re-running.**
+- The skill's exit status is non-zero so CI fails.
+
+### The rules, and the failure each one is for
+
+| Rule | Check | Observed failure it exists for |
+|---|---|---|
+| **R1** | A finding's `precondition` is supplied by another finding's `postcondition` in this same report ⇒ its severity floor is the supplier's. Applied to a fixpoint, so multi-hop chains propagate. | "Only exploitable if the UUID is known" — while a HIGH in the same report handed out the UUIDs. |
+| **R2** | Prose matching `combined with\|chained\|together with\|in combination\|…` that names another finding ⇒ severity ≥ that finding's. | Five lines of regex that **alone** would have escalated M6 in March. Fires even with zero capability tags. |
+| **R3** | Any path from an **unprivileged** persona reaching a **crown jewel** ⇒ CRITICAL — for the findings that actually *contribute* (backward slice), not every finding that happens to be reachable. | A genuinely-MEDIUM cookie-scope bug is CRITICAL once you notice the persona holding it is external. No analyst makes that call by eye across 60+ findings. |
+| **R4** | Severity may not decrease across runs without a `severity_history` entry naming what changed (`fix_commit` / `compensating_control` / `disproven_exploitability` / `rescoped`). A HIGH+ that *disappears* must be matched to a code change or it is itself a finding. | CONFIRMED MEDIUM → LOW → "well-defended (INFO)", while still exploitable. |
+| **L1** | A CONFIRMED HIGH/CRITICAL older than 30 days with no `lifecycle.fix_commit` and no unexpired acceptance ⇒ fail. | The 96-day hole. Detection was never the bottleneck; triage-to-fix was. |
+| **L2** | HIGH+ cannot be `accepted` without a named owner **and** a live expiry. | "The team says it is fine." |
+| **L3** | `verified` requires `verified_by_test`. `fixed` without one is reported. | The fix shipped with no denial test, and a sibling test mocked the very gate it should have pinned — so "fixed" was never mechanically proven, and the class recurred on a different endpoint. |
+
+### Read the ORPHAN CAPABILITIES section
+
+The gate prints preconditions no finding or persona supplies, and postconditions
+that feed nothing. That list is the drift alarm: a chain that should have
+composed and did not, usually because two sub-agents named the same capability
+differently. Reconcile the vocabulary against
+[`../lib/capability-lexicon.md`](../lib/capability-lexicon.md) and re-run — do
+not ignore it. **An empty orphan list is evidence the arithmetic actually ran;
+a long one means the gate is quietly inert.**
+
+### Honest scope
+
+The composer can only compose what was tagged, and a capability nobody wrote
+down joins nothing. R2 is the backstop for untagged chains named in prose, and
+the orphan list is the backstop for the backstop — but neither makes this
+complete. What v2.5 changes is that the failure is now **loud** rather than
+silent, and that a tagged chain can no longer be out-voted by instinct.
+
 ## 7.7 — Emit `phase-07-report.md`
 
 Use the template in `lib/report-template.md`. Sections in order:
@@ -259,6 +368,21 @@ Use the template in `lib/report-template.md`. Sections in order:
    CWE, OWASP ids, description, attack scenario, suggested fix.
 5. **Attack Surface Summary** — from Phase 2, counts by category,
    noteworthy surfaces listed.
+5c. **Collection Scoping (row-level access control)** — from §6.20.
+   Report: collections inventoried by `row_scope`; the fail-closed coverage-gate
+   status; every C1/C2 finding WITH its `verification_probe`; the C4 tests that
+   pin insecure behaviour; and the `public_resources` allowlist again in this
+   context (it is the one place "we decided this is public" is auditable). State
+   the caveat plainly: a clean reconciliation means every *known* list-query
+   candidate was accounted for and scoped — not that no unscoped path exists.
+
+5d. **Severity Gate (computed severity + lifecycle)** — from §7.15.
+   Report: escalations applied with the rule that fired and the from→to rungs;
+   per-persona reachability and any crown jewels reached; unresolved governance
+   failures (R4/L1-L3) as a **blocking** list; and the ORPHAN CAPABILITIES list
+   with a one-line note on what it means. If any governance failure stands, the
+   Executive Summary opens with `AUDIT GATE: FAILED` and Phase 8 is skipped.
+
 5b. **Authorized-Egress (cross-layer access control)** — from §6.19.
    Report: sensitive-resource count (default-deny) + the `public_resources`
    allowlist for human review; egress sinks inventoried + candidates dismissed;
@@ -301,15 +425,24 @@ Every `results[]` item in the synthetic `security-audit-skill` run:
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required
   for fixture matching, baseline carryover, and GitHub Security tab
   grouping. Look up in `lib/cwe-map.json`.
-- `properties.category`: one of the 12 category slugs (`auth`, `idor`, `token_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`). Recommended.
+- `properties.category`: one of the 13 category slugs (`auth`, `idor`, `token_scope`, `collection_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`). Recommended.
 - `properties.cwe_top25_2025_rank` (optional): integer 1–25 when the
   finding's CWE is in the 2025 CWE Top 25 (§7.13).
 - `properties.epss` / `properties.kev` (optional): EPSS probability and
   CISA-KEV flag joined from grype (§7.14). Additive prioritization signals
   only — they never change `level` or `properties.security-severity`.
-- `properties.verification_probe` (optional): for Authorized-Egress findings
-  (§6.19), the JSON `{request, expected, actual}` — the executable proof (the
-  request that should fail). Carry it through verbatim so a triager can run it.
+- `properties.verification_probe` (optional): for Authorized-Egress (§6.19) and
+  collection-scoping (§6.20) findings, the JSON `{request, expected, actual}` —
+  the executable proof (the request that should fail). Carry it through verbatim
+  so a triager can run it.
+- `properties.severity_asserted` / `properties.severity_computed` (v2.5): when
+  they differ, the SARIF `level` and `security-severity` follow **computed**.
+  Emit both so a reader can see that the rating was raised by path arithmetic
+  rather than by opinion, and `properties.escalation_rules` naming which rule
+  fired.
+- `properties.first_seen_at` (v2.5): carried from the baseline. This is what
+  makes an ageing HIGH visible in the GitHub Security tab rather than looking
+  identical to one found this morning.
 
 **Scanner-run results.** Per-scanner SARIF runs (semgrep, trivy, etc.)
 emit CWE in scanner-specific locations — `tags[]`, `rule.properties.tags`,

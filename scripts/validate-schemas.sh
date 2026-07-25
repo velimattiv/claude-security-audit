@@ -239,6 +239,31 @@ else
   note "tests/fixtures/egress absent — skipped"
 fi
 
+# --- 7d. Collection-scoping fixtures vs collection schema (v2.5) ------------
+echo
+echo "[7d] Collection-scoping fixtures (collection schema)..."
+if [ -d tests/fixtures/collection-scoping ]; then
+  csch="skills/security-audit/lib/collection-schema.json"
+  while IFS= read -r cf; do
+    [ "$(basename "$cf")" = "collections.json" ] || continue
+    if python3 -c "
+import json, sys
+try:
+    import jsonschema
+except ImportError:
+    sys.exit(0)
+jsonschema.Draft202012Validator(json.load(open('$csch'))).validate(json.load(open('$cf')))
+" 2>/dev/null; then
+      pass
+    else
+      fail "collection fixture $cf failed schema validation against $csch"
+    fi
+  done < <(find tests/fixtures/collection-scoping -type f -name '*.json')
+  note "collection fixtures validated"
+else
+  note "tests/fixtures/collection-scoping absent — skipped"
+fi
+
 # --- 8. CWE / A##:2025 tag-pair mapping ------------------------------------
 # Guards the tag-mismap class both v2.1 adversarial rounds caught: a
 # hand-authored "CWE-N / A##:2025" pairing that every other validator passed
