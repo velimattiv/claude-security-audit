@@ -457,7 +457,8 @@ assert not m.predicate_binds_caller("eq(decks.scope, 'session')")
 for d in ("    @property", "    @cached_property", "    @Input()"):
     assert not m._NEXT_HANDLER_RE.search(d), d
 for d in ("    @action(detail=True)", "    @api_view(['GET'])",
-          "    @staticmethod\n    def get(request):"):
+          "    @staticmethod\n    def get(request):",
+          "    @app.route('/x')", "@router.get('/y')", "    @bp.route('/z')"):
     assert m._NEXT_HANDLER_RE.search(d), d
 PYEOF
 then ok "comment stripping line-scoped; only route decorators bound C2b"

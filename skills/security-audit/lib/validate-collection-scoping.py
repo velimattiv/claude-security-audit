@@ -915,7 +915,11 @@ _NEXT_HANDLER_RE = re.compile(
     r"|^\s+@(?:action|api_view|route|get|post|put|patch|delete|head|options"
     r"|require_http_methods|require_GET|require_POST|csrf_exempt|login_required"
     r"|permission_classes|renderer_classes|authentication_classes)\b"
-    r"|^\s+@(?:staticmethod|classmethod)\s*\n\s*(?:async\s+)?def\b",
+    r"|^\s+@(?:staticmethod|classmethod)\s*\n\s*(?:async\s+)?def\b"
+    # Dotted route decorators: @app.route, @bp.route, @router.get/post/...
+    # (Flask blueprints, FastAPI routers). Anchored to the verb so it can never
+    # widen back into matching @property or @Input().
+    r"|^\s*@\w+\.(?:route|get|post|put|patch|delete|head|options)\b",
     re.MULTILINE)
 
 _COMMENT_LINE_RE = re.compile(r"^\s*(//|#|\*|/\*)")
