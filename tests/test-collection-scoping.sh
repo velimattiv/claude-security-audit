@@ -427,13 +427,41 @@ assert not m.predicate_binds_caller("eq(decks.scope, 'session')")
 assert not m.predicate_binds_caller("eq(decks.scope,'user')")
 
 # A decorated indented member is a handler boundary even with no self
-# (@staticmethod / @action / @api_view are real DRF idioms).
-assert m._NEXT_HANDLER_RE.search("    @staticmethod")
+# (@action / @api_view are real DRF idioms). R7 narrowed this from a bare
+# `@\w+` — which matched @property inside the current handler — to decorators
+# that actually register a handler, plus @staticmethod when a def follows.
+assert m._NEXT_HANDLER_RE.search("    @staticmethod\n    def get(request):")
 assert m._NEXT_HANDLER_RE.search("    @action(detail=True)")
+assert not m._NEXT_HANDLER_RE.search("    @property")
 assert not m._NEXT_HANDLER_RE.search("    def format_row(row):")
 PYEOF
 then ok "literal scanner handles escapes/apostrophes; decorated handlers bound C2b"
 else bad "R6 regression (literal scanning / decorated handler boundary)"
+fi
+
+# --- 4t. R7: comment stripping is line-scoped; decorators are route-scoped ---
+if python3 - <<'PYEOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+
+# R7-F1: a trailing comment must blank to end of LINE. Blanking to end of string
+# erased the .where() two lines below in a fluent chain.
+chain = ["const rows = await db.select().from(decks) // active connection",
+         "  .where(and(eq(decks.userId, session.user.id), isNull(decks.deletedAt)))"]
+assert m.predicate_binds_caller(m._statement_at(chain, 0)), "comment ate the chain"
+assert not m.predicate_binds_caller("eq(decks.scope, 'session')")
+
+# R7-F2: only handler-REGISTERING decorators bound C2b. A bare @\w+ matched
+# @property / @Input() inside the current handler and truncated the window.
+for d in ("    @property", "    @cached_property", "    @Input()"):
+    assert not m._NEXT_HANDLER_RE.search(d), d
+for d in ("    @action(detail=True)", "    @api_view(['GET'])",
+          "    @staticmethod\n    def get(request):"):
+    assert m._NEXT_HANDLER_RE.search(d), d
+PYEOF
+then ok "comment stripping line-scoped; only route decorators bound C2b"
+else bad "R7 regression (comment overreach / decorator boundary too broad)"
 fi
 
 # --- 5. schema conformance --------------------------------------------------

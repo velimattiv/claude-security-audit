@@ -524,8 +524,15 @@ def _strip_literals(text):
             i += 1
             continue
         if c == "#" or (c == "/" and i + 1 < n and t[i + 1] == "/"):
-            out.append(" " * (n - i))       # line comment
-            break
+            # To end of LINE, not end of string: _statement_at returns multi-line
+            # method chains, and blanking the whole remainder erased the
+            # `.where(eq(..., session.user.id))` two lines below a trailing
+            # comment — reporting a correctly-scoped collection as unscoped.
+            eol = t.find("\n", i)
+            stop = n if eol == -1 else eol
+            out.append(" " * (stop - i))
+            i = stop
+            continue
         out.append(c)
         i += 1
     return "".join(out)
@@ -901,9 +908,14 @@ _NEXT_HANDLER_RE = re.compile(
     r"|^(?:async\s+)?def\s+\w+\s*\("
     r"|^\s+(?:async\s+)?def\s+\w+\s*\(\s*(?:self|cls)\b"
     # A decorated member of a view class is a handler even when it takes no
-    # self (@staticmethod, @action, @api_view). Decoration is the real signal;
-    # requiring `self` was over-narrow.
-    r"|^\s+@\w[\w.]*\s*(?:\(|$)",
+    # self. But `@\w+` matched @property / @cached_property / @Input() sitting
+    # INSIDE the current handler and truncated the search window — the same bug
+    # the column-0 rule fixed for `const`. Restrict to decorators that actually
+    # register a handler, plus @staticmethod/@classmethod when a def follows.
+    r"|^\s+@(?:action|api_view|route|get|post|put|patch|delete|head|options"
+    r"|require_http_methods|require_GET|require_POST|csrf_exempt|login_required"
+    r"|permission_classes|renderer_classes|authentication_classes)\b"
+    r"|^\s+@(?:staticmethod|classmethod)\s*\n\s*(?:async\s+)?def\b",
     re.MULTILINE)
 
 _COMMENT_LINE_RE = re.compile(r"^\s*(//|#|\*|/\*)")

@@ -218,8 +218,23 @@ mechanism rather than its reasoning:
   `self`/`cls` — the signal that distinguishes a class-based-view handler from a
   local helper.
 
-**Round 6** re-verified round 5's fixes and returned no new HIGH or MEDIUM:
-**CONVERGED at HIGH=0, MEDIUM=0.**
+**Rounds 6 and 7** each returned HIGH=0 with two MEDIUMs — at the bar both
+times, and fixed rather than shipped at the ceiling. Round 6: the literal regex
+had no escape handling and paired a prose apostrophe with an unrelated quote;
+the indented-`def` boundary required `self`, missing `@staticmethod` handlers.
+Round 7: comment stripping blanked to end of *string* rather than end of *line*,
+erasing the `.where()` two lines below in a fluent chain; and a bare `@\w+`
+decorator boundary matched `@property` / `@Input()` inside the current handler.
+Every one of these is the **false-positive** direction — a correctly-scoped
+collection reported as unscoped, which a human closes — never a silent pass.
+
+**Round 8** re-verified round 7's fixes: **CONVERGED at HIGH=0, MEDIUM=0.**
+
+The trajectory across eight rounds (6H/4M → 4H/5M → 2H/3M → 1H/2M → 1H/1M →
+0H/2M → 0H/2M → 0H/0M) is itself the argument for the two-round minimum being a
+floor: **six** of the eight rounds found a defect introduced by the previous
+round's fix, and every HIGH after round 1 was a regression rather than an
+original miss.
 
 One round-1 finding was **refuted with evidence** rather than fixed: the claimed
 `_ID_TOKEN` ReDoS is linear (0.0 / 0.1 / 1.2 ms at 400 / 4k / 40k chars) because
