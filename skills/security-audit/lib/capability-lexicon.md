@@ -52,19 +52,49 @@ Examples:
 | `escalates:admin` | The attacker gains an administrative principal. |
 | `bypasses:rate_limit` | The attacker is no longer throttled. |
 | `impersonates:any_user` | The attacker acts as an arbitrary user. |
+| `denies:any_attribution_processing` | The attacker stops a process from completing for principals other than themselves. |
+| `corrupts:any_ledger_record` | The attacker makes a record other principals rely on silently wrong. |
 
 ## 2. Verbs (closed set)
 
 `knows` · `reads` · `writes` · `deletes` · `executes` · `escalates` ·
-`impersonates` · `bypasses` · `authenticates`
+`impersonates` · `bypasses` · `authenticates` · `denies` · `corrupts`
 
 `knows` is the enumeration/discovery verb and is the single most under-tagged
 capability in real audits — it is exactly what `H1` granted and exactly what
 `M6` needed. **A finding that leaks identifiers grants `knows:`; tag it.**
 
+`denies` and `corrupts` (v2.6) are the **availability** and **integrity**
+verbs, and they exist because the first nine are all confidentiality verbs.
+Every one of them describes the attacker learning or changing something *they*
+can see. A calibrated run missed a HIGH in which an uncapped provisioning call
+lets a developer mint over 500 empty instances that displace every real one
+from a downstream fixed-size 500-row scan — an estate-wide **silent
+attribution stop**. Nothing is disclosed, nothing errors, and with no verb for
+it the chain composed to nothing and was never rated. See
+[`../steps/deepdive/lens-availability-integrity.md`](../steps/deepdive/lens-availability-integrity.md).
+
+Discriminator, because they are easy to confuse:
+
+- **`denies:`** — the operation **stops**. Work is not done; rows are not
+  processed; the request never completes for the victim.
+- **`corrupts:`** — the operation **completes with the wrong answer**. A
+  record downstream systems trust is silently incomplete. This is worse than
+  `denies:` in almost every case: a stopped process gets noticed, a wrong
+  number gets used.
+
+Both take the normal `<scope>_<object>` tail. Prefer an object naming the
+*process or record damaged* (`_processing`, `_record`, `_ledger`,
+`_attribution`), not the row the attacker created — the row is the
+`writes:` postcondition of the *other* half of the chain.
+
 Synonyms are normalised by `compose-attack-paths.py` (`read`→`reads`,
 `list`/`enumerate`/`discover`→`knows`, `modify`→`writes`, `rce`→`executes`,
-`privesc`→`escalates`, …) but write the canonical form.
+`privesc`→`escalates`, …) but write the canonical form. `denies` and
+`corrupts` have **no synonym entries yet** — `deny`, `starve`, `exhaust`,
+`truncate` and `corrupt` will not normalise, so writing the canonical form is
+not a style preference here, it is the difference between a chain and an
+orphan.
 
 ## 3. Scopes (closed set)
 
@@ -110,6 +140,14 @@ regardless of how the org describes it internally.
 - `reads:any_user_pii` whenever `profile.pii.detected`.
 - `reads:cross_tenant_<x>` whenever a tenant/org column exists.
 - `escalates:admin` always.
+- **`corrupts:any_<e>_record` for every entity that is a system of record for a
+  process outside its own service** — billing, attribution, reconciliation,
+  audit, compliance export, usage metering. The test is not "is this data
+  sensitive" but "does something outside this codebase act on it as if it were
+  true". Every crown jewel above is a confidentiality jewel; a report whose
+  jewel list has no integrity entry cannot rate an integrity chain above the
+  severity its individual legs were asserted at, which is precisely how the
+  silent-attribution-stop HIGH went unrated.
 
 **R3 is the rule that does the work:** any path from an *unprivileged* persona
 that reaches a crown jewel is **CRITICAL**, regardless of how its parts were

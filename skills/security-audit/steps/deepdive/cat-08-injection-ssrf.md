@@ -9,6 +9,13 @@
 **Baseline CWEs:** 20, 22, 77, 78, 79, 89, 91, 94, 434, 502, 601, 611, 776,
 918, 943, 1321.
 
+> **Cross-cutting lens — apply it here.**
+> [`lens-availability-integrity.md`](lens-availability-integrity.md). Every
+> rule in this file traces attacker-controlled *content* into a dangerous
+> sink. The lens traces attacker-controlled **volume** into a bounded consumer
+> — well-formed input, valid every time, in a quantity that silently truncates
+> something downstream. File its findings under `injection`.
+
 ---
 
 ## Invariants

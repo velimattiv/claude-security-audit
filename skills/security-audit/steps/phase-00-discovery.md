@@ -374,6 +374,46 @@ Emit the canonical entity ids at the top level:
 This list is surfaced in the Phase 7 report for human review — it is the one
 place where "we decided this is public" is auditable.
 
+## 0.13 — Ignore list
+
+Produce `ignore.txt` at `.claude-audit/ignore.txt` — patterns downstream
+phases (especially Phase 5 greps) must respect. Seed with:
+
+```
+# Standard ignores
+.git/
+node_modules/
+dist/
+build/
+target/
+.venv/
+venv/
+__pycache__/
+vendor/
+.next/
+.nuxt/
+.output/
+coverage/
+.pytest_cache/
+.tox/
+
+# Generated code markers (add if detected)
+**/*.generated.*
+**/*.pb.go
+**/*_pb2.py
+**/*.d.ts
+openapi-codegen/
+
+# Test fixtures (matched by dir)
+**/testdata/
+**/fixtures/
+**/__fixtures__/
+**/test-fixtures/
+```
+
+Append project-specific additions based on what you discovered in 0.3 (monorepo
+ignore paths) and 0.9 (build outputs).
+
 ## 0.14 — Capability lexicon (personas + crown jewels) — v2.5
 
 The Phase-7 severity gate (`lib/compose-attack-paths.py`) composes findings into
@@ -416,52 +456,100 @@ credential class:
 - `reads:cross_tenant_<x>` when a tenant/org column exists;
 - `escalates:admin`, always.
 
+**Integrity crown jewels (v2.6).** Every jewel rule above is a
+*confidentiality* rule. Also emit `corrupts:any_<e>_record` for each entity
+that is a **system of record for a process outside its own service** —
+billing, attribution, reconciliation, metering, audit, compliance export. The
+test is not "is this data sensitive" but "does something outside this codebase
+act on it as if it were true". Without at least one integrity jewel, rule R3
+cannot rate an availability/integrity chain above whatever its individual legs
+were asserted at — which is exactly how a HIGH-severity estate-wide silent
+attribution stop went unrated in the calibrated run. See
+[`../lib/capability-lexicon.md`](../lib/capability-lexicon.md) §2 and
+[`deepdive/lens-availability-integrity.md`](deepdive/lens-availability-integrity.md).
+
 If you cannot derive these, emit the object with the defaults above and add a
 `notes[]` entry — the composer falls back to built-in patterns, but a
 project-specific list is materially more precise, and a silently-absent lexicon
 is a silently-weakened gate.
 
-## 0.13 — Ignore list
+## 0.15 — Design records (decision-record deference) — v2.6
 
-Produce `ignore.txt` at `.claude-audit/ignore.txt` — patterns downstream
-phases (especially Phase 5 greps) must respect. Seed with:
+**Why this is a discovery step and not a Phase-5 step.** A deep-dive sub-agent
+is scoped to a partition and told not to read outside it. Decision records
+live at the repo root, in `docs/`, or in a `doc/architecture/decisions/`
+directory that belongs to no partition — so an agent that should defer to one
+will never see it unless Phase 0 puts the path in the profile. In the
+calibrated run, the report filed a deliberate, documented asymmetry as a theme
+(*"The asymmetry **is** the finding"*) while the project's own ratified record
+named the compensating control. Acting on the remediation would have added a
+call that cannot fire, against the design record.
 
+**Locate, do not read.** Phase 0's budget is ≤30 file reads; this step is
+path probes plus one or two greps. Record where the records are and what they
+are about. Phase 5 §5.13 reads the one it needs.
+
+Probe, in this order:
+
+| Source | Signal |
+|---|---|
+| ADR directories | `docs/adr/**`, `doc/architecture/decisions/**`, `**/adr/**`, `**/decisions/**`, `adr/**` |
+| RFC directories | `docs/rfcs/**`, `rfcs/**`, `**/RFC-*.md` |
+| Design docs | `docs/design/**`, `docs/architecture/**`, `DESIGN.md`, `ARCHITECTURE.md`, `DECISIONS.md` |
+| Security model | `SECURITY.md`, `docs/threat-model*`, `docs/security-model*` |
+| Inline markers | one ripgrep for `by design\|deliberate\|intentional\|SECURITY NOTE\|ADR-[0-9]\|see RFC` over source and migration files |
+
+For each **file** hit, read only its first ~15 lines: enough for the title and
+a `Status:` / `## Status` line. For each **inline** hit, record `file:line` and
+the matched line verbatim. Do not summarise a record you have not read — a
+paraphrase of a decision record is worse than a path to it.
+
+Emit at the top level:
+
+```json
+{
+  "design_records": {
+    "detected": true,
+    "records": [
+      {
+        "path": "docs/adr/0007-region-scoping.md",
+        "title": "Region scoping is enforced at write, not at read",
+        "status": "accepted",
+        "topics": ["region scoping", "reconciliation"]
+      }
+    ],
+    "inline_markers": [
+      {"file": "db/migrations/0031_rls.sql", "line": 42,
+       "text": "-- by design: 'admin' bypasses the region predicate; see ADR-0007"}
+    ],
+    "evidence": ["docs/adr/", "db/migrations/0031_rls.sql:42"]
+  }
+}
 ```
-# Standard ignores
-.git/
-node_modules/
-dist/
-build/
-target/
-.venv/
-venv/
-__pycache__/
-vendor/
-.next/
-.nuxt/
-.output/
-coverage/
-.pytest_cache/
-.tox/
 
-# Generated code markers (add if detected)
-**/*.generated.*
-**/*.pb.go
-**/*_pb2.py
-**/*.d.ts
-openapi-codegen/
+`status` is `accepted` / `proposed` / `superseded` / `unknown`, taken verbatim
+from the document. **It is load-bearing.** The Phase-5 burden shift in §5.13
+applies only to a record that is *ratified*: a `proposed` ADR argues for an
+asymmetry, it does not ratify one, and a `superseded` one ratifies nothing at
+all. When no status line exists, `unknown` — do not upgrade a document to
+`accepted` because it reads as though someone meant it.
 
-# Test fixtures (matched by dir)
-**/testdata/
-**/fixtures/
-**/__fixtures__/
-**/test-fixtures/
-```
+`topics` is a short list of free-text subject keywords lifted from the title
+and headings, so a Phase-5 agent can tell in one line whether a record is
+plausibly about its finding without opening it.
 
-Append project-specific additions based on what you discovered in 0.3 (monorepo
-ignore paths) and 0.9 (build outputs).
+Absent ⇒ `{"detected": false, "records": [], "inline_markers": []}`.
 
-## 0.14 — Emit the profile
+> **Honest scope, stated plainly because this field can be misused in both
+> directions.** A record's *absence* does not make an asymmetry a finding, and
+> a record's *presence* does not make one safe. All that changes is who
+> carries the burden: with a ratified record naming a compensating control,
+> an analyst asserting that the asymmetry **is** the finding must rebut the
+> record explicitly (§5.13). This field must never become a blanket dismissal
+> — "there's an ADR" is not a refutation, and a refutation of a real defect is
+> the most expensive error this skill makes.
+
+## 0.16 — Emit the profile
 
 Write the merged JSON to `.claude-audit/current/phase-00-profile.json` and
 the done-marker to `.claude-audit/current/phase-00.done`.
@@ -471,8 +559,8 @@ check every required field is populated or explicitly null).
 
 Report to the user:
 > Phase 0 complete — detected <primary language + framework>, <topology
-> kind>, <N entities>, LLM usage: <yes/no>, PII: <yes/no>. Proceeding to
-> partition + risk rank.
+> kind>, <N entities>, LLM usage: <yes/no>, PII: <yes/no>, design records:
+> <N>. Proceeding to partition + risk rank.
 
 ---
 
