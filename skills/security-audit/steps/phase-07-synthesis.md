@@ -522,7 +522,7 @@ Build a table for the report:
 
 | Methodology | Coverage | Findings tagged |
 |---|---|---|
-| ASVS 5.0 L2 | X% (pass / fail / n.a.) | N |
+| ASVS 4.0.3 L2 | X% (pass / fail / n.a.) | N |
 | OWASP Top 10:2025 (web) | K/10 categories fired (A01..A10) | N |
 | API Top 10 (2023) | per-category counts | N |
 | LLM Top 10 (2025) | per-category counts (or N/A) | N |
