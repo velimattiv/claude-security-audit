@@ -1,7 +1,28 @@
-# OWASP ASVS 5.0 Level 2 — Checklist Reference
+# OWASP ASVS 4.0.3 Level 2 — Checklist Reference
 
 Companion to `steps/phase-06-config.md §6.9`. One sub-agent per top-level
 category walks its sub-items and emits JSONL status rows.
+
+> **Version correction (v2.6).** This file was headed *"OWASP ASVS 5.0
+> Level 2"* from v2.1 through v2.5 while its body enumerated **4.0.3's**
+> chapter set — `V4 Access Control`, `V6 Stored Cryptography`,
+> `V13 API and Web Service`, and so on. ASVS 5.0.0 (May 2025)
+> renumbered every chapter; under 5.0, `V6` is *Authentication* and
+> `V8` is *Authorization*. So the label and the content named different
+> standards, and every `ASVS-V*.*.*` id the skill emits — including the
+> ones hardcoded in `lib/validate-collection-scoping.py` and the
+> `steps/deepdive/cat-*.md` headers — is a **4.0.3** id.
+>
+> The honest fix is the label, not the content: the mapping targets, the
+> emitted ids and the whole downstream tag surface are 4.0.3 and are
+> internally consistent as 4.0.3. Retitling makes the file true today.
+> Migrating the *content* to 5.0's 17 chapters is a real piece of work
+> (it renumbers every emitted id and every deepdive cross-reference) and
+> is tracked as its own item in `docs/ROADMAP.md`, not smuggled in here.
+>
+> Do **not** re-label this file to 5.0 without renumbering the body.
+> That is the exact move that produced a report which had to caveat its
+> own ASVS claim.
 
 **License / attribution.** The ASVS standard is published by OWASP under
 CC-BY-SA-4.0. This file restates the L2 category topics for the sub-agent
@@ -9,11 +30,12 @@ prompt; the canonical IDs and text live at
 `https://github.com/OWASP/ASVS`. Phase 7 synthesis links back to the
 OWASP source in the report footer.
 
-The categories below use ASVS 5.0 numbering. If the OWASP project
-re-numbers, update this file in lockstep — coverage tracking depends on
-ID stability.
+The categories below use **ASVS 4.0.3** numbering. If this file is ever
+migrated to a different edition, update the emitted ids in lockstep —
+coverage tracking depends on ID stability, and a mixed-edition tag set is
+worse than either edition alone.
 
-## Categories (17 top-level)
+## Categories (14 top-level in 4.0.3: V1–V14)
 
 ### V1 — Architecture, Design & Threat Modeling
 Primarily for design review; few grep-detectable items. Sub-agent scans
@@ -29,10 +51,16 @@ for `threat-model`/`THREAT`/`architecture` docs and tags their presence.
 - V2.7 Out of Band Verifier
 - V2.8 Single or Multi-Factor One-Time Verifier
 - V2.9 Cryptographic Software
-- V2.10 Service Authentication
-- V2.11 Storage of Secrets
+- V2.10 Service Authentication (incl. storage of integration secrets)
 
 Sub-agent reads `profile.auth.*` + cat-01 findings; maps to V2.*.
+
+> The sub-item lists in this file are a **curated subset** chosen for
+> static-analysis reach, not the complete 4.0.3 requirement set. The
+> canonical list is at `https://github.com/OWASP/ASVS`. A sub-item absent
+> here was not judged N/A — it was not enumerated. (v2.5 and earlier
+> carried a `V2.11 Storage of Secrets` entry that does not exist in
+> 4.0.3; removed.)
 
 ### V3 — Session Management
 - V3.1 Fundamental Session Management
@@ -127,9 +155,26 @@ Maps to entire Phase 2 surface inventory.
 
 Maps to §6.1 CORS, §6.2 headers, §6.8 CI, cat-07 deployment.
 
-### V15-V17
-Reserved / lower priority for automated audit. Sub-agent lists any
-relevant files discovered but rarely produces findings.
+### V15–V17 — DO NOT EXIST IN 4.0.3
+ASVS 4.0.3 ends at **V14**. Earlier versions of this file described
+V15–V17 as "reserved / lower priority", which read as a real-but-quiet
+part of the standard; they are not part of it at all. (ASVS **5.0** does
+define 17 chapters — but with entirely different numbering, so those are
+not these.)
+
+`steps/phase-06-config.md §6.9` still dispatches **17** slots and
+hard-fails when it does not get 17 per-category files, so slots 15–17
+remain in the fan-out for contract compatibility. Each of them MUST emit
+exactly one row and nothing else:
+
+```json
+{"asvs_id":"V15","status":"N/A","message":"not defined in ASVS 4.0.3 (this file's edition)","severity":"INFO"}
+```
+
+Collapsing the fan-out from 17 slots to 14 requires editing §6.9's count
+check and is tracked in `docs/ROADMAP.md`. Do not silently emit findings
+against V15–V17 — a finding tagged to a chapter that does not exist is
+unverifiable by anyone reading the report.
 
 ## Sub-agent invocation (per category)
 
@@ -141,6 +186,10 @@ Invoke one sub-agent per V* category (above). Each:
   {"asvs_id":"V2.4.1","status":"PASS","file":"lib/auth/hash.ts","line":14,"message":"Argon2id 19MiB, 2 iterations — meets 2026 OWASP baseline","severity":"INFO"}
   ```
   Valid `status` values: `PASS | FAIL | N/A | MANUAL_REVIEW`.
+- `asvs_id` values are **ASVS 4.0.3** ids. Findings carry them as
+  `owasp_ids[]` entries of the form `ASVS-V2.4.1`, matching the ids
+  already hardcoded across `steps/deepdive/cat-*.md` and
+  `lib/validate-collection-scoping.py`. Do not mix editions.
 
 Concurrency cap: same 8-agent cap as Phase 5. Some categories (V11
 Business Logic) are nearly always MANUAL_REVIEW; don't fan out those.
