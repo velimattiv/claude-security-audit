@@ -232,6 +232,7 @@ whether anyone attacked it, and how much to trust the fix. Split them.
 | 1.3 | Gate capability minting on a *verified* unscoped determination; record per-tag provenance so a chain built on heuristic tags is visible in ORPHAN CAPABILITIES | `lib/validate-collection-scoping.py:610-617`, `lib/compose-attack-paths.py` | B3 |
 | 1.4 | **Evidence-aware escalation** — see §2.1 below for the full resolution | `lib/compose-attack-paths.py:813-819`, `steps/phase-07-synthesis.md:121-123,137-139`, `lib/finding-schema.json`, `lib/report-template.md` | B3, §1.5 inflation |
 | 1.5 | The report may **never** print a band mixing attacked-mechanical with unattacked-judgement findings. Report reading order by `evidence_class`, not by `attacked` | `lib/report-template.md`, `steps/phase-07-synthesis.md` | B1 |
+| 1.6 | **The L1 age gate was keyed on the same broken label.** `compose-attack-paths.py:563` fired only on `confidence == "CONFIRMED"` HIGH+ findings — so the gate that exists to stop a real finding rotting for 96 days pointed at the 9.6%-true population and skipped the 92.1%-true one. Re-key on `evidence_class`, excluding only `heuristic_inventory`. *(Found during Wave 0 implementation; not in the calibration analysis.)* | `lib/compose-attack-paths.py:563` | B1, second consumer |
 
 **Decided:** we do **not** extend adversarial confirmation to the deep-dives.
 That was the alternative on the table; §1.5 E1 is direct evidence that refutation

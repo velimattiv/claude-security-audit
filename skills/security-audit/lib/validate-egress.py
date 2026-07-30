@@ -365,7 +365,15 @@ def reconcile(sinks_doc, creds_doc, surface_doc, profile_doc, partition):
         f = {
             "id": f"{partition}:egress:{seq:04d}",
             "severity": sev,
-            "confidence": "CONFIRMED",
+            # v2.6: was hardcoded "CONFIRMED" — asserted at EMISSION, before
+            # anything had been attacked, on every row this file produces. The
+            # R-rules measured 19.8% true over a calibrated run. LIKELY is the
+            # honest ceiling for a rule reconciling an agent-written inventory;
+            # the §6.19 adversarial pass may still refute it, and `attacked`
+            # (not `confidence`) is where that outcome now lands.
+            "confidence": "LIKELY",
+            "evidence_class": "heuristic_inventory",
+            "rule_family": f"validate-egress:{rule}",
             "category": cat,
             "partition": partition,
             "file": file or "<unknown>",
@@ -374,7 +382,7 @@ def reconcile(sinks_doc, creds_doc, surface_doc, profile_doc, partition):
             "owasp_ids": owasp,
             "title": title[:120],
             "description": desc[:800],
-            "sources": [{"kind": "scanner", "detail": f"validate-egress.py:{rule}"}],
+            "sources": [{"kind": "heuristic", "detail": f"validate-egress.py:{rule}"}],
             "remediation_effort": "small",
         }
         if probe:

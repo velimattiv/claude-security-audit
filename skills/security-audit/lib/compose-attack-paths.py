@@ -100,6 +100,39 @@ def smax(a, b):
     return a if sidx(a) >= sidx(b) else b
 
 
+# --- Evidence class (v2.6) --------------------------------------------------
+#
+# `confidence` conflated three orthogonal things: where the row came from,
+# whether anyone attacked it, and how sure we are. A calibrated run measured the
+# cost — CONFIRMED findings were 9.6% true, unlabelled ones 92.1% — because the
+# label only ever recorded WHICH PHASE emitted the row. evidence_class records
+# the first of those three explicitly so the other two stop borrowing its
+# authority.
+
+#: The only class that earns the §7.4 +1 severity promotion. A heuristic over an
+#: inventory a sub-agent WROTE is not a scanner, whatever its output looks like.
+PROMOTABLE_EVIDENCE = {"external_scanner"}
+
+#: Excluded from the L1 age gate: too noisy to nag about. Everything else is
+#: eligible, which is the v2.6 widening — see the L1 comment below.
+_L1_EXCLUDED_EVIDENCE = {"heuristic_inventory"}
+
+
+def evidence_class(f):
+    """Best-effort read of a finding's evidence class.
+
+    Falls back to `agent_judgement` rather than to a promotable class, so a row
+    from an older run or a sub-agent that has not been updated cannot inherit a
+    promotion it never earned. Fail-safe direction: toward NOT promoting.
+    """
+    ec = (f or {}).get("evidence_class")
+    return ec if isinstance(ec, str) and ec else "agent_judgement"
+
+
+def _l1_eligible(f):
+    return evidence_class(f) not in _L1_EXCLUDED_EVIDENCE
+
+
 # --- Capability normalisation ----------------------------------------------
 # One vocabulary or the chain silently breaks. See lib/capability-lexicon.md.
 _VERB_SYNONYMS = {
@@ -462,6 +495,11 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
             "id": f"governance:methodology:{seq:04d}",
             "severity": severity,
             "confidence": "CONFIRMED",
+            # v2.6: governance rows assert facts about the audit's own artifacts,
+            # not about the target. They are deterministic, but they are NOT an
+            # external scanner and must not earn the §7.4 +1 promotion.
+            "evidence_class": "governance",
+            "rule_family": f"governance:{rule}",
             "category": "methodology",
             "partition": "global",
             "file": file or "docs/security-audit-output/security-audit-report.md",
@@ -560,7 +598,16 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
                      remediation_effort="trivial")
 
         # --- L1: age gate. The 96-day hole.
-        if sidx(sev) >= SEV_IDX["HIGH"] and f.get("confidence") == "CONFIRMED":
+        #
+        # v2.6: keyed on evidence_class, NOT on confidence. v2.5 required
+        # `confidence == "CONFIRMED"`, and a calibrated run showed CONFIRMED was
+        # 9.6% true while unlabelled (agent_judgement) findings were 92.1% true —
+        # because only phase-06 ever set the label. So the gate that exists to
+        # stop a real finding rotting for 96 days fired on the least reliable
+        # population and skipped the most reliable one. Excluding only
+        # heuristic_inventory keeps the gate off the noisy mechanical families
+        # while pointing it at the findings it was written for.
+        if sidx(sev) >= SEV_IDX["HIGH"] and _l1_eligible(f):
             first_seen = (parse_ts(f.get("first_seen_at"))
                           or parse_ts((base or {}).get("first_seen_at"))
                           or (bcreated if base else None))

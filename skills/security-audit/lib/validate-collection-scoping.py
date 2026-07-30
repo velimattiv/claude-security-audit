@@ -624,6 +624,13 @@ def _finding(seq, partition, rule, severity, confidence, cwe, owasp, title,
         "id": f"{partition}:{category}:{seq:04d}",
         "severity": severity,
         "confidence": confidence,
+        # v2.6: this reconciler is a heuristic over an inventory a sub-agent
+        # WROTE, not a scanner. Declaring itself `scanner` is what let §7.3's
+        # "scanners are mechanical ground truth" rule hand this family a
+        # CONFIRMED label and a +1 severity rung; measured true-positive rate of
+        # the C-rules over a calibrated run was 1.4%.
+        "evidence_class": "heuristic_inventory",
+        "rule_family": f"validate-collection-scoping:{rule}",
         "category": category,
         "partition": partition,
         "file": file,
@@ -632,7 +639,7 @@ def _finding(seq, partition, rule, severity, confidence, cwe, owasp, title,
         "owasp_ids": owasp,
         "title": title[:120],
         "description": description[:800],
-        "sources": [{"kind": "scanner",
+        "sources": [{"kind": "heuristic",
                      "detail": f"validate-collection-scoping.py:{rule}"}],
     }
     f.update(extra)
