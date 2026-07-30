@@ -407,9 +407,12 @@ traded one failure mode for another and fails this gate.
 
 ### 3.2 Regression — the recall floor
 
-The 17 mechanical findings the triage returned REAL or ACCEPTED_RISK, by rule and
-site. After the Wave 2b re-cast they become annex legs rather than findings, but
-**every one of these sites must still appear somewhere in the output**:
+The 17 mechanical **findings** the triage returned REAL or ACCEPTED_RISK, at **13
+distinct sites** — several sites produced an R2 and an R3 row at the same line,
+so the finding count and the site count are not the same number and the table
+below is keyed on sites. After the Wave 2b re-cast these become annex legs rather
+than findings, but **every one of these sites must still appear somewhere in the
+output**:
 
 | rule | site | what it is |
 |---|---|---|
