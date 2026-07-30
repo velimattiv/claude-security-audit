@@ -1,0 +1,7 @@
+{
+  "candidates": [
+    {"file": ".output/nitro/chunks/handler.mjs", "line": 3, "kind": "db_entity"},
+    {"file": "tmp/vendored-clone/server/api/leak.get.ts", "line": 9, "kind": "db_entity"},
+    {"file": "server/api/ok.get.ts", "line": 5, "kind": "db_entity"}
+  ]
+}

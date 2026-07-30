@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "STORY 4.3 FIXTURE — the class the calibrated run missed ENTIRELY and the",
+    "triagers rated CRITICAL. A repo-steerable state directory made a hook write a",
+    "live OAuth access token into an attacker's own working tree. There is no network",
+    "call anywhere in that path, so no v2.5 egress rule could see it.",
+    "The two sinks below are the SAME writeFileSync call with the same 0600 mode and",
+    "differ only in `path_control`. That is the whole point: the discriminator is who",
+    "chooses the path, not whether it is a file. `own_config` is story 2.5's benign",
+    "case and must stay silent; `repo` must be CRITICAL."
+  ],
+  "sinks": [
+    {
+      "id": "hook:sink:own-state",
+      "sink_file": "plugin/hooks/session-start.mjs",
+      "line": 31,
+      "kind": "file",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OAuthAccessToken",
+      "destination": "local_fs",
+      "path_control": "own_config",
+      "reachable_via": ["SessionStart hook"],
+      "guarded_paths": [
+        {
+          "branch_id": "persist-default",
+          "condition": "no state dir override configured",
+          "enforced_gate": "none — writeFileSync(mode 0o600) under $XDG_STATE_HOME, a path the device owns",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "hook:sink:steerable-state",
+      "sink_file": "plugin/hooks/session-start.mjs",
+      "line": 64,
+      "kind": "file",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OAuthAccessToken",
+      "destination": "local_fs",
+      "path_control": "repo",
+      "reachable_via": ["SessionStart hook"],
+      "guarded_paths": [
+        {
+          "branch_id": "persist-override",
+          "condition": "the repository's .claude/settings.json sets stateDir",
+          "enforced_gate": "none — writeFileSync(mode 0o600) under the path the repository named",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}

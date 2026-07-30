@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "STORY 2.6 FIXTURE — two resources, one asserting the cap fires and one asserting",
+    "it does NOT. CostCentre is protected by request-scoped Postgres RLS GUCs the",
+    "inventory agent classified as kind `capability`. _KIND_RANK mapped `capability`",
+    "to GATE_VERIFIED (3) — a rank only the keywords 2fa|mfa|otp|verif|step-up can",
+    "reach — in an application with no step-up auth anywhere, so every resource those",
+    "GUCs touched got floor 3 and the CORRECTLY GATED branch was filed HIGH.",
+    "SessionShare is the control: a real rank-3 gate text IS observed for it, so the",
+    "cap must not apply and its ungated branch must still be CRITICAL. A cap that",
+    "silenced both would have traded one failure mode for another."
+  ],
+  "sinks": [
+    {
+      "id": "cc:sink:list",
+      "sink_file": "server/api/admin/cost-centres.get.ts",
+      "line": 151,
+      "kind": "json_collection",
+      "framework": "Nitro",
+      "serves_resource": "CostCentre",
+      "reachable_via": ["/api/admin/cost-centres"],
+      "guarded_paths": [
+        {
+          "branch_id": "scoped",
+          "condition": "always",
+          "enforced_gate": "tenant ownership enforced by the RLS policy on the org path",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "share:sink:bytes",
+      "sink_file": "server/api/share/[id].get.ts",
+      "line": 60,
+      "kind": "file",
+      "framework": "Nitro",
+      "serves_resource": "SessionShare",
+      "reachable_via": ["/api/share/{id}"],
+      "intended_gate": "step-up 2FA email verification before the share is released",
+      "guarded_paths": [
+        {
+          "branch_id": "verified",
+          "condition": "valid __share_sv cookie",
+          "enforced_gate": "step-up 2FA email verification",
+          "serves_bytes": true
+        },
+        {
+          "branch_id": "legacy-link",
+          "condition": "a legacy share link exists",
+          "enforced_gate": "none (link exists)",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}
