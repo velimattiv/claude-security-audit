@@ -18,7 +18,34 @@ asserted per finding.
 
 ## Version
 
-- **v2.5.0** (current) — **Sufficiency & severity arithmetic.** Two gaps, both
+- **v2.6.0** (current) — **Calibrated severity.** The first release measured
+  against ground truth: eight security engineers triaged all 263 HIGH-or-above
+  findings from a v2.5.0 full-mode run against the real code (255 verdicts), and
+  recorded 34 defects the audit missed. The headline result was that the audit's
+  own confidence marker was **anti-correlated with truth** — `CONFIRMED` findings
+  were 9.6% true, unlabelled ones 92.1% — because only one phase ever set the
+  label, so it recorded *which phase emitted the row* rather than trustworthiness.
+  - *Evidence is typed.* `confidence` is split into `evidence_class`,
+    `attacked` and `fix_confidence`. Only an external scanner earns a severity
+    promotion; this skill's own reconcilers declare `sources[].kind = "heuristic"`
+    and can no longer inherit the "scanners are mechanical ground truth" rule.
+  - *Mechanical rules enumerate, they do not conclude.* The R/C families were 60%
+    of HIGH+ findings and 15% of the true ones, and surfaced no unique CRITICAL —
+    but they did enumerate one defect class's nine legs at exact line
+    granularity. They are now **annexed** to the judgement finding they restate,
+    carrying its fix surface and no severity of their own.
+  - *The composer stops escalating blind.* R3 chain escalation stays uncapped —
+    that is the point of v2.5 — but is suppressed when a load-bearing member is
+    `structurally_unreachable` **with a cited line**, and every suppression is
+    printed rather than silently applied.
+  - *Findings must enumerate their siblings.* The majority of the 34 misses were
+    the second, third and fourth site of a defect found once. `sibling_sites: []`
+    is now a claim backed by the pattern that was run, not a silent omission.
+  - Plus the precision repairs behind those numbers: tagged-template-aware
+    predicate scoring, layer-typed egress joins, and three shipped
+    silent-corruption bugs whose combined effect was 64 phantom coverage failures
+    masking 136 real gaps. See [docs/EPIC-v2.6-calibrated-severity.md](docs/EPIC-v2.6-calibrated-severity.md).
+- **v2.5.0** — **Sufficiency & severity arithmetic.** Two gaps, both
   from a real audit that returned a clean bill for an endpoint disclosing every
   user's private data to any authenticated caller:
   - *Gate presence ≠ gate sufficiency.* A new **collection-scoping** category
@@ -129,16 +156,16 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.5.0 \
+git clone --depth 1 --branch v2.6.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.5.0
+cat ~/.claude/skills/security-audit/VERSION   # → 2.6.0
 ```
 
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.5.0 \
+git clone --depth 1 --branch v2.6.0 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -183,7 +210,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.5.0 \
+git clone --depth 1 --branch v2.6.0 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 
