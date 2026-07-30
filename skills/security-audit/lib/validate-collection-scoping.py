@@ -42,12 +42,17 @@ TWO RESPONSIBILITIES (same shape as validate-egress.py)
       any row whose `coverage` is "incomplete". A silent omission must break the
       run, never pass quietly.
 
-  (B) RECONCILIATION (C1-C5). Emit finding-schema JSONL:
+  (B) RECONCILIATION (C1-C6). Emit finding-schema JSONL:
       C1  unscoped collection of a sensitive entity (the primary rule)
       C2  authorization by decoration — permission computed per row, never used to filter
       C3  incomplete/caveat coverage (fail-closed deficit, surfaced not swallowed)
       C4  a TEST pins the insecure behaviour (asserts another principal's row is present)
       C5  claimed row-scoping with no caller-derived predicate (anti-laundering)
+      C6  scope_evidence cites a predicate that is not at the cited line
+          (methodology — the CITATION is wrong, which is a different claim from
+          C5's "there is no predicate", and split from it in v2.6 after 9 of 14
+          sampled false positives turned out to be correctly-scoped handlers
+          whose predicate lived one frame up the call stack)
 
 Findings carry `preconditions`/`postconditions` per lib/capability-lexicon.md so
 compose-attack-paths.py can chain them. That wiring is the point: an unscoped
@@ -131,7 +136,32 @@ _CALLER_TOKENS = (
     "created_by", "tenantid", "tenant_id", "orgid", "org_id",
     "organizationid", "organization_id", "accountid", "account_id",
     "workspaceid", "workspace_id", "membership", "acl", "visible_to",
+    # Postgres row-level security carries the caller in a session GUC.
+    # `app.user…` / `rls.user…` / `request.jwt…` (PostgREST) are the same shape
+    # as `req.user` and `ctx.user` above — an application-namespaced handle on
+    # the authenticated principal — and in an RLS-scoped query they are the ONLY
+    # form the caller takes. These entries cover the UNQUOTED appearances
+    # (`SET app.user_id = …`, `set_config`, `request.jwt.claims`); the quoted
+    # form needs _RLS_GUC_RE below, because the GUC name is a string literal.
+    "app.user", "rls.user", "request.jwt",
 )
+
+# The RLS-GUC pre-pass. `current_setting('app.user_teammate_id', true)` is the
+# canonical Postgres way to say "the caller", and the caller's identity is
+# spelled INSIDE A SINGLE-QUOTED LITERAL — precisely what _strip_literals is
+# built to discard, and rightly so for `eq(decks.scope, 'session')`. The v2.6
+# calibration run measured every RLS-scoped handler in the corpus scoring as
+# NOT caller-bound for exactly this reason, so C5 fired and C1 followed it.
+# predicate_binds_caller therefore scores this shape on the RAW text, before any
+# literal is blanked.
+#
+# Matched by PREFIX, not by "any current_setting": `current_setting('app.tenant_mode')`
+# or `current_setting('statement_timeout')` says nothing about who is calling,
+# and treating them as caller-binding would be a fail-open on the identity
+# question this whole file exists to ask.
+_RLS_GUC_RE = re.compile(
+    r"current_setting\s*\(\s*['\"]\s*(?:app\.user|rls\.user|request\.jwt)",
+    re.IGNORECASE)
 
 # Permission-shaped field names — the "authorization by decoration" signature.
 _PERMISSION_FIELD_RE = re.compile(
@@ -486,12 +516,41 @@ def _tokenize(text):
     return [t for t in re.split(r"[^a-z0-9]+", spaced.lower()) if t]
 
 
-def _strip_literals(text):
-    """Blank string literals and line comments, preserving length.
+# A backtick opens a TAGGED template when the previous non-whitespace character
+# can end an expression — an identifier char, `$`, `)` or `]`. That one character
+# is the whole difference between sql`…` (a query: CODE, and the only place a raw
+# SQL predicate is ever written in TypeScript) and Error(`…`) (a message: DATA).
+_TAG_END_RE = re.compile(r"[A-Za-z0-9_$)\]]")
 
-    A quoted value is data, never a caller reference: without this,
-    `eq(decks.scope, 'session')` scores caller-bound because the component
-    splitter discards the quotes and `session` becomes an ordinary token.
+# ...unless that identifier is a KEYWORD, which is not a callable. `return
+# `session expired`` ends in an identifier char and would otherwise be read as a
+# tag application — preserving a message template as code, and scoring the word
+# `session` in it as a caller reference. That is the fail-OPEN direction: a
+# spurious "this predicate binds the caller" suppresses C1 on a real gap.
+_TEMPLATE_KEYWORDS = frozenset({
+    "return", "throw", "typeof", "void", "delete", "await", "yield", "new",
+    "in", "of", "instanceof", "case", "do", "else", "default", "extends",
+})
+
+
+def _is_tagged(t, i):
+    """Is the backtick at t[i] a template TAG application rather than a bare
+    template literal?"""
+    k = i - 1
+    while k >= 0 and t[k].isspace():
+        k -= 1
+    if k < 0 or not _TAG_END_RE.match(t[k]):
+        return False
+    j = k
+    while j >= 0 and (t[j].isalnum() or t[j] in "_$"):
+        j -= 1
+    # `)` / `]` leave this slice non-empty and non-keyword, so `f(x)`…`` and
+    # `arr[0]`…`` stay tagged.
+    return t[j + 1:k + 1] not in _TEMPLATE_KEYWORDS
+
+
+def _scan_quoted(t, i, n, out):
+    """Blank the '…' or "…" literal starting at t[i]; return the index past it.
 
     Hand-scanned rather than regex-alternated, for two reasons a naive
     `'[^']*'` gets wrong:
@@ -499,29 +558,103 @@ def _strip_literals(text):
       - an UNTERMINATED quote (a prose apostrophe in a trailing comment) must be
         treated as an ordinary character, not paired with the next unrelated
         quote further along — which would blank everything between and erase a
-        genuine caller reference.
-    Residual ambiguity is documented in docs/KNOWN-GAPS.md #23."""
-    t = str(text)
-    n = len(t)
-    out = []
-    i = 0
+        genuine caller reference."""
+    q = t[i]
+    j = i + 1
+    while j < n:
+        if t[j] == "\\":
+            j += 2
+            continue
+        if t[j] == q:
+            out.append(" " * (j - i + 1))   # properly closed literal
+            return j + 1
+        j += 1
+    out.append(" ")                         # unterminated: a bare apostrophe
+    return i + 1
+
+
+# Templates and `${…}` interpolations nest, and _scan_template/_scan_code recurse
+# into each other to follow them. The input is source from the repo under audit,
+# so the nesting depth is not ours to bound: ~500 levels overflows the Python
+# stack, and an uncaught RecursionError kills the whole fail-closed gate rather
+# than failing it. Past this depth the body is simply blanked (the more-findings
+# direction), which is the right way to be wrong about `${`${`${…`.
+_TEMPLATE_MAX_DEPTH = 24
+
+
+def _scan_template(t, i, n, out, depth=0):
+    """Render the template literal opening at t[i]; return the index just past
+    its closing backtick.
+
+    Before v2.6 the backtick sat in the same delimiter set as `'` and `"`, so the
+    ENTIRE body of a tagged template was blanked. The calibration run measured
+    what that costs: a correctly scoped Drizzle query written as
+
+        tx.execute(sql`SELECT * FROM t WHERE teammate_id = ${session.teammateId}`)
+
+    scored as having NO caller predicate — predicate_binds_caller tokenises the
+    stripped text and derives its `components` list from the same stripped text,
+    so both matching paths were blinded at once. Two rules follow:
+
+      - a `${…}` interpolation is ALWAYS code, in either kind of template. It is
+        the single most common way a caller value reaches a query;
+      - a TAGGED body is code too. sql`…` is a query, not a message.
+
+    An UNTAGGED body stays blanked: it is a data literal, and `` `session
+    expired` `` thrown from an Error must never score as caller-bound.
+
+    Nested `'…'` INSIDE a tagged body is still blanked. "A tagged body is code"
+    does not make the SQL string literals inside it data-free — sql`… WHERE
+    scope = 'session'` is this file's founding bug wearing a template."""
+    exhausted = depth >= _TEMPLATE_MAX_DEPTH
+    tagged = _is_tagged(t, i) and not exhausted
+    buf = [" "]                             # the opening backtick
+    j = i + 1
+    while j < n:
+        c = t[j]
+        if c == "\\":                       # an escaped ` or ${ does not delimit
+            chunk = t[j:j + 2]
+            buf.append(chunk if tagged else " " * len(chunk))
+            j += len(chunk)
+            continue
+        if c == "`":
+            buf.append(" ")
+            out.extend(buf)
+            return j + 1
+        if c == "$" and j + 1 < n and t[j + 1] == "{" and not exhausted:
+            buf.append("${")
+            j = _scan_code(t, j + 2, n, buf, stop_brace=True, depth=depth + 1)
+            continue
+        if tagged:
+            if c in "'\"":
+                j = _scan_quoted(t, j, n, buf)
+                continue
+            buf.append(c)
+            j += 1
+            continue
+        buf.append(" ")
+        j += 1
+    # Unterminated: treat the backtick as a stray character and let the caller
+    # rescan from i+1, rather than pairing it with something far away — same
+    # reasoning as the prose apostrophe above, and `buf` is discarded unread.
+    out.append(" ")
+    return i + 1
+
+
+def _scan_code(t, i, n, out, stop_brace=False, depth=0):
+    """Render CODE from t[i:n] into `out`; return the index it stopped at.
+
+    With stop_brace=True this is scanning the inside of a `${…}` interpolation
+    and stops just past the `}` that closes it. `depth` is the template nesting
+    level, bounded by _TEMPLATE_MAX_DEPTH."""
+    braces = 0
     while i < n:
         c = t[i]
-        if c in "'\"`":
-            j = i + 1
-            while j < n:
-                if t[j] == "\\":
-                    j += 2
-                    continue
-                if t[j] == c:
-                    break
-                j += 1
-            if j < n:                       # properly closed literal
-                out.append(" " * (j - i + 1))
-                i = j + 1
-                continue
-            out.append(" ")                 # unterminated: a bare apostrophe
-            i += 1
+        if c in "'\"":
+            i = _scan_quoted(t, i, n, out)
+            continue
+        if c == "`":
+            i = _scan_template(t, i, n, out, depth=depth)
             continue
         if c == "#" or (c == "/" and i + 1 < n and t[i + 1] == "/"):
             # To end of LINE, not end of string: _statement_at returns multi-line
@@ -533,8 +666,37 @@ def _strip_literals(text):
             out.append(" " * (stop - i))
             i = stop
             continue
+        if stop_brace:
+            if c == "{":
+                braces += 1
+            elif c == "}":
+                if braces == 0:
+                    out.append(c)
+                    return i + 1
+                braces -= 1
         out.append(c)
         i += 1
+    return i
+
+
+def _strip_literals(text):
+    """Blank string literals and line comments, preserving length.
+
+    A quoted value is data, never a caller reference: without this,
+    `eq(decks.scope, 'session')` scores caller-bound because the component
+    splitter discards the quotes and `session` becomes an ordinary token.
+    Template literals are the exception the v2.6 calibration forced; see
+    _scan_template.
+
+    LENGTH PRESERVATION IS LOAD-BEARING, not tidiness: _statement_at hands this
+    function text taken at real source offsets, so every branch of every scanner
+    here emits exactly as many characters as it consumes.
+    tests/test-collection-scoping.sh asserts it over the whole truth table.
+
+    Residual ambiguity is documented in docs/KNOWN-GAPS.md #23."""
+    t = str(text)
+    out = []
+    _scan_code(t, 0, len(t), out)
     return "".join(out)
 
 
@@ -548,6 +710,13 @@ def predicate_binds_caller(text):
     are the expensive direction here, so the match is anchored to whole tokens."""
     if not text:
         return False
+    # PRE-PASS, before any literal is blanked. Postgres RLS spells the caller's
+    # identity inside a single-quoted GUC name, so by the time _strip_literals
+    # has run — correctly, for `eq(decks.scope, 'session')` — the only evidence
+    # of caller binding in an RLS-scoped query is gone. Nothing downstream can
+    # recover it, which is why this runs first rather than as another token.
+    if _RLS_GUC_RE.search(str(text)):
+        return True
     text = _strip_literals(text)
     toks = _tokenize(text)
     if not toks:
@@ -607,8 +776,29 @@ def preconditions_for(gate_text, roles):
     return pre
 
 
-def postconditions_for(entity, meta, returns):
+def postconditions_for(entity, meta, returns, unscoped):
+    """What the attacker WALKS AWAY WITH — gated on the scoping determination.
+
+    `unscoped` must be a determination, not a guess. Until v2.6 this function
+    took none: it synthesised `knows:any_<e>_id`, `reads:any_<e>_metadata` and
+    `reads:any_<e>_pii` from the entity NAME and the profile's `pii_cols` for
+    every inventoried row, scoped or not. The calibration run measured the cost:
+    47% of all capability tags in the composition graph originated here, and 31
+    of 44 false HIGH+ C-rule findings carried a `reads:*_pii` they had not
+    earned. Those tags do not merely inflate their own finding — R1/R3 compose
+    them, so a manufactured `reads:any_x_pii` escalated the finding's NEIGHBOURS,
+    including true ones, to CRITICAL. A capability nobody proved is worse than a
+    capability nobody wrote down: the first corrupts every chain it touches.
+
+    When the collection IS row-scoped the caller still walks away with their own
+    rows, so the honest tag is the `own`-scoped one. It is non-empty (findings in
+    the access-control categories must be — lib/capability-lexicon.md §5) and it
+    cannot escalate anything: the containment rule flows `any` -> narrower, never
+    `own` -> `any`. For a `public_allowlisted` collection it is an understatement
+    rather than an overstatement, which is the safe direction here."""
     e = str(entity).lower().replace(" ", "_").replace("-", "_")
+    if not unscoped:
+        return [f"reads:own_{e}_metadata"]
     post = [f"knows:any_{e}_id", f"reads:any_{e}_metadata"]
     if returns == "tree":
         post.append(f"knows:any_{e}_path")
@@ -647,7 +837,8 @@ def _finding(seq, partition, rule, severity, confidence, cwe, owasp, title,
 
 
 def reconcile(collections_doc, profile, surface_doc, partition, source_root=None):
-    """Rules C1-C5. Returns (findings, notes)."""
+    """Rules C1-C3, C5, C6. Returns (findings, notes). (C4 needs the test corpus
+    and runs separately in test_pinned_findings.)"""
     findings, notes = [], []
     rows = (collections_doc or {}).get("collections", [])
     ents = entity_index(profile)
@@ -667,15 +858,14 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
         if not roles and surf:
             roles = surf.get("roles_required") or []
         pre = preconditions_for(gate, roles)
-        post = postconditions_for(entity, meta, returns)
         sensitive = (not is_public(entity, profile)) and returns != "single"
 
-        # --- C5: a scoping CLAIM with no caller-derived predicate is not scoping.
+        # --- C5/C6: a scoping CLAIM the source does not support is not scoping.
         claimed = scope in ("caller_bound", "visibility_filtered")
         if claimed:
             ev = r.get("scope_evidence") or {}
             pred = ev.get("predicate", "")
-            fabricated = False
+            miscited = False
             # Read the cited location whenever we can, and judge on the SOURCE,
             # not on the claim. Only falling back to source when `predicate` was
             # empty meant any non-empty string was trusted outright — an agent
@@ -699,30 +889,79 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
             if actual:
                 if pred and _tokenize(pred) and not _subseq(_tokenize(pred),
                                                             _tokenize(actual)):
-                    fabricated = True
+                    miscited = True
                 # The source at the cited line is the authority either way.
                 pred = scored
-            if fabricated or not predicate_binds_caller(pred):
+
+            # Two DIFFERENT claims, split in v2.6 because they were sharing one
+            # finding shape and one severity while needing opposite follow-ups:
+            #
+            #   C6  the inventoried predicate string is not a token subsequence
+            #       of the cited source window — the CITATION is wrong;
+            #   C5  the source at the cited line binds no caller value at all —
+            #       there is NO PREDICATE.
+            #
+            # The calibration sampled 14 C-rule false positives; 9 fired on the
+            # first branch against handlers whose predicate was genuinely
+            # present, just two frames up the call stack. Emitting "no
+            # caller-derived predicate" there sent the reviewer looking for a
+            # missing WHERE clause that was never missing, and burned the rule's
+            # credibility on the cases where it was right. They are now scored
+            # independently: a wrong citation to a line that DOES bind the caller
+            # is a bookkeeping defect, not a disclosure.
+            #
+            # The anti-laundering rule is unchanged and deliberate: the SOURCE at
+            # the cited line is the authority, never the claimed string, so an
+            # inventory still cannot write a predicate it does not have.
+            if miscited:
+                seq += 1
+                findings.append(_finding(
+                    seq, partition, "C6", "MEDIUM", "LIKELY", "CWE-1007",
+                    ["ASVS-V4.2.1"],
+                    f"scope_evidence for {entity} cites a predicate that is not at that line",
+                    f"Collection `{rid}` cites "
+                    f"{ev.get('file')}:{ev.get('line')} as evidence of "
+                    f"row_scope={scope}, but the predicate it records "
+                    f"({str(ev.get('predicate', '')).strip()[:100]!r}) does NOT "
+                    f"appear there. The source reads {actual.strip()[:120]!r}. "
+                    "This says the citation is wrong, NOT that the handler is "
+                    "unscoped — the predicate is commonly real and one or two "
+                    "frames up (a repository method, a scoped-query helper). "
+                    "Re-cite the file:line where the caller binding actually "
+                    "happens; the row is judged on what is at the cited line.",
+                    hf, ln,
+                    surface_id=r.get("surface_id"),
+                    # methodology, and postconditions=[], for the same reason C3
+                    # and C4 are: this finding records that the EVIDENCE is
+                    # unusable. It grants an attacker nothing, and tagging it as
+                    # an access-control finding would push a capability into the
+                    # composition graph that nobody proved.
+                    category="methodology",
+                    preconditions=pre, postconditions=[],
+                    suggested_fix="Point scope_evidence at the file:line that "
+                                  "actually contains the caller-bound predicate, "
+                                  "or record row_scope=unscoped honestly.",
+                    remediation_effort="trivial"))
+
+            if not predicate_binds_caller(pred):
                 seq += 1
                 findings.append(_finding(
                     seq, partition, "C5", "MEDIUM", "LIKELY", "CWE-1220",
                     ["API1:2023", "A01:2025", "ASVS-V4.2.1"],
                     f"Row-scoping claimed for {entity} but no caller-derived predicate",
-                    (f"Collection `{rid}` declares row_scope={scope} for entity "
-                     f"`{entity}` citing a predicate that does NOT appear at "
-                     f"{ev.get('file')}:{ev.get('line')}. The source there reads "
-                     f"{actual.strip()[:120]!r}. A cited predicate that is not in "
-                     "the cited file is not evidence."
-                     if fabricated else
-                     f"Collection `{rid}` declares row_scope={scope} for entity "
-                     f"`{entity}`, but the predicate at its scope_evidence "
-                     f"({str(pred).strip()[:160] or 'absent'!r}) references no "
-                     "session/user/tenant/org value. A filter on a literal (e.g. "
-                     "`scope = 'user'`, `deletedAt IS NULL`) constrains WHICH "
-                     "rows, not WHOSE.") + " Treated as unscoped for the rules below.",
+                    f"Collection `{rid}` declares row_scope={scope} for entity "
+                    f"`{entity}`, but the predicate at its scope_evidence "
+                    f"({str(pred).strip()[:160] or 'absent'!r}) references no "
+                    "session/user/tenant/org value. A filter on a literal (e.g. "
+                    "`scope = 'user'`, `deletedAt IS NULL`) constrains WHICH "
+                    "rows, not WHOSE. Treated as unscoped for the rules below.",
                     hf, ln,
                     surface_id=r.get("surface_id"),
-                    preconditions=pre, postconditions=post,
+                    preconditions=pre,
+                    # C5 firing IS the unscoped determination, so the `any`-scope
+                    # capabilities are earned here even though `scope` is only
+                    # rewritten on the next line.
+                    postconditions=postconditions_for(entity, meta, returns, True),
                     suggested_fix="Add a WHERE predicate binding to the caller "
                                   "(session user id / org / tenant), or record "
                                   "row_scope=unscoped honestly.",
@@ -735,6 +974,13 @@ def reconcile(collections_doc, profile, surface_doc, partition, source_root=None
             effective = "unscoped"
             notes.append(f"{rid}: role_restricted with non-admin role(s) "
                          f"{roles or '[]'} — treated as unscoped")
+
+        # Capability tags are minted from the DETERMINATION, never from the
+        # entity name — see postconditions_for. `unknown` is deliberately not
+        # unscoped: C1 still fires on it (at reduced severity and confidence),
+        # but "we could not tell" earns no `knows:any_*` in the attack graph.
+        post = postconditions_for(entity, meta, returns,
+                                  effective == "unscoped")
 
         # --- C1: unscoped collection of a sensitive entity. THE primary rule.
         if sensitive and effective in ("unscoped", "unknown"):

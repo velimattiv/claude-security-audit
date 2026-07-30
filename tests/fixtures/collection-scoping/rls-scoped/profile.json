@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "data_model": {
+    "orm": "drizzle",
+    "schema_files": ["server/db/schema.ts"],
+    "entities": [
+      {"name": "Org",  "id": "Org",  "owner_cols": ["owner_id"],    "pii_cols": []},
+      {"name": "Task", "id": "Task", "owner_cols": ["teammate_id"], "pii_cols": []},
+      {"name": "Post", "id": "Post", "owner_cols": ["authorId"],    "pii_cols": []}
+    ]
+  },
+  "pii": {"detected": false, "columns": []},
+  "public_resources": [],
+  "capability_lexicon": {
+    "personas": {
+      "anonymous": [],
+      "authenticated_user": ["authenticated"]
+    },
+    "unprivileged": ["anonymous"],
+    "crown_jewels": ["reads:any_post_content", "escalates:admin"]
+  }
+}
