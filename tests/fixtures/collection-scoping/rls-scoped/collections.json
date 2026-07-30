@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "audit_id": "fixture-rls-scoped",
+  "generated_at": "2026-07-31T00:00:00Z",
+  "notes": [
+    "Fixture: the two raw-SQL scoping idioms v2.5 could not see (a Postgres RLS GUC read back with current_setting, and a ${...} interpolation into a tagged template), plus a literal-only control that must still be caught. The point of the test is that the v2.6 template/GUC work bought precision WITHOUT trading it for a miss: orgs and tasks must be silent, posts must not."
+  ],
+  "collections": [
+    {
+      "id": "orgs-index",
+      "partition": "server-api",
+      "handler_file": "server/api/orgs/index.get.ts",
+      "line": 8,
+      "framework": "Nuxt/h3",
+      "method": "GET",
+      "path": "/api/orgs",
+      "entity": "Org",
+      "returns": "collection",
+      "row_scope": "caller_bound",
+      "scope_evidence": {
+        "file": "server/api/orgs/index.get.ts",
+        "line": 8,
+        "predicate": "owner_id = NULLIF(current_setting('app.user_teammate_id', true), '')::uuid"
+      },
+      "endpoint_gate": "requireAuth(event) — authenticated session",
+      "roles_required": [],
+      "decorates_permission": false,
+      "decoration_fields": [],
+      "filters_after_decoration": false,
+      "row_owner_col": "owner_id",
+      "coverage": "complete",
+      "notes": "Row-level security. Any finding here is a false positive."
+    },
+    {
+      "id": "tasks-index",
+      "partition": "server-api",
+      "handler_file": "server/api/tasks/index.get.ts",
+      "line": 7,
+      "framework": "Nuxt/h3",
+      "method": "GET",
+      "path": "/api/tasks",
+      "entity": "Task",
+      "returns": "collection",
+      "row_scope": "caller_bound",
+      "scope_evidence": {
+        "file": "server/api/tasks/index.get.ts",
+        "line": 7,
+        "predicate": "teammate_id = ${session.teammateId}"
+      },
+      "endpoint_gate": "requireAuth(event) — authenticated session",
+      "roles_required": [],
+      "decorates_permission": false,
+      "decoration_fields": [],
+      "filters_after_decoration": false,
+      "row_owner_col": "teammate_id",
+      "coverage": "complete",
+      "notes": "Caller value interpolated into the tagged template. Any finding here is a false positive."
+    },
+    {
+      "id": "posts-index",
+      "partition": "server-api",
+      "handler_file": "server/api/posts/index.get.ts",
+      "line": 7,
+      "framework": "Nuxt/h3",
+      "method": "GET",
+      "path": "/api/posts",
+      "entity": "Post",
+      "returns": "collection",
+      "row_scope": "caller_bound",
+      "scope_evidence": {
+        "file": "server/api/posts/index.get.ts",
+        "line": 7,
+        "predicate": "status = 'published'"
+      },
+      "endpoint_gate": "requireAuth(event) — authenticated session",
+      "roles_required": [],
+      "decorates_permission": false,
+      "decoration_fields": [],
+      "filters_after_decoration": false,
+      "row_owner_col": "authorId",
+      "coverage": "complete",
+      "notes": "Claims caller_bound on a literal predicate inside a tagged template. C5 must still refuse it."
+    }
+  ],
+  "dismissed": []
+}

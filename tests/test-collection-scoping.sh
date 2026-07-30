@@ -16,9 +16,15 @@
 #   2. Findings carry the capability tags the Phase-7 severity gate needs.
 #   3. An omitted collection FAILS the coverage gate fail-closed ("UNACCOUNTED").
 #   4. A row that CLAIMS scoping it cannot evidence is rewritten to unscoped (C5)
-#      — the inventory cannot launder a false claim into a pass.
-#   5. Emitted findings validate against finding-schema.json.
-#   6. Partition coverage FAILS on a directory that matches no partition glob.
+#      — the inventory cannot launder a false claim into a pass — while a merely
+#      MIS-CITED predicate is C6, a separate claim with a separate follow-up.
+#   5. The v2.6 truth table (§4u): raw-SQL scoping idioms bind the caller
+#      (tagged templates, ${...} interpolation, Postgres RLS GUCs) WITHOUT
+#      reopening the literal-laundering hole those blanks exist to close.
+#   6. Capability tags are minted from the scoping DETERMINATION, never from the
+#      entity name (§4w) — an unearned reads:*_pii escalates its neighbours.
+#   7. Emitted findings validate against finding-schema.json.
+#   8. Partition coverage FAILS on a directory that matches no partition glob.
 #
 # Exit 0 = all assertions pass.
 set -u
@@ -142,10 +148,15 @@ grep -q 'Permission-shaped field' /tmp/cs-dec.jsonl \
   || bad "C2b did not fire on a handler with canWrite and no filter"
 rm -f "$tmp_dec"
 
-# --- 4d. R1-F2: a FABRICATED scope_evidence predicate is refused -------------
+# --- 4d. R1-F2: a MIS-CITED scope_evidence predicate is refused --------------
 # The release claims "a wrong inventory cannot launder a gap into a pass". Until
 # R1 that was false: any non-empty `predicate` string was trusted verbatim and
 # the source at the cited line was never read.
+#
+# v2.6 splits the two claims that used to share this finding: C6 says the
+# CITATION is wrong, C5 says there is NO caller predicate at the cited line.
+# Here both hold (the inventory cites a predicate that isn't there, and what IS
+# there filters on a literal), so both fire — and C1 follows from C5.
 tmp_fab=$(mktemp /tmp/coll-fab-XXXX.json)
 python3 - "$tmp_fab" <<'EOF'
 import json, sys
@@ -155,10 +166,57 @@ json.dump(d, open(sys.argv[1], 'w'))
 EOF
 $V "$tmp_fab" $FIX/laundered/profile.json --source-root $FIX/laundered/source-app \
    --partition fab --out /tmp/cs-fab.jsonl --quiet
-grep -q 'does NOT appear at' /tmp/cs-fab.jsonl \
-  && ok "C5 refuses a predicate that is not at the cited file:line" \
-  || bad "fabricated predicate accepted — laundering claim is false"
+if python3 - <<'EOF'
+import json
+rows = [json.loads(l) for l in open('/tmp/cs-fab.jsonl') if l.strip()]
+by = {r['sources'][0]['detail'].rsplit(':', 1)[-1]: r for r in rows}
+assert set(by) == {"C5", "C6", "C1"}, sorted(by)
+assert "does NOT appear there" in by["C6"]["description"], by["C6"]["description"]
+# C6 is about the EVIDENCE, so it must not push a capability nobody proved into
+# the composition graph.
+assert by["C6"]["category"] == "methodology", by["C6"]["category"]
+assert by["C6"]["postconditions"] == [], by["C6"]["postconditions"]
+# ...and it must not be the one claiming there is no predicate. That conflation
+# is what sent reviewers hunting for a missing WHERE clause on 9 of 14 sampled
+# false positives whose predicate was real and one frame up.
+assert "no caller-derived predicate" not in by["C6"]["title"]
+assert "no caller-derived predicate" in by["C5"]["title"]
+EOF
+then ok "a mis-cited predicate yields C6 (citation) AND C5 (no predicate), split"
+else bad "mis-cited predicate: laundering claim false, or C5/C6 still conflated"
+fi
 rm -f "$tmp_fab"
+
+# --- 4d-bis. v2.6 2.3: a wrong CITATION to a line that DOES bind the caller is
+# a bookkeeping defect, not a disclosure. This is the case the split exists for:
+# before it, `fabricated` alone forced row_scope=unscoped and C1 fired HIGH on a
+# handler that was correctly scoped all along.
+tmp_cit=$(mktemp /tmp/coll-cit-XXXX.json)
+python3 - "$tmp_cit" <<'EOF'
+import json, sys
+d = json.load(open('tests/fixtures/collection-scoping/tree-bug/collections.json'))
+row = dict(d['collections'][2])                     # me-decks: correctly scoped
+row['scope_evidence'] = dict(row['scope_evidence'],
+                             predicate="eq(decks.ownerId, ctx.principal.id)")
+d['collections'] = [row]
+d['dismissed'] = [{"candidate": f, "reason": "out of scope for this assertion"}
+                  for f in ("server/api/content/tree.get.ts",
+                            "server/api/decks/index.get.ts",
+                            "server/api/products/index.get.ts")]
+json.dump(d, open(sys.argv[1], 'w'))
+EOF
+$V "$tmp_cit" $FIX/tree-bug/profile.json --source-root $FIX/tree-bug/source-app \
+   --partition cit --out /tmp/cs-cit.jsonl --quiet
+if python3 - <<'EOF'
+import json
+rules = [json.loads(l)['sources'][0]['detail'].rsplit(':', 1)[-1]
+         for l in open('/tmp/cs-cit.jsonl') if l.strip()]
+assert rules == ["C6"], rules   # the citation is wrong; the handler is not
+EOF
+then ok "a wrong citation to a caller-bound line yields C6 only (no C5, no C1)"
+else bad "wrong citation still forces unscoped — C5/C6 split did not take"
+fi
+rm -f "$tmp_cit"
 
 # --- 4e. R1-F3: caller-token matching is token-scoped, not substring ---------
 if python3 - <<'EOF'
@@ -464,6 +522,170 @@ PYEOF
 then ok "comment stripping line-scoped; only route decorators bound C2b"
 else bad "R7 regression (comment overreach / decorator boundary too broad)"
 fi
+
+# --- 4u. v2.6 2.1+2.2: THE TRUTH TABLE ---------------------------------------
+# The acceptance gate for the template/GUC work. A/B/G are the shapes v2.5 could
+# not see; D/E/F are the shapes it must keep refusing. A patch that fixes the
+# first three by also flipping the last three has traded one failure mode for
+# another and does not pass — which is why they are asserted together.
+#
+# Neither half of the fix is sufficient alone, and the table proves it: B needs
+# the template work (the ${...} was blanked with the rest of the body), A and G
+# need the GUC pre-pass (the caller's identity is spelled inside a single-quoted
+# literal, which _strip_literals blanks — correctly, per D).
+if python3 - <<'PYEOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+
+TABLE = [
+    ("A", "const ownerClause = sql`EXISTS (SELECT 1 FROM cou_owner co WHERE "
+          "co.teammate_id = NULLIF(current_setting('app.user_teammate_id', true), "
+          "'')::uuid)`", True),
+    ("B", "const rows = await tx.execute(sql`SELECT * FROM t WHERE teammate_id = "
+          "${session.teammateId}`)", True),
+    ("C", "db.select().from(project).where(eq(project.teammateId, session.teammateId))", True),
+    ("D", "db.select().from(decks).where(eq(decks.scope, 'session'))", False),
+    ("E", "throw new Error(`session expired`)", False),
+    ("F", "sql`SELECT * FROM posts WHERE status = 'published'`", False),
+    ("G", "sql`path <@ current_setting('app.user_org_path')::ltree`", True),
+]
+for name, src, want in TABLE:
+    got = m.predicate_binds_caller(src)
+    assert got is want, f"case {name}: got {got}, want {want} — {src}"
+    # LENGTH PRESERVATION. _statement_at hands this function text taken at real
+    # source offsets; a transform that changes length silently misaligns every
+    # citation downstream of it.
+    assert len(m._strip_literals(src)) == len(src), f"case {name}: length changed"
+
+# Length preservation is a property of the transform, not of these seven strings.
+for src in ("", "`", "'", "a`b", "sql`x${", "sql`a${'b'}c`", "`${`${x}`}`",
+            "x // ' unterminated\n.where(eq(a, viewerId))", "\\", "sql`a\\`b`",
+            "${", "}", "sql`a${b}`", "'\\'", '"unclosed', "#c\nsql`${u.id}`"):
+    assert len(m._strip_literals(src)) == len(src), repr(src)
+
+# Templates nest and the scanners recurse into each other. The input is source
+# from the repo under audit, so the depth is not ours to bound — past ~500 the
+# Python stack overflows and an uncaught RecursionError kills the whole
+# fail-closed gate instead of failing it.
+for n in (24, 25, 600, 5000):
+    deep = "sql`" + "${`" * n + "x" + "`}" * n + "`"
+    assert len(m._strip_literals(deep)) == len(deep), n
+# ...while ordinary one-level nesting is still read as code.
+assert m.predicate_binds_caller("sql`a = ${sql`${session.userId}`}`")
+
+# The template work must not become a new laundering channel: a tagged body is
+# CODE, but the string literals inside it are still data.
+assert not m.predicate_binds_caller("sql`SELECT * FROM d WHERE scope = 'session'`")
+assert not m.predicate_binds_caller("sql`SELECT * FROM d WHERE role = 'viewer'`")
+# ...and an untagged template is data whatever it says.
+assert not m.predicate_binds_caller("`eq(decks.ownerId, session.user.id)`")
+assert not m.predicate_binds_caller("eq(x, `caller`)")
+# A KEYWORD before the backtick is not a tag. `return`/`throw`/`case` end in an
+# identifier character, so without the keyword check a message template would be
+# preserved as code — and a spurious "binds the caller" SUPPRESSES C1, which is
+# the expensive direction.
+for p in ("return `session expired`", "throw `no viewer for caller`",
+          "case `principal`:", "typeof `me`", "await `claims`"):
+    assert not m.predicate_binds_caller(p), p
+# ...while a real tag application, including one on a call or index result, is.
+for p in ("sql`x = ${session.userId}`", "db.raw()`${session.userId}`",
+          "tags[0]`${session.userId}`", "await sql`${session.userId}`"):
+    assert m.predicate_binds_caller(p), p
+# A GUC that is not an identity GUC says nothing about who is calling.
+assert not m.predicate_binds_caller("sql`x = current_setting('app.tenant_mode')`")
+assert not m.predicate_binds_caller("sql`x = current_setting('statement_timeout')`")
+PYEOF
+then ok "truth table A/B/C/G bind, D/E/F do not; _strip_literals preserves length"
+else bad "v2.6 truth table FAILED (template awareness / RLS GUC / length)"
+fi
+
+# --- 4v. v2.6 2.1+2.2 end to end: precision bought without a miss ------------
+# Two correctly-scoped raw-SQL handlers (an RLS GUC and a ${...} interpolation)
+# must produce ZERO findings, while their literal-only sibling — same tagged
+# template shape — must still be caught.
+$V $FIX/rls-scoped/collections.json $FIX/rls-scoped/profile.json \
+   --source-root $FIX/rls-scoped/source-app --partition rls \
+   --out /tmp/cs-rls.jsonl --quiet
+rc=$?
+if python3 - <<'EOF'
+import json
+rows = [json.loads(l) for l in open('/tmp/cs-rls.jsonl') if l.strip()]
+files = {r['file'] for r in rows}
+assert "server/api/orgs/index.get.ts" not in files, "FP on the RLS-scoped handler"
+assert "server/api/tasks/index.get.ts" not in files, "FP on the interpolated handler"
+rules = sorted(r['sources'][0]['detail'].rsplit(':', 1)[-1] for r in rows)
+assert rules == ["C1", "C5"], rules
+EOF
+then ok "RLS/interpolated queries are silent; the literal-only sibling still fires"
+else bad "rls-scoped fixture: precision lost, or the control stopped firing"
+fi
+[ "$rc" -eq 1 ] && ok "rls-scoped exits 1 on the literal-only handler" \
+  || bad "rls-scoped exit=$rc (want 1)"
+
+# --- 4w. v2.6 1.3: capability tags are minted from the determination ---------
+# postconditions_for used to synthesise knows:any_<e>_id / reads:any_<e>_pii from
+# the entity NAME for every row, scoped or not. 47% of all capability tags in the
+# composition graph came from there, and 31 of 44 false HIGH+ findings carried a
+# reads:*_pii they had not earned — which R1/R3 then composed, escalating their
+# NEIGHBOURS (true findings included) to CRITICAL.
+if python3 - <<'EOF'
+import importlib.util
+s = importlib.util.spec_from_file_location('vc','skills/security-audit/lib/validate-collection-scoping.py')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+meta = {"owner_cols": ["ownerId"], "pii_cols": ["email"]}
+earned = m.postconditions_for("Deck", meta, "tree", True)
+assert earned == ["knows:any_deck_id", "reads:any_deck_metadata",
+                  "knows:any_deck_path", "reads:any_deck_pii"], earned
+unearned = m.postconditions_for("Deck", meta, "tree", False)
+assert unearned == ["reads:own_deck_metadata"], unearned
+# Non-empty: lib/capability-lexicon.md §5 requires it for collection_scope, and
+# `own` cannot escalate a neighbour — containment flows any -> narrower only.
+assert unearned and not any("any_" in c for c in unearned)
+EOF
+then ok "postconditions_for mints any_* only on a verified-unscoped determination"
+else bad "capability tags still synthesised from the entity name"
+fi
+
+# End to end: a decoration finding on a CORRECTLY SCOPED collection of a
+# PII-bearing entity must not walk away with reads:any_user_pii.
+tmp_cap=$(mktemp /tmp/coll-cap-XXXX.json)
+python3 - "$tmp_cap" <<'EOF'
+import json, sys
+d = json.load(open('tests/fixtures/collection-scoping/tree-bug/collections.json'))
+row = dict(d['collections'][2], entity="User",      # User has pii_cols=['email']
+           decorates_permission=True, decoration_fields=["canWrite"],
+           filters_after_decoration=False)
+unk = dict(d['collections'][1], id="unknown-scope", row_scope="unknown")
+d['collections'] = [row, unk]
+d['dismissed'] = [{"candidate": f, "reason": "out of scope for this assertion"}
+                  for f in ("server/api/content/tree.get.ts",
+                            "server/api/products/index.get.ts")]
+json.dump(d, open(sys.argv[1], 'w'))
+EOF
+$V "$tmp_cap" $FIX/tree-bug/profile.json --source-root $FIX/tree-bug/source-app \
+   --partition cap --out /tmp/cs-cap.jsonl --quiet
+if python3 - <<'EOF'
+import json
+rows = [json.loads(l) for l in open('/tmp/cs-cap.jsonl') if l.strip()]
+scoped = [r for r in rows if r['file'].endswith('me/decks.get.ts')]
+assert scoped, "the C2 decoration finding disappeared"
+for r in scoped:
+    assert r['postconditions'] == ["reads:own_user_metadata"], r['postconditions']
+# row_scope=unknown is NOT a verified-unscoped determination. C1 still fires on
+# it (downgraded), but "we could not tell" must not grant knows:any_* — a
+# POSSIBLE guess that escalates its neighbours to CRITICAL is the exact failure
+# this gate exists for.
+unk = [r for r in rows if r['file'].endswith('decks/index.get.ts')]
+assert unk, "C1 stopped firing on row_scope=unknown"
+for r in unk:
+    assert not any(c.startswith(("knows:any_", "reads:any_")) for c in r['postconditions']), \
+        r['postconditions']
+EOF
+then ok "a scoped/unknown collection grants no any_* capability it did not earn"
+else bad "unearned any_* capability still minted for scoped or unknown rows"
+fi
+rm -f "$tmp_cap"
 
 # --- 5. schema conformance --------------------------------------------------
 if python3 "$LIB/validate-findings.py" \
