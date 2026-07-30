@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "STORY 2.7 FIXTURE. `enforced_gate` below is verbatim from a finding the",
+    "calibrated run filed CRITICAL/CONFIRMED. It is a paragraph of genuine, correct",
+    "hardening and it contains not one of the keyword ranker's tokens, so it ranked",
+    "GATE_NONE; the credential set the floor to AUTHZ; and `CRITICAL if br ==",
+    "GATE_NONE and floor >= GATE_AUTHZ` did the rest. The emergent behaviour was that",
+    "THE MORE PRECISELY AN ANALYST DESCRIBED A REAL CONTROL, THE MORE LIKELY IT WAS",
+    "FILED CRITICAL. `gate_rank_hint` is the structured channel that ends that.",
+    "tests/test-egress.sh runs this fixture twice — once as written, once with the",
+    "hint stripped — so it asserts both that the hint silences the row and that the",
+    "row is otherwise live."
+  ],
+  "sinks": [
+    {
+      "id": "dev:sink:token-redeem",
+      "sink_file": "server/api/tokens/redeem.post.ts",
+      "line": 120,
+      "kind": "db_entity",
+      "framework": "Nitro",
+      "serves_resource": "DeviceToken",
+      "reachable_via": ["/api/tokens/redeem"],
+      "guarded_paths": [
+        {
+          "branch_id": "persist",
+          "condition": "redemption succeeds",
+          "enforced_gate": "0600 + chmod + atomic rename, with a compare-and-swap against the bytes read so a concurrent redeem's freshly written credential is never clobbered; unparseable JSON aborts rather than rewrites",
+          "gate_rank_hint": "authz",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}
