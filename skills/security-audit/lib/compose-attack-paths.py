@@ -1085,6 +1085,28 @@ def main():
                         for gi in contrib_g
                         if suppression_evidence(findings[gi])]
 
+            # A cited blocker only suppresses if it actually breaks EVERY route
+            # to the jewel. `contributing_slice()` returns the union of all
+            # routes, so on a graph with two independent paths a blocker on
+            # route A would otherwise veto route B as well — silencing a live
+            # CRITICAL on the strength of an unrelated finding's unreachability.
+            # That is the exact failure this gate was built to avoid, so the
+            # test is re-composition, not membership: drop the blocked findings
+            # and ask whether the jewel is still reached. If it is, the chain
+            # stands and nothing is suppressed.
+            if blockers:
+                blocked = {gi for gi, _ in blockers}
+                survivors = [f for f in tagged
+                             if idx_of[id(f)] not in blocked]
+                _, sheld = compose(survivors, held0)
+                if any(is_jewel(c, jewels) for c in sheld):
+                    blockers = []           # another route survives — still live
+                    # …but the blocked members are NOT on the surviving route,
+                    # so they must not ride its escalation. Escalate what
+                    # actually carries the live chain, nothing more — the same
+                    # backward-slice precision R3 already applies to bystanders.
+                    contrib_g = [gi for gi in contrib_g if gi not in blocked]
+
         chain_sev = "INFO"
         for i in path:
             chain_sev = smax(chain_sev, target[idx_of[id(tagged[i])]])

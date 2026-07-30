@@ -264,6 +264,20 @@ def family_of(finding: dict) -> tuple[str, bool]:
     return UNLABELLED, False
 
 
+# Raw rule families the calibration actually covered. A family NOT listed here
+# but whose `group_of()` label IS recorded gets admitted as PROVISIONAL rather
+# than inheriting its group's rate — measured-for-siblings is not measured.
+KNOWN_RAW_FAMILIES = frozenset({
+    f"validate-egress:{r}" for r in ("R2", "R3", "R4", "R5")
+} | {
+    f"validate-collection-scoping:{r}" for r in ("C1", "C2", "C2b", "C3", "C4", "C5")
+} | {
+    "asvs", "linddun", "config", "governance",
+} | {
+    f"deepdive:cat-{i:02d}" for i in range(1, 13)
+})
+
+
 def group_of(family: str) -> str:
     for pattern, label in FAMILY_GROUPS:
         if pattern.match(family):
@@ -668,12 +682,19 @@ def cmd_gate(findings_path: Path) -> int:
     violations = []
     provisional_hits = []
     unknown_families = {}
+    # Raw families seen in this run, so a NEW one cannot ride an existing
+    # group's measured precision. `group_of()` maps e.g. `validate-egress:R7`
+    # into the recorded `R-rules` group, which would let a brand-new rule inherit
+    # a number nobody measured for it — the same "borrowed authority" move that
+    # let heuristics inherit `scanners are mechanical ground truth`.
+    seen_raw = {}
     for f in findings:
         fam, _ = family_of(f)
         group = group_of(fam)
         sev = str(f.get("severity", "")).upper()
         if sev not in band:
             continue
+        seen_raw.setdefault(group, set()).add(fam)
         if group in barred:
             violations.append((f.get("id"), group, sev))
         elif group in provisional:
@@ -681,6 +702,10 @@ def cmd_gate(findings_path: Path) -> int:
         elif group not in recorded:
             unknown_families.setdefault(group, 0)
             unknown_families[group] += 1
+        elif fam not in KNOWN_RAW_FAMILIES:
+            # Recorded group, unrecognised member: measured for its siblings, not
+            # for this. Admitted, but PROVISIONAL and named — never silent.
+            provisional_hits.append((f.get("id"), f"{group} / {fam} (new member)", sev))
 
     print("=== headline-band calibration gate ===")
     print(f"policy: a rule family measured below {threshold:.0%} over >= {min_sample} verdicts")

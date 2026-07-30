@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 
+_CITE_RE = re.compile(r"[\w./\\-]+\.\w+:\d+")
+
 _CAP_GRAMMAR = re.compile(r"^[a-z][a-z0-9_]*(:[a-z0-9_]+)?$")
 
 
@@ -124,7 +126,13 @@ def _sev(finding: dict) -> str:
                or finding.get("severity") or "").upper()
 
 
-def evidence_discipline_errors(lineno: int, finding: dict) -> list[str]:
+def evidence_class_of(finding: dict) -> str:
+    ec = finding.get("evidence_class")
+    return ec if isinstance(ec, str) and ec else "agent_judgement"
+
+
+def evidence_discipline_errors(lineno: int, finding: dict,
+                               known_ids: set[str] | None = None) -> list[str]:
     """v2.6: the Wave-3 obligations, enforced mechanically rather than in prose.
 
     Every one of these was written as methodology guidance first. The audit's own
@@ -137,7 +145,24 @@ def evidence_discipline_errors(lineno: int, finding: dict) -> list[str]:
     finding, not findings in their own right, so the parent carries the
     obligations and these checks skip them.
     """
-    if finding.get("annexed_to"):
+    annex = finding.get("annexed_to")
+    if annex:
+        # An annexed row is exempt because its PARENT carries the obligations.
+        # If the parent does not exist, nothing carries them and the row has
+        # vanished from the report instead of being demoted — `annexed_to` would
+        # be a one-field way to delete a finding. Only `heuristic_inventory` rows
+        # are annexable: a judgement finding may never fold itself into another.
+        if known_ids is not None and annex not in known_ids:
+            return [f"line {lineno}: `annexed_to` points at `{annex}`, which is "
+                    "not a finding in this corpus — an annexed row is exempt from "
+                    "the HIGH+ obligations because its PARENT carries them, so a "
+                    "dangling parent deletes the finding rather than demoting it"]
+        if evidence_class_of(finding) != "heuristic_inventory":
+            return [f"line {lineno}: only `heuristic_inventory` rows may be "
+                    f"annexed; this row is `{evidence_class_of(finding)}`. The "
+                    "annex exists to fold MECHANICAL enumeration legs into the "
+                    "judgement finding they restate, not to let a judgement "
+                    "finding suppress itself"]
         return []
     errs = []
 
@@ -180,11 +205,22 @@ def evidence_discipline_errors(lineno: int, finding: dict) -> list[str]:
     # Six findings on one Postgres-TLS defect: the FINDING was right on all six,
     # the FIX was wrong on five. Fix text is what gets executed, and it currently
     # inherits the finding's confidence for free.
-    if finding.get("suggested_fix") and not finding.get("fix_confidence"):
+    fc = finding.get("fix_confidence")
+    if finding.get("suggested_fix") and not fc:
         errs.append(
             f"line {lineno}: `suggested_fix` present but no `fix_confidence` — "
             "rate the FIX separately from the finding "
             "(verified requires a cited line in the dependency being asserted about)")
+    elif fc == "verified" and not _CITE_RE.search(str(finding.get("suggested_fix") or "")):
+        # `verified` is the only value that buys anything downstream (§7.4b lets
+        # it win a fix-contradiction), so it is the one that must be earned. In
+        # the measured case the CORRECT fix of six was the only one citing driver
+        # source; an unearned `verified` hands the win to the wrong text.
+        errs.append(
+            f"line {lineno}: `fix_confidence: verified` requires a cited "
+            "`file:line` in `suggested_fix`, naming the dependency/driver/API "
+            "the claim is about — otherwise `verified` is self-asserted, which "
+            "is exactly how `confidence: CONFIRMED` became a 9.6%-true label")
 
     # --- Reachability evidence (story 1.4).
     # Fail-open by design: this suppresses an R3 escalation, so an uncited claim
@@ -204,7 +240,8 @@ def evidence_discipline_errors(lineno: int, finding: dict) -> list[str]:
 
 def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None,
                              require_cats: set[str] | None = None,
-                             evidence_discipline: bool = False):
+                             evidence_discipline: bool = False,
+                             known_ids: set[str] | None = None):
     import jsonschema  # type: ignore
     validator = jsonschema.Draft202012Validator(schema)
     errors = []
@@ -224,13 +261,14 @@ def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None,
                 )
         errors.extend(capability_errors(lineno, finding, require_cats or set()))
         if evidence_discipline:
-            errors.extend(evidence_discipline_errors(lineno, finding))
+            errors.extend(evidence_discipline_errors(lineno, finding, known_ids))
     return errors
 
 
 def validate_manual(schema: dict, findings, cwe_ids: set[str] | None,
                     require_cats: set[str] | None = None,
-                    evidence_discipline: bool = False):
+                    evidence_discipline: bool = False,
+                    known_ids: set[str] | None = None):
     """Minimal manual validator used when jsonschema is unavailable.
     Checks only the top-level `required` list + CWE-in-map + capability
     requirements when provided. Not a substitute for jsonschema — CI must
@@ -250,7 +288,7 @@ def validate_manual(schema: dict, findings, cwe_ids: set[str] | None,
                 errors.append(f"line {lineno}: cwe `{cwe}` not in cwe-map.json")
         errors.extend(capability_errors(lineno, finding, require_cats or set()))
         if evidence_discipline:
-            errors.extend(evidence_discipline_errors(lineno, finding))
+            errors.extend(evidence_discipline_errors(lineno, finding, known_ids))
     return errors
 
 
@@ -305,13 +343,20 @@ def main():
     require_cats = {c.strip() for c in args.require_capabilities.split(",")
                     if c.strip()} if args.require_capabilities else set()
 
+    # Ids present in THIS file. An `annexed_to` pointing outside it cannot be
+    # resolved here, so the check only fires when the target is absent from a
+    # corpus that plausibly contains it (see evidence_discipline_errors).
+    known_ids = {f.get("id") for _, f in findings if isinstance(f.get("id"), str)}
+
     try:
         errors = validate_with_jsonschema(schema, findings, cwe_ids, require_cats,
-                                          args.require_evidence_discipline)
+                                          args.require_evidence_discipline,
+                                          known_ids)
         backend = "jsonschema"
     except ImportError:
         errors = validate_manual(schema, findings, cwe_ids, require_cats,
-                                 args.require_evidence_discipline)
+                                 args.require_evidence_discipline,
+                                 known_ids)
         backend = "manual-fallback"
         if not args.quiet:
             print(

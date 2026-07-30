@@ -582,6 +582,75 @@ def _scan_quoted(t, i, n, out):
 _TEMPLATE_MAX_DEPTH = 24
 
 
+def _comment_span(t, i, n):
+    """If a comment opens at t[i], return the index just past its end; else None.
+
+    ONLY used inside a TAGGED template body. v2.6 made a tagged body code so a
+    real predicate would survive — which handed comments the same trust. That is
+    a regression in the SILENT direction, and the only one in this file:
+
+        sql`SELECT * FROM t -- WHERE teammate_id = current_setting('app.user_teammate_id')
+        `
+
+    scored `binds_caller = True`, so C5 did not fire, so C1 did not fire, and a
+    genuinely unscoped collection passed. v2.5 was accidentally safe here because
+    it blanked the whole body. Over-blanking costs a false positive a human
+    closes; under-blanking costs a miss nobody ever sees.
+
+    `//` is deliberately NOT treated as a comment opener when it follows a colon,
+    so a `https://…` inside a query survives; everywhere else the blanking
+    direction is the conservative one."""
+    c, nxt = t[i], (t[i + 1] if i + 1 < n else "")
+    if c == "-" and nxt == "-":             # SQL line comment
+        j = t.find("\n", i)
+        return n if j < 0 else j
+    if c == "/" and nxt == "*":             # SQL / C block comment
+        j = t.find("*/", i + 2)
+        return n if j < 0 else j + 2
+    if c == "/" and nxt == "/" and not (i and t[i - 1] == ":"):
+        j = t.find("\n", i)
+        return n if j < 0 else j
+    return None
+
+
+def _strip_comments(t):
+    """Blank every comment, preserving length and leaving quotes intact.
+
+    Used ONLY by the RLS-GUC pre-pass, which must run on text that still has its
+    single quotes (the GUC name lives inside one) but must NOT see a commented-out
+    predicate as evidence of scoping. Quote-aware, so a `--` or `/*` inside a
+    string literal is left alone."""
+    t = str(t)
+    n = len(t)
+    out = []
+    i = 0
+    while i < n:
+        c = t[i]
+        # Only `'` and `"` skip. A BACKTICK must not: the GUC we are looking for
+        # normally sits inside sql`…`, so skipping the template verbatim would
+        # carry its comments through untouched and defeat the whole point.
+        if c in "'\"":                      # skip over a literal, verbatim
+            j = i + 1
+            while j < n:
+                if t[j] == "\\":
+                    j += 2
+                    continue
+                if t[j] == c:
+                    break
+                j += 1
+            out.append(t[i:min(j + 1, n)])
+            i = min(j + 1, n)
+            continue
+        k = _comment_span(t, i, n)
+        if k is not None:
+            out.append(" " * (k - i))
+            i = k
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _scan_template(t, i, n, out, depth=0):
     """Render the template literal opening at t[i]; return the index just past
     its closing backtick.
@@ -628,6 +697,11 @@ def _scan_template(t, i, n, out, depth=0):
         if tagged:
             if c in "'\"":
                 j = _scan_quoted(t, j, n, buf)
+                continue
+            k = _comment_span(t, j, n)
+            if k is not None:               # a comment inside a tagged body
+                buf.append(" " * (k - j))
+                j = k
                 continue
             buf.append(c)
             j += 1
@@ -715,7 +789,13 @@ def predicate_binds_caller(text):
     # has run — correctly, for `eq(decks.scope, 'session')` — the only evidence
     # of caller binding in an RLS-scoped query is gone. Nothing downstream can
     # recover it, which is why this runs first rather than as another token.
-    if _RLS_GUC_RE.search(str(text)):
+    # …but the raw text still contains COMMENTS, and a commented-out GUC is not
+    # a scope. Blank comments first, keeping quotes intact so the GUC name (a
+    # single-quoted literal) survives for the pre-pass. Without this the pre-pass
+    # reads `-- WHERE teammate_id = current_setting('app.user_teammate_id')` as
+    # caller binding, suppresses C5, and lets a genuinely unscoped collection
+    # through — the one silent-direction failure this file can have.
+    if _RLS_GUC_RE.search(_strip_comments(str(text))):
         return True
     text = _strip_literals(text)
     toks = _tokenize(text)

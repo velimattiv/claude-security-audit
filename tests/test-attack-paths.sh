@@ -253,6 +253,22 @@ rm -f "$tmp_b" "$tmp_f"
 # the information had no channel to reach the composer. deployment_reachability
 # is that channel — and it only counts when it is cited.
 
+# (a0) two-route: a cited blocker on ONE route must not veto a SECOND live route.
+# contributing_slice() returns the UNION of all routes to a jewel, so membership
+# alone is the wrong suppression test — it would silence a live CRITICAL on the
+# strength of an unrelated finding's unreachability, which is the precise
+# failure this gate exists to prevent. Suppression is decided by re-composition.
+out="$($C $FIX/two-route/findings.jsonl --profile "$PROFILE" --now "$NOW" 2>&1)"
+grep -q "CRITICAL app:idor:0002" <<<"$out" \
+  && ok "two-route: the live route still escalates despite a blocked sibling route" \
+  || bad "two-route: a blocked route suppressed a second, reachable route"
+grep -q "R3 SUPPRESSED" <<<"$out" \
+  && bad "two-route: suppressed a chain that is still reachable without the blocker" \
+  || ok "two-route: no suppression while an unblocked path to the jewel remains"
+grep -qE "^\s+HIGH\s+app:auth:0001" <<<"$out" \
+  && ok "two-route: the unreachable member does not ride the live route's escalation" \
+  || bad "two-route: escalated a member whose own route is dead"
+
 # (a) unreachable: a CONTRIBUTING member, structurally_unreachable WITH a cite.
 out="$($C $FIX/unreachable/findings.jsonl --profile "$PROFILE" --now "$NOW" \
         --rewrite /tmp/ap-unreach.jsonl --json-summary /tmp/ap-unreach.json 2>&1)"

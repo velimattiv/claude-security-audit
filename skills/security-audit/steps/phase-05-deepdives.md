@@ -153,42 +153,40 @@ python3 "$SKILL_DIR/lib/validate-findings.py" \
     .claude-audit/current/phase-05-<c.id>-<p.id>.jsonl
 ```
 
-Then run the **two v2.6 obligation gates**. JSON Schema cannot express
-"required only at HIGH+" or "required only on a refutation", so these are
-checked here. Both are `jq` one-liners over the same JSONL:
+The v2.6 obligation gates run in the SAME invocation, via
+`--require-evidence-discipline`. JSON Schema cannot express "required only at
+HIGH+" or "required only on a refutation", so the validator checks them
+imperatively:
 
 ```bash
-F=.claude-audit/current/phase-05-<c.id>-<p.id>.jsonl
-
-# GATE 1 — sibling sweep (story 3.1). Every HIGH+ row carries a
-# `sibling_pattern` and a `sibling_sites` ARRAY. An empty array is a claim
-# and is fine; a MISSING pattern is an omission wearing a claim's clothes.
-jq -e -s '
-  [ .[] | select(.severity == "HIGH" or .severity == "CRITICAL")
-        | select(((.sibling_pattern // "") | length) == 0
-                 or (.sibling_sites | type) != "array") ] | length == 0
-' "$F" >/dev/null || echo "SIBLING SWEEP MISSING on one or more HIGH+ rows"
-
-# GATE 2 — refutation scope (story 3.2). Every refuted row states the
-# boundary of what was examined. An unbounded refutation is not printable.
-jq -e -s '
-  [ .[] | select(.attacked == "refuted")
-        | select(((.refutation_scope // "") | length) == 0) ] | length == 0
-' "$F" >/dev/null || echo "REFUTATION WITH NO SCOPE"
-
-# GATE 3 — fix confidence (story 3.3). A `suggested_fix` with no
-# `fix_confidence` inherits the finding's credibility for free.
-jq -e -s '
-  [ .[] | select(((.suggested_fix // "") | length) > 0)
-        | select(has("fix_confidence") | not) ] | length == 0
-' "$F" >/dev/null || echo "SUGGESTED FIX WITH NO fix_confidence"
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/validate-findings.py" \
+    --schema "$SKILL_DIR/lib/finding-schema.json" \
+    --cwe-map "$SKILL_DIR/lib/cwe-map.json" \
+    --require-capabilities auth,idor,token_scope,collection_scope \
+    --require-evidence-discipline \
+    .claude-audit/current/phase-05-<c.id>-<p.id>.jsonl
 ```
 
-On exit 0 with all three gates clean, write
+`--require-evidence-discipline` refuses: a HIGH+ row with no `sibling_sites`,
+or with `sibling_sites` and no `sibling_pattern` (an empty array is a CLAIM and
+is fine; a missing pattern is an omission wearing a claim's clothes); a
+`refuted` row with no `refutation_scope`; a `suggested_fix` with no
+`fix_confidence`, or a `verified` one with no cited `file:line`; a non-`reachable`
+`deployment_reachability` with no cite; and an `annexed_to` pointing at a parent
+that is not in the corpus, or set on a row that is not `heuristic_inventory`.
+
+> **Why the validator and not a `jq` gate.** Earlier drafts of this step used
+> three `jq` one-liners. They covered three of the six checks, could not see
+> the annex exemption, and — being a second implementation of the same rule —
+> were free to drift from the schema they were enforcing. One enforcer, one
+> place, exercised by `tests/test-evidence-discipline.sh` in CI.
+
+On exit 0, write
 `.claude-audit/current/phase-05-<c.id>-<p.id>.done`.
-On exit != 0 **or any gate printing a failure**, re-invoke the Agent with
-the validator's errors and the failing gate names quoted back into the
-prompt. After the retry, if it still fails, record one placeholder INFO
+On exit != 0, re-invoke the Agent with the validator's errors quoted back
+into the prompt. After the retry, if it still fails, record one placeholder INFO
 finding documenting the errors and proceed.
 
 Re-derive `sibling_sweeps_run` from the file rather than trusting the
@@ -270,6 +268,7 @@ view, not a command for you to run:
 python3 "<absolute-path-to-skill>/lib/validate-findings.py" \
     --schema "<absolute-path-to-skill>/lib/finding-schema.json" \
     --cwe-map "<absolute-path-to-skill>/lib/cwe-map.json" \
+    --require-evidence-discipline \
     .claude-audit/current/phase-05-<cat>-<partition>.jsonl
 ```
 

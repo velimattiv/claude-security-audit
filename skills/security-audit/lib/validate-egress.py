@@ -217,6 +217,33 @@ _UNGATEABLE_LAYERS = {"browser"}
 SUPPRESSION_AUDIT = {"ungateable_layer": set(), "non_network": set()}
 
 
+
+# Browser-only FILE EXTENSIONS. Excluding a sink from R2/R3/R5 is a recall
+# decision, so it may rest only on evidence that cannot be wrong about the
+# question being asked. A `.vue`/`.svelte` file cannot enforce a server-side
+# authorization gate no matter where it runs — SSR renders it on the server, but
+# the gate still lives in the handler. A DIRECTORY name cannot carry that weight:
+# `app/` is the browser in Nuxt and server code in Rails, Laravel and Flask, so a
+# directory-inferred `browser` would silently DROP a byte-serving path instead of
+# splitting a bucket — the one thing layer typing promised not to do.
+_BROWSER_EXTS = (".vue", ".svelte", ".jsx", ".tsx")
+
+
+def ungateable(row, path, layer):
+    """May this row be excluded from the authorization rules entirely?
+
+    True only when the layer is ungateable AND the evidence for it is either
+    DECLARED by the inventory agent or a browser-only file extension. An
+    exclusion inferred from a directory name is refused: it reconciles normally
+    instead, which costs a false positive rather than a miss.
+    """
+    if layer not in _UNGATEABLE_LAYERS:
+        return False
+    if str(row.get("layer") or "").strip().lower() in _UNGATEABLE_LAYERS:
+        return True
+    return _norm(path or "").lower().endswith(_BROWSER_EXTS)
+
+
 def sink_layer(sink, partition=None):
     return infer_layer(sink.get("layer"), sink.get("sink_file"), partition)
 
@@ -880,13 +907,17 @@ def reconcile(sinks_doc, creds_doc, surface_doc, profile_doc, partition):
             if sink_destination(s) != "network":
                 SUPPRESSION_AUDIT["non_network"].add(
                     f"{sid} destination={sink_destination(s)}")
-            elif sink_layer(s, partition) in _UNGATEABLE_LAYERS:
+            elif ungateable(s, s.get("sink_file"), sink_layer(s, partition)):
                 SUPPRESSION_AUDIT["ungateable_layer"].add(
-                    f"{sid} layer={sink_layer(s, partition)}")
+                    f"{sid} layer={sink_layer(s, partition)}"
+                    f"{'' if s.get('layer') else ' (inferred from file type)'}")
             else:
                 net_sinks.append(s)
-        gated_surfaces = [sf for sf in surfaces_for_r
-                          if surface_layer(sf, partition) not in _UNGATEABLE_LAYERS]
+        gated_surfaces = [
+            sf for sf in surfaces_for_r
+            if not ungateable(sf,
+                              sf.get("handler_file") or sf.get("registration_file"),
+                              surface_layer(sf, partition))]
 
         # --- Story 2.6: is a rank-3 control OBSERVED for r, in gate TEXT? ----
         # A credential KIND is a taxonomy label. Only an actual gate description

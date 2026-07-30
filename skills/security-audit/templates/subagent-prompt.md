@@ -57,6 +57,7 @@ METHOD:
        python3 "{{skill_dir}}/lib/validate-findings.py" \
          --schema "{{skill_dir}}/lib/finding-schema.json" \
          --cwe-map "{{skill_dir}}/lib/cwe-map.json" \
+         --require-evidence-discipline \
          .claude-audit/current/phase-{{NN}}-{{category}}-{{partition_id}}.jsonl
      The `{{skill_dir}}` placeholder is replaced by the orchestrator
      with the literal absolute path of the security-audit skill before
