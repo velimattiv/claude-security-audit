@@ -100,6 +100,29 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# v2.6: `lstrip("./")` takes a CHARACTER SET, not a prefix — so `.output/x`
+# became `output/x`, `./.env` became `env`, and any path whose first component
+# starts with a dot was silently rewritten into a different path. Shipped in
+# v2.5; together with the missing ignore-file support it produced 64 phantom
+# coverage failures that masked 7 real credential gaps and 129 real collection
+# gaps. Fail-closed gates failing in the NOISY direction is the specific way a
+# fail-closed gate stops being trusted.
+#
+# The calibration analysis filed this as one bug in one file. A repo-wide sweep
+# for the shape found ten call sites across three modules — the release's own
+# §1.6 lesson ("the tool finds instances, not classes") landing on the release
+# itself. Here it also corrupted BASELINE MATCH KEYS, so a finding under
+# `.github/` or `.output/` could fail to match its own baseline entry, resetting
+# `first_seen_at` and blinding the R4 ratchet and the L1 age gate.
+_DOT_PREFIX_RE = re.compile(r"^(?:\./)+")
+
+
+def _strip_dot_prefix(s):
+    """Strip leading `./` path prefixes. Never touches a leading dot that is
+    part of a real name (`.github/`, `.output/`, `.env`)."""
+    return _DOT_PREFIX_RE.sub("", str(s))
+
+
 SEV = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 SEV_IDX = {s: i for i, s in enumerate(SEV)}
 
@@ -578,7 +601,7 @@ def baseline_index(baseline):
         # baseline-schema's findings_carryover, and a pruned v2.4-era baseline
         # omits it — keying on it would make the drift fallback silently never
         # match, which is how this fix failed its own first test.
-        key = (str(b.get("file", "")).lstrip("./"), b.get("cwe"))
+        key = (_strip_dot_prefix(b.get("file", "")), b.get("cwe"))
         drift.setdefault(key, []).append((b.get("line"), fp, b))
     return idx, drift
 
@@ -611,7 +634,7 @@ def match_baseline(f, bidx, drift, consumed=None):
     fp = fingerprint_of(f)
     if fp in bidx:
         return bidx[fp], fp, "exact"
-    key = (str(f.get("file", "")).lstrip("./"), f.get("cwe"))
+    key = (_strip_dot_prefix(f.get("file", "")), f.get("cwe"))
     best, best_fp, best_d = None, None, None
     for bline, bfp, b in drift.get(key, []):
         if bfp in consumed:
@@ -639,7 +662,7 @@ def _parse_changed(entries):
     path only says the file was touched somewhere."""
     files, ranges = set(), {}
     for raw in entries or []:
-        raw = str(raw).strip().lstrip("./")
+        raw = _strip_dot_prefix(str(raw).strip())
         if not raw:
             continue
         m = re.match(r"^(.*?):(\d+)-(\d+)$", raw)
@@ -700,7 +723,7 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
     for fi, f in enumerate(findings):
         if fingerprint_of(f) in bidx:
             continue
-        key = (str(f.get("file", "")).lstrip("./"), f.get("cwe"))
+        key = (_strip_dot_prefix(f.get("file", "")), f.get("cwe"))
         for bline, bfp, b in bdrift.get(key, []):
             if bline is None or f.get("line") is None:
                 continue
@@ -849,7 +872,7 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
     for fp, b in bidx.items():
         if fp in seen_fps or sidx(b.get("severity", "INFO")) < SEV_IDX["HIGH"]:
             continue
-        bfile = str(b.get("file", "")).lstrip("./")
+        bfile = _strip_dot_prefix(b.get("file", ""))
         rngs = changed_ranges.get(bfile)
         if bfile and bfile in changed:
             if rngs is None:
