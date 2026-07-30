@@ -148,7 +148,7 @@ discarded as a *severity* signal because 11% of it is true.
 
 | Methodology | Coverage | Findings |
 |---|---|---|
-| OWASP ASVS 5.0 L2 | {{asvs_pct}}% | {{asvs_count}} |
+| OWASP ASVS 4.0.3 L2 | {{asvs_pct}}% | {{asvs_count}} |
 | OWASP Top 10:2025 (web) | {{web_top10_cat_count}}/10 categories fired | {{web_top10_total}} |
 | OWASP API Top 10 (2023) | {{api_cat_count}}/10 categories fired | {{api_total}} |
 | OWASP LLM Top 10 (2025) | {{llm_status}} | {{llm_count}} |

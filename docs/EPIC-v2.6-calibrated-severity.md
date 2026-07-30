@@ -34,6 +34,13 @@ over-flagging.** Nothing in v2.6 makes the tool quieter at the expense of recall
 cycles are counted as *not* true, so every rate is a lower bound; the right-hand
 column drops them.
 
+**Read the denominator carefully.** It is **255 verdicts**, not the 263 HIGH+
+findings — 8 were never triaged. So every rate below is *precision over triaged
+findings*, not precision over all findings, and the two are not the same claim.
+`scripts/calibration-report.py` models this correctly: untriaged rows are
+excluded from the denominator and reported separately as coverage, so a future
+run cannot quietly improve its number by triaging less.
+
 | Rule family | n | true | rate | rate (excl. cycles) |
 |---|---:|---:|---:|---:|
 | Category deep-dive agent | 89 | 86 | **96.6%** | 98.9% |

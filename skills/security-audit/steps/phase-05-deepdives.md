@@ -283,7 +283,9 @@ INFO-level finding and moves on.
 ## 5.4 — OWASP tagging
 
 Every finding gets at least one OWASP identifier:
-- **ASVS 5.0** category id, e.g., `ASVS-V6.2.1`
+- **ASVS 4.0.3** category id, e.g., `ASVS-V6.2.1` (the edition
+  `lib/asvs-l2.md` enumerates; 5.0.0 renumbered every chapter, so mixing
+  editions produces tags that resolve to the wrong control)
 - **API Top 10 (2023)**: `API1:2023` … `API10:2023`
 - **LLM Top 10 (2025)**: `LLM01:2025` … `LLM10:2025`
 - **Web Top 10 (2025)**: `A01:2025` … `A10:2025` (cat-08/10 and the §6.16 roll-up)

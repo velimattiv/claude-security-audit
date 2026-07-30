@@ -344,7 +344,7 @@ staleness, SARIF upload rejection).
   by BMad Code, LLC, under MIT.
 - `skills/security-audit/lib/cwe-map.json` reproduces CWE IDs and names
   from MITRE's Common Weakness Enumeration under CC BY 4.0.
-- `skills/security-audit/lib/asvs-l2.md` references OWASP ASVS 5.0
+- `skills/security-audit/lib/asvs-l2.md` references OWASP ASVS 4.0.3
   category topics (canonical text at https://github.com/OWASP/ASVS).
 - See `NOTICE.md` for full per-file attribution and scanner bundle
   license transparency.

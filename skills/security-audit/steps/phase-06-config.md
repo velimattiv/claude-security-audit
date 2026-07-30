@@ -160,7 +160,7 @@ From `profile.deployment.ci.*`:
 Cross-reference zizmor SARIF if present. Findings tagged
 `category: deployment`, `owasp_ids: ["ASVS-V14.1", "API8:2023"]`.
 
-## 6.9 — ASVS 5.0 Level 2 spine
+## 6.9 — ASVS 4.0.3 Level 2 spine
 
 Invoke the **Agent tool** once per ASVS L2 category (V1 through V17 —
 17 sub-agents). For each category, the Agent invocation has:
