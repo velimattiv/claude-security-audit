@@ -502,7 +502,7 @@ python3 "$SKILL_DIR/lib/validate-collection-scoping.py" \
 The script (a) re-extracts list-query candidates from the handler files and
 **FAILS the run if any candidate was neither inventoried nor dismissed** in Phase
 2 §2.12 (line-scoped, same discipline as §6.19), and (b) emits one finding per
-scoping deficit via rules C1-C5:
+scoping deficit via rules C1-C6:
 
 - **C1** — a collection of a sensitive entity with no caller-bound predicate,
   no filtering visibility helper, and no `public_resources` entry (CWE-1220).

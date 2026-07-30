@@ -388,7 +388,7 @@ answer this question; that is the whole point of the section.
 - **Collections inventoried:** {{collection_count}} · **candidates dismissed:** {{collection_dismissed_count}}
 - **By row scope:** caller_bound {{collection_caller_bound}} · visibility_filtered {{collection_visibility_filtered}} · public_allowlisted {{collection_public}} · role_restricted {{collection_role_restricted}} · **unscoped {{collection_unscoped}}** · unknown {{collection_unknown}}
 - **Coverage gate:** {{collection_coverage_status}} (fail-closed — a silently-omitted list query fails the run)
-- **Findings:** C1 unscoped {{collection_c1}} · C2 decoration {{collection_c2}} · C3 coverage {{collection_c3}} · C4 test-pinned {{collection_c4}} · C5 unevidenced claim {{collection_c5}}
+- **Findings:** C1 unscoped {{collection_c1}} · C2 decoration {{collection_c2}} · C3 coverage {{collection_c3}} · C4 test-pinned {{collection_c4}} · C5 unevidenced claim {{collection_c5}} · C6 miscited predicate {{collection_c6}}
 - **Public-resource allowlist (review this):** {{collection_public_list}}
 
 {{collection_findings_block}}

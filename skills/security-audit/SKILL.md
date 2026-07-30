@@ -78,7 +78,7 @@ correctly-looking, and still return every other user's rows — because
 inventories row scoping (`phase-02-collections.json`), Phase 5 category 12
 deep-dives it, and Phase 6 §6.20 runs a deterministic reconciliation
 ([lib/validate-collection-scoping.py](lib/validate-collection-scoping.py), rules
-C1–C5) with a fail-closed coverage gate. C5 re-checks each scoping *claim*
+C1–C6) with a fail-closed coverage gate. C5 re-checks each scoping *claim*
 against the source at the cited `file:line` (a predicate that is not there is
 refused) and C2b catches a denied decoration the handler plainly performs. Those
 are the two claims most likely to be wrong; neither is a general proof that an
@@ -112,7 +112,7 @@ suppression is printed.
 > **The invariant, stated once:** a low-evidence finding must not be able to
 > raise the severity of anything — itself or its neighbours.
 
-**Honest scope (state this in the report):** C1–C5 make the collection class
+**Honest scope (state this in the report):** C1–C6 make the collection class
 expressible and checkable, and make an omitted collection loud — but a clean run
 is **not** a proof of absence. A scope applied by an un-modelled mechanism is
 missed conservatively (over-flagging, then retired by the §6.20 adversarial
