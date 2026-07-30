@@ -298,6 +298,21 @@ _VERB_SYNONYMS = {
     "escalate": "escalates", "privesc": "escalates", "elevate": "escalates",
     "impersonate": "impersonates", "bypass": "bypasses",
     "authenticate": "authenticates", "auth": "authenticates",
+    # v2.6 (story 4.4): availability / integrity verbs. The calibrated run
+    # missed a HIGH whose entire attack path had no confidentiality component —
+    # an uncapped provisioning call mints enough rows to displace every real one
+    # from a downstream fixed-size scan, producing an estate-wide silent
+    # attribution stop. `normcap` passes unknown verbs through and `satisfies`
+    # is exact-match, so such a capability composes fine once written in
+    # canonical form — but WITHOUT these entries the synonyms silently fail to
+    # normalise and the chain breaks at the join. A capability that joins
+    # nothing is invisible to R1/R3, which is the failure mode this table exists
+    # to prevent.
+    "deny": "denies", "starve": "denies", "starves": "denies",
+    "exhaust": "denies", "exhausts": "denies", "dos": "denies",
+    "corrupt": "corrupts", "truncate": "corrupts", "truncates": "corrupts",
+    "falsify": "corrupts", "falsifies": "corrupts", "poison": "corrupts",
+    "poisons": "corrupts",
 }
 _SCOPES = ("any", "own", "other", "cross_tenant", "self")
 

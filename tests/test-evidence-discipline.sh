@@ -72,6 +72,20 @@ expect_hit 6 "uncited structurally_unreachable is refused"
 # The parent carries the obligations.
 expect_clean 7 "an annexed row is exempt (its parent carries the obligations)"
 
+# A refutation grants the attacker nothing — that is the whole content of the
+# claim. Requiring non-empty postconditions would force the analyst to tag it
+# with the capability the ALLEGED defect would have granted, feeding a disproven
+# capability into the composition graph where it would satisfy other findings'
+# preconditions and escalate them.
+out_caps="$(python3 "$VALIDATOR" --schema "$SCHEMA" \
+             --require-capabilities auth,idor,token_scope,collection_scope \
+             --require-evidence-discipline "$FIXTURE" 2>&1)"
+if grep -q "line 8:" <<<"$out_caps"; then
+  bad "a refuted finding in an access-control category must not be forced to declare postconditions"
+else
+  ok "a refutation carries its real category and grants nothing"
+fi
+
 # The flag is opt-in: without it, the same fixture must validate cleanly, so
 # existing callers are unaffected.
 if python3 "$VALIDATOR" --schema "$SCHEMA" "$FIXTURE" >/dev/null 2>&1; then

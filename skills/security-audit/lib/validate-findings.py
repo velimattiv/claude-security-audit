@@ -81,6 +81,15 @@ def capability_errors(lineno: int, finding: dict, require_cats: set[str]) -> lis
     days of exposure."""
     if not require_cats or finding.get("category") not in require_cats:
         return []
+    # v2.6: a REFUTATION grants the attacker nothing — that is the whole content
+    # of the claim. Requiring non-empty `postconditions` here would force the
+    # analyst to tag it with the capability the *alleged* defect would have
+    # granted, feeding a **disproven** capability into the composition graph,
+    # where it would satisfy other findings' preconditions and escalate them.
+    # A refuted finding must be able to carry its real category and grant
+    # nothing; `refutation_scope` (checked separately) is what keeps it honest.
+    if finding.get("attacked") == "refuted":
+        return []
     errs = []
     if "preconditions" not in finding:
         errs.append(
