@@ -96,6 +96,18 @@ jobs:
           # sink-kind-swap) is still caught.
           bash tests/test-egress.sh
 
+      - name: Evidence discipline (v2.6)
+        run: |
+          # The Wave-3 obligations enforced mechanically rather than in prose:
+          # HIGH+ findings must enumerate their sibling sites (the majority of
+          # the 34 defects a calibrated triage found and the audit missed were
+          # the 2nd/3rd/4th site of a defect found once), a refutation must be
+          # scoped to what was actually examined (a refutation true of one
+          # module, generalised to a system property, buried a live HIGH), a
+          # suggested fix must be rated separately from its finding, and an
+          # unreachability claim that suppresses escalation must cite a line.
+          bash tests/test-evidence-discipline.sh
+
       - name: Compile-check cat-*.md regex patterns (polyglot regression guard)
         run: |
           python3 scripts/validate-patterns.py
