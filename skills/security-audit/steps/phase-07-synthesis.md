@@ -165,8 +165,18 @@ For each row with `evidence_class == "heuristic_inventory"`:
 
 1. **Join on `(file, line)`** to a row with
    `evidence_class == "agent_judgement"`. Exact line match.
-2. **Fall back to `(file, cwe)`** — same file, same CWE, any line. When several
-   judgement rows match, take the nearest line, then the highest severity.
+2. **Fall back to `(file, cwe)` within ±40 lines** — same file, same CWE, and
+   the nearest judgement row **no more than 40 lines away**; ties break on the
+   highest severity. Beyond that window, **do not match — leave the row an
+   orphan annex.**
+
+   The window is the whole point of this step. "Same file, same CWE, any line"
+   is an unbounded free variable: a file with two distinct CWE-862 defects 400
+   lines apart would fold the mechanical row for one into the judgement finding
+   for the other purely because it was nearest, corrupting that finding's
+   `sibling_sites`, mislabelling its `sibling_pattern`, and silently discarding
+   the correct target. An orphan is a visible, low-confidence lead; a
+   misattribution is an invisible wrong answer inside a finding a reader trusts.
 3. **On a hit** — set `annexed_to = <parent id>`, append
    `{file, line, note}` to the **parent's** `sibling_sites[]`, and set the
    parent's `sibling_pattern` to the annexed row's `rule_family` if the parent
@@ -193,6 +203,35 @@ explicitly-labelled heading:
 **A silent drop here is a recall regression and blocks the release** — see
 `docs/EPIC-v2.6-calibrated-severity.md` §3.2 for the 17-site recall floor that
 must still appear somewhere in the output after this re-cast.
+
+### Step 5 — REQUIRED: validate the annexed corpus
+
+The join above is the only step in this skill that can make a finding stop being
+a finding. It runs here, on merged Phase-7 data, so the Phase-5 validation pass
+has already happened and **cannot** have checked it — `annexed_to` did not exist
+when Phase 5 ran. Re-validate now, or the annex's own safety checks never
+execute on a single real annexed row:
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+python3 "$SKILL_DIR/lib/validate-findings.py" \
+    --schema "$SKILL_DIR/lib/finding-schema.json" \
+    --require-evidence-discipline \
+    .claude-audit/current/phase-07-findings-annexed.jsonl
+```
+
+This refuses an `annexed_to` naming a parent that is not in the corpus (a
+dangling parent **deletes** a finding rather than demoting it — nothing carries
+its obligations any more) and an `annexed_to` on a row that is not
+`heuristic_inventory` (a judgement finding may not fold itself away). Both are
+one-field ways to make a real finding disappear, which is why they are checked
+mechanically rather than described.
+
+**Non-zero exit blocks the phase.** Fix the join and re-run; do not proceed with
+an unvalidated annexed corpus. `compose-attack-paths.py` additionally reports any
+`annexed_to` it cannot resolve as a `DANGLING ANNEXES` block and reclassifies
+those rows as orphan annexes, so a reference broken by §7.2's id-dedup surfaces
+as a lead rather than vanishing.
 
 ### Consequence for the severity gate
 

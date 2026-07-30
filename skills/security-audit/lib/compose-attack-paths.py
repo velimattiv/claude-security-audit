@@ -153,15 +153,43 @@ PROMOTABLE_EVIDENCE = {"external_scanner"}
 _L1_EXCLUDED_EVIDENCE = {"heuristic_inventory"}
 
 
-def evidence_class(f):
-    """Best-effort read of a finding's evidence class.
+#: Substrings identifying THIS SKILL's own reconcilers in `sources[].detail`.
+#: Used only to classify a pre-v2.6 row that predates `evidence_class`.
+_HEURISTIC_SOURCE_HINTS = ("validate-egress", "validate-collection-scoping")
 
-    Falls back to `agent_judgement` rather than to a promotable class, so a row
-    from an older run or a sub-agent that has not been updated cannot inherit a
-    promotion it never earned. Fail-safe direction: toward NOT promoting.
+#: External tools. A `scanner`-kind source naming one of these is the only thing
+#: that earns `external_scanner`; `validate-*.py` calling itself a scanner is the
+#: category error the whole field exists to prevent.
+_EXTERNAL_TOOL_HINTS = ("semgrep", "trivy", "osv-scanner", "gitleaks",
+                        "trufflehog", "hadolint", "checkov", "grype")
+
+
+def evidence_class(f):
+    """Read a finding's evidence class, INFERRING it when the field is absent.
+
+    Defaulting straight to `agent_judgement` was fail-safe only for the +1
+    promotion. It was fail-OPEN everywhere else: a pre-v2.6 R-rule row carried
+    forward from a baseline (which the R4 ratchet explicitly supports across a
+    v2.5 -> v2.6 upgrade) would land in the 92.1%-true judgement band, stay
+    eligible for the L1 age gate, escape annexation — which keys on
+    `heuristic_inventory` exactly — and keep minting capabilities. It would
+    inherit the trust of a class it never earned, which is this release's
+    founding defect wearing a version-skew hat.
+
+    So when the field is missing, classify from `sources[]` first and only fall
+    back to `agent_judgement` when nothing identifies the row.
     """
     ec = (f or {}).get("evidence_class")
-    return ec if isinstance(ec, str) and ec else "agent_judgement"
+    if isinstance(ec, str) and ec:
+        return ec
+    for src in (f or {}).get("sources") or []:
+        detail = str((src or {}).get("detail") or "").lower()
+        kind = str((src or {}).get("kind") or "").lower()
+        if kind == "heuristic" or any(h in detail for h in _HEURISTIC_SOURCE_HINTS):
+            return "heuristic_inventory"
+        if kind == "scanner" and any(t in detail for t in _EXTERNAL_TOOL_HINTS):
+            return "external_scanner"
+    return "agent_judgement"
 
 
 def _l1_eligible(f):
@@ -1099,13 +1127,18 @@ def main():
                 survivors = [f for f in tagged
                              if idx_of[id(f)] not in blocked]
                 _, sheld = compose(survivors, held0)
-                if any(is_jewel(c, jewels) for c in sheld):
+                sreached = sorted({c for c in sheld if is_jewel(c, jewels)})
+                if sreached:
                     blockers = []           # another route survives — still live
-                    # …but the blocked members are NOT on the surviving route,
-                    # so they must not ride its escalation. Escalate what
-                    # actually carries the live chain, nothing more — the same
-                    # backward-slice precision R3 already applies to bystanders.
-                    contrib_g = [gi for gi in contrib_g if gi not in blocked]
+                    # Re-slice against the SURVIVING graph rather than filtering
+                    # the stale union. Dropping only the citing nodes would leave
+                    # every node that was upstream of them — whose sole route is
+                    # now severed — still in the slice, and escalate it to
+                    # CRITICAL on the strength of a chain the recomposition just
+                    # proved dead. Escalate what actually carries a live chain.
+                    spath, _ = compose(survivors, held0)
+                    scontrib = contributing_slice(survivors, spath, held0, sreached)
+                    contrib_g = [idx_of[id(survivors[i])] for i in sorted(scontrib)]
 
         chain_sev = "INFO"
         for i in path:
@@ -1223,9 +1256,31 @@ def main():
     # guarantee for an agent's diligence, and 34 missed defects say that trade
     # is bad. So orphans surface, explicitly labelled and capped out of the
     # headline band by the report (§7.2b), rather than being dropped.
+    # A DANGLING `annexed_to` is the dangerous case. §7.2's id-dedup runs before
+    # §7.2b's annex join, so a parent can be collapsed under a surviving id after
+    # a child already pointed at it. Such a row is excluded from the headline
+    # band (correctly, it is annexed) AND missed by an orphan test that only asks
+    # `annexed_to is None` — so it vanishes from both, which is the silent drop
+    # §7.2b's own release-blocking language forbids. Resolve the reference here
+    # rather than assuming an upstream validator caught it.
+    _known = {str(f.get("id")) for f in findings if f.get("id")}
+    for _f in findings:
+        for _a in (_f.get("aliases") or []):
+            _known.add(str(_a))
+    dangling_annex = [f for f in findings
+                      if annexed_to(f) is not None
+                      and str(annexed_to(f)) not in _known]
+    if dangling_annex and not args.quiet:
+        print("\nDANGLING ANNEXES (annexed_to names no finding in this corpus — "
+              "reclassified as orphans so they cannot vanish silently)")
+        for f in dangling_annex[:15]:
+            print(f"  {str(f.get('id')):<28} -> {annexed_to(f)}  "
+                  f"{f.get('file')}:{f.get('line')}")
+    _dangling_ids = {id(f) for f in dangling_annex}
+
     orphan_annex = [f for f in findings
                     if evidence_class(f) == "heuristic_inventory"
-                    and annexed_to(f) is None]
+                    and (annexed_to(f) is None or id(f) in _dangling_ids)]
     if orphan_annex and not args.quiet:
         print("\nORPHAN ANNEXES (heuristic rows with no judgement twin — "
               "low-confidence leads, NOT headline findings; see §7.2b)")
@@ -1370,6 +1425,7 @@ def main():
             {str(findings[gi].get("id")) for gi, _p in uncited_claims}),
         # Wave 2b: the annex split, so the report can band them correctly.
         "annexed_rows": [str(f.get("id")) for f in annexed],
+        "dangling_annexes": [str(f.get("id")) for f in dangling_annex],
         "orphan_annexes": [str(f.get("id")) for f in orphan_annex],
     }
     if args.json_summary:

@@ -566,6 +566,12 @@ def _scan_quoted(t, i, n, out):
             j += 2
             continue
         if t[j] == q:
+            # SQL doubles a quote to escape it ('it''s'); that is one literal,
+            # not two. Closing on the first half inverts parity for everything
+            # after it — v2.6, alongside the same fix in _strip_comments.
+            if j + 1 < n and t[j + 1] == q:
+                j += 2
+                continue
             out.append(" " * (j - i + 1))   # properly closed literal
             return j + 1
         j += 1
@@ -607,7 +613,15 @@ def _comment_span(t, i, n):
     if c == "/" and nxt == "*":             # SQL / C block comment
         j = t.find("*/", i + 2)
         return n if j < 0 else j + 2
-    if c == "/" and nxt == "/" and not (i and t[i - 1] == ":"):
+    if c == "/" and nxt == "/":
+        # No `https://` carve-out. Both callers resolve quoted literals BEFORE
+        # asking about comments, so a URL that matters is already inside a string
+        # and never reaches here. A look-back-one-char exception would instead
+        # misread `case 1://x` and `{port:5432}//x` as not-a-comment, and a
+        # commented-out `current_setting('app.user_*')` on such a line would then
+        # satisfy the RLS-GUC pre-pass — reopening the silent miss this function
+        # was added to close, just relocated. A bare unquoted `//` inside a query
+        # blanks to end of line, which is the over-flagging direction.
         j = t.find("\n", i)
         return n if j < 0 else j
     return None
@@ -636,6 +650,15 @@ def _strip_comments(t):
                     j += 2
                     continue
                 if t[j] == c:
+                    # SQL escapes a quote by DOUBLING it, not with a backslash:
+                    # 'it''s' is one literal. Reading the second quote as a
+                    # close would invert quote parity for the rest of the line
+                    # and either hide a real GUC from the pre-pass or expose a
+                    # commented one to it — both directions of the bug this
+                    # function exists to prevent.
+                    if j + 1 < n and t[j + 1] == c:
+                        j += 2
+                        continue
                     break
                 j += 1
             out.append(t[i:min(j + 1, n)])
