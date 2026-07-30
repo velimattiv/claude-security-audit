@@ -236,6 +236,36 @@ The Phase 5 sub-agents already assign an initial `confidence`. Phase 7
 may promote (LIKELY → CONFIRMED when another source appears) but never
 demote.
 
+### ⛔ `evidence_class` DOES NOT MOVE — ever, in this phase
+
+**Cross-referencing raises `confidence`. It NEVER raises `evidence_class`.**
+This is the Phase-7 half of the rule stated for sub-agents in
+`phase-05-deepdives.md §5.6`, and it must exist in both places, because
+`confidence` is *supposed* to rise when a second source appears and the
+temptation to carry the row's class up with it is exactly the mistake.
+
+| Row starts as | A scanner also flags it | `confidence` | `evidence_class` |
+|---|---|---|---|
+| `agent_judgement` | semgrep agrees | may rise to CONFIRMED | **stays `agent_judgement`** |
+| `heuristic_inventory` | semgrep agrees | may rise to CONFIRMED | **stays `heuristic_inventory`** |
+| `heuristic_inventory` | a second heuristic agrees | may rise to CONFIRMED | **stays `heuristic_inventory`** |
+| `external_scanner` | anything | unchanged rules | stays `external_scanner` |
+
+The scanner's agreement is recorded where it belongs — in `sources[]` — and
+that is what §7.5 and the report read. **`evidence_class` describes how the row
+was ORIGINALLY OBTAINED and is immutable after emission.**
+
+Why this guard is load-bearing: without it, Phase 7 quietly re-implements the
+promotion story 1.1 just removed. A `heuristic_inventory` row that acquired a
+`scanner` source would become `external_scanner`, and `external_scanner` is the
+**one** class that earns the §7.4 `+1` rung. Two sources would then buy a
+severity rung for the 1.4%-true family through a different door — and this time
+with no single line of code to point at, because it happened in prose.
+
+The corollary: **a row's `evidence_class` may only ever be set by the thing that
+emitted it.** If Phase 7 finds itself computing an `evidence_class`, that is a
+bug — the correct fix is upstream, in whichever phase failed to stamp it.
+
 **Do not infer `evidence_class` from `confidence`, or vice versa.** They are
 orthogonal, along with `attacked`. `evidence_class` says where the row came
 from, `attacked` says whether anyone tried to break it, `confidence` says how
@@ -336,6 +366,147 @@ more positives don't nudge further (they'd be double-counting the
 same underlying signal). The symmetric dev-zone demotion captures
 the inverse — test fixtures rarely warrant the same severity as
 production code with the same finding body.
+
+## 7.4b — Fix contradiction check (v2.6, story 3.3) — MANDATORY, before the roadmap
+
+**The finding and the fix are separate claims and get separately checked.**
+
+The measured case: **six findings on one Postgres-TLS defect. The finding was
+right on all six; the fix was wrong on five.** Five prescribed a nine-site
+`ssl: { rejectUnauthorized… }` change plus CA bundling; **one** prescribed a
+one-word `?sslmode=verify-full` substitution and cited the driver source proving
+it. The correct one was in the minority, and the report **merged the wrong text
+into its priority list** without noticing that its own findings disagreed with
+each other. Nothing checked. Fix text is what gets executed, and it currently
+inherits the finding's confidence for free.
+
+### Step 1 — group
+
+Group findings that describe **the same defect**:
+
+1. `(file, line, cwe)` — exact.
+2. Fall back to `(fingerprint, cwe)`.
+
+Groups of one are done. A group of two or more goes to Step 2.
+
+### Step 2 — do the fixes actually disagree?
+
+Normalise each `suggested_fix` (lowercase, collapse whitespace, strip code
+fences and punctuation) and compare. Two outcomes, and **only the second is a
+contradiction**:
+
+- **Same remedy, different words** — e.g. "set `sslmode=verify-full`" vs
+  "append `?sslmode=verify-full` to the connection URL". **Merge**: keep the
+  longest text, union the citations, and move on. This is not a contradiction
+  and must not be reported as one.
+- **Different remedies** — they prescribe different edits, to different places,
+  or one asserts a change is needed where another asserts it is not. **This is a
+  contradiction.** Go to Step 3.
+
+Adjudicate this by *reading* the two texts, not by a similarity score. A
+threshold would have merged the Postgres-TLS pair (they share almost every
+token: `ssl`, `postgres`, `connection`, `verify`) while they prescribe a
+nine-site refactor and a one-word change respectively. **Token overlap does not
+measure agreement about what to do.**
+
+### Step 3 — resolve, and never by majority
+
+| Situation | Resolution |
+|---|---|
+| Exactly one member has `fix_confidence: verified` | **That fix wins.** The others' `suggested_fix` text is **discarded, not merged**. List the discarded texts in the block below so the decision is auditable. |
+| Two or more members are `verified` and still disagree | Contradiction **stands**. No fix ships. Emit the block. |
+| No member is `verified` | **Ship NEITHER as a roadmap item.** Emit the block. |
+
+**Never resolve by majority, by severity, or by recency.** In the measured case
+the correct fix was 1 of 6 and the only one carrying a driver-source citation —
+every one of those heuristics picks the wrong text. `fix_confidence: verified`
+requires a cited line *in the dependency, driver or API being asserted about*,
+which is precisely the evidence the minority fix had and the majority did not.
+
+### ⛔ Step 4 — this withholds the FIX, never the FINDING
+
+**The findings still ship, at full computed severity, in their normal band.**
+Only the `suggested_fix` text is withheld, and it is withheld *loudly*. Each
+affected finding prints:
+
+> **Suggested fix:** ⛔ **WITHHELD — FIX RECONCILIATION REQUIRED.** <n> findings
+> on this defect prescribe conflicting remedies and none is `verified`. See
+> *Fix Reconciliation Required*. The defect is real; the remedy is not agreed.
+
+This direction is not negotiable. A check that could suppress a finding because
+its remediation text is disputed would be a **severity-suppression mechanism
+wearing a quality check's clothes** — the same shape as the wrong refutation
+that buried a live HIGH under a heading readers trust (§7.15). The defect's
+existence and the defect's cure are independent claims; only the second is in
+doubt here.
+
+### Step 5 — emit the block
+
+A `FIX RECONCILIATION REQUIRED` section in the Remediation Roadmap, before the
+effort groups:
+
+```markdown
+### ⛔ Fix Reconciliation Required
+
+Findings whose remedies contradict each other. **The defects are real.** The
+fixes below are NOT roadmap items until one is verified against the dependency,
+driver or API it asserts about.
+
+| Defect | Findings | Conflicting remedies | `fix_confidence` |
+|---|---|---|---|
+| db/client.ts:14 (CWE-295) | 6 | (a) nine-site `ssl:{rejectUnauthorized}` + CA bundle · (b) `?sslmode=verify-full` | all `inferred` |
+
+**To resolve:** cite the line in the driver/dependency that proves which remedy
+is correct, set `fix_confidence: verified` on that finding, and re-run Phase 7.
+```
+
+Detection is mechanical; run it and do not skip the group of one-line greps:
+
+```bash
+python3 - <<'PY'
+import json, re, collections
+
+def norm(s):
+    """Lowercase, drop code fences, strip punctuation, collapse whitespace.
+
+    Must match the normalisation described in Step 2. A weaker norm (e.g.
+    whitespace only) reports 'Escape the output.' and 'escape  the output' as
+    two remedies and buries the real contradictions in noise."""
+    s = re.sub(r'`{1,3}[^`]*`{1,3}', ' ', str(s or '').lower())
+    return ' '.join(re.sub(r'[^a-z0-9]+', ' ', s).split())
+
+rows = [json.loads(l) for l in
+        open('.claude-audit/current/phase-07-findings-computed.jsonl')
+        if l.strip()]
+groups = collections.defaultdict(list)
+for r in rows:
+    if r.get('attacked') == 'refuted' or r.get('annexed_to'):
+        continue                      # refutations and annex legs prescribe nothing
+    key = (r.get('file'), r.get('line'), r.get('cwe'))
+    if key[0] is None or key[1] is None:
+        key = (r.get('fingerprint'), None, r.get('cwe'))
+    groups[key].append(r)
+for key, g in sorted(groups.items(), key=lambda kv: str(kv[0])):
+    if len(g) < 2:
+        continue
+    fixes = {norm(r.get('suggested_fix')) for r in g}
+    if len(fixes) < 2:
+        continue
+    verified = [r for r in g if r.get('fix_confidence') == 'verified']
+    print(f"CANDIDATE {key}: {len(g)} findings, {len(fixes)} distinct remedies, "
+          f"{len(verified)} verified -> {[r.get('id') for r in g]}")
+PY
+```
+
+Note the normalisation strips **code fences and inline code**. That is
+deliberate and it cuts the other way too: two remedies whose only difference is
+inside a backticked snippet normalise to the same string and will **not** be
+reported. Step 2 is where you catch that — the script narrows the reading, it
+does not replace it.
+
+The script finds **candidates**; Step 2 decides which are real contradictions
+and Step 3 resolves them. A candidate you dismiss as "same remedy, different
+words" is a judgement you are making — make it deliberately.
 
 ## 7.5 — Unique-to-skill identification
 
@@ -645,19 +816,19 @@ silent, and that a tagged chain can no longer be out-voted by instinct.
 
 ## 7.7 — Emit `phase-07-report.md`
 
-Use the template in `lib/report-template.md`. Sections in order:
+Use the template in `lib/report-template.md`. **The template is authoritative
+for structure**; this section says how to fill it. Sections in order:
 
 1. **Header** — project name, audit id, skill version, generated-at,
    scope, duration.
-2. **Executive Summary** — total findings, by severity, by category,
-   by confidence. Top 3 risks (one line each). Plus: **CWE Top 25 (2025)
-   hits** (§7.13) and the **"Exploit-likely" callout** (EPSS ≥ 0.10 OR
+2. **Executive Summary** — total findings, by severity, the **Evidence mix**
+   (below), by confidence. Top 3 risks (one line each). Plus: **CWE Top 25
+   (2025) hits** (§7.13) and the **"Exploit-likely" callout** (EPSS ≥ 0.10 OR
    KEV=true, §7.14) when either is non-empty.
 3. **Partition Risk Ranking** — table from Phase 1 with finding counts
    appended per partition.
-4. **Findings** — grouped by severity (CRITICAL → INFO), within severity
-   grouped by category. Per finding: id, title, confidence, file:line,
-   CWE, OWASP ids, description, attack scenario, suggested fix.
+4. **Findings** — **class-major, severity-minor.** See §7.7a below. This
+   replaces v2.5's severity-major ordering; do not fall back to it.
 5. **Attack Surface Summary** — from Phase 2, counts by category,
    noteworthy surfaces listed.
 5c. **Collection Scoping (row-level access control)** — from §6.20.
@@ -702,9 +873,103 @@ Use the template in `lib/report-template.md`. Sections in order:
 9. **Route Inventory** — first 50 rows (truncated with count).
 10. **Unique-to-Skill Findings** — §7.5.
 11. **Audit Coverage** — per-phase status (completed / degraded /
-    skipped) with notes.
-12. **Remediation Roadmap** — grouped by effort (trivial / small /
-    medium / large) for quick triage.
+    skipped) with notes, plus the §7.7a routing assertion count.
+12. **Remediation Roadmap** — the `FIX RECONCILIATION REQUIRED` block (§7.4b)
+    first, then grouped by effort (trivial / small / medium / large).
+
+## 7.7a — Findings ordering: CLASS-MAJOR, SEVERITY-MINOR (v2.6, story 1.5)
+
+⛔ **v2.5 ordered the Findings section by severity, with category sub-groups.
+That ordering is retired. Do not emit it.**
+
+Severity-major with class sub-bands is not a fix, and this is the trap worth
+naming: it *looks* like it satisfies "no band mixes `evidence_class`" while
+still pointing the reading path at the worst pile first. A CRITICAL heading
+containing a `heuristic_inventory` sub-band still puts an 11%-true row above a
+92%-true MEDIUM, because readers read top-down. **The measured harm was the
+reading order, not the heading labels.** In the calibrated run 60% of the HIGH+
+population came from the families that supplied 15% of the true findings, and
+the report's own advice — "read the confidence bands" — sent triagers to the
+worst pile first and the best pile last.
+
+So: **the outer key is `evidence_class`, the inner key is severity.**
+
+### Routing — total, exclusive, evaluated in this order
+
+Every row lands in exactly one place. A row matching nothing is a **bug**, not
+a row to drop.
+
+| # | Test | Destination |
+|---|---|---|
+| 1 | `attacked == "refuted"` | **What Is Sound** — not a band, not in the Findings Index |
+| 2 | `annexed_to` is set | **no row of its own** — appears only inside its parent's `sibling_sites` |
+| 3 | `evidence_class == "heuristic_inventory"` | **Annex** (leads) |
+| 4 | `evidence_class == "governance"` | **§ C** |
+| 5 | `evidence_class == "external_scanner"` | **§ B** |
+| 6 | `evidence_class == "agent_judgement"` | **§ A** |
+
+**Assert before emitting**, and print the result in the Audit Coverage table:
+
+```
+|§A| + |§B| + |§C| + |Annex| + |What Is Sound| + |annexed legs| == total rows
+```
+
+Test 1 precedes the class tests deliberately: a refuted row is a **negative
+claim** and belongs with the other negative claims regardless of who made it.
+Test 2 precedes the class tests because an annex leg is not a row at all.
+
+Within **§ A** and **§ B**, order by severity CRITICAL → INFO. Omit any
+severity sub-heading with zero rows; omit an entire class section with zero
+rows. **Do not merge a thin band into its neighbour to avoid printing an empty
+one** — that is how classes get mixed.
+
+**§ C (governance)** is a flat severity-ordered list, not sub-banded: these are
+claims about the audit's own state and a reader triaging them is doing a
+different job.
+
+### Placeholder semantics
+
+| Placeholder | Value |
+|---|---|
+| `n_ev_judgement` / `n_ev_scanner` / `n_ev_heuristic` / `n_ev_governance` | Row counts per `evidence_class` **after** routing. `n_ev_heuristic` counts annex leads (attached + orphan); annexed legs are counted there, not in §A/§B. |
+| `findings_index_rows` | One row per **§A + §B + §C** finding, severity-ordered: `\| Severity \| Evidence \| § \| ID \| Title \| Location \|`. **Excludes** refutations, annex legs and annex leads — a severity-ordered index containing an 11%-true lead re-creates the exact harm §7.7a exists to remove. The `Evidence` column is mandatory on every row; the `§` column names the band the finding is argued in. |
+| `judgement_critical_block`, `judgement_high_block`, `judgement_medium_block`, `judgement_low_block`, `judgement_info_block` | Per-finding blocks (template format) for `agent_judgement` at that severity. Empty string when none — the emitter omits the heading too. |
+| `scanner_critical_block`, `scanner_high_block`, `scanner_medium_block`, `scanner_low_block`, `scanner_info_block` | Same for `external_scanner`. |
+| `governance_block` | Per-finding blocks for `governance`, severity-ordered, no sub-headings. |
+| `escalation_rules_note` | When `severity_computed` > `severity_asserted`: `, via {{escalation_rules joined by "/"}}` (e.g. `, via R1/R3`). Empty string otherwise. **A finding whose computed severity exceeds its asserted severity with an empty `escalation_rules` is a bug** — report it in Audit Coverage rather than printing a bare arrow. |
+| `refutation_rows` | One row per `attacked == "refuted"` finding **that has a non-empty `refutation_scope`**: `\| # \| Host category \| Claim refuted \| Boundary examined \| Confidence \| Evidence \|`. Host category from the row's `notes`. Apply the template's four emitter rules — they are hard. |
+| `unscoped_refutation_ids` | Ids of refutations with **no** `refutation_scope`. These do **not** print as rows; they print here so the omission is visible. Comma-separated, or `none`. |
+| `n_refutations` | Count of **printed** (scoped) refutations — the ones the "— all scoped" claim covers. Unscoped ones are counted in `unscoped_refutation_ids` and nowhere else. |
+| `annex_lead_count` | All `heuristic_inventory` rows = attached + orphan. |
+| `annex_attached_count` | Those with `annexed_to` set (from the gate's `annexed_rows[]`). |
+| `annex_orphan_count` | Those without (from the gate's `orphan_annexes[]`). |
+| `annex_orphan_list` | The orphan lead list: `rule_family`, `file:line`, title. **No severity column** — these carry none. |
+| `annex_precision` | See §7.7b. |
+| `sibling_sweeps_run` | HIGH+ findings in §A + §B carrying a non-empty `sibling_pattern`. A sweep is "run" when a pattern was recorded, whether or not it found anything. |
+| `n_high_plus` | HIGH+ findings in §A + §B. Leads are excluded — they are not HIGH+, they are not rated. |
+| `sibling_sites_total` | Sum of `len(sibling_sites)` across those findings — the additional sites the sweeps found. |
+
+### 7.7b — Precision figures: print "not yet measured", never omit
+
+The "How to read this report" table carries a **Last measured precision**
+column, read from `manifest.yaml` `rule_family_precision` (the story 4.5
+standing calibration control).
+
+**That key does not exist yet.** Until it lands:
+
+- Print the column. Print `not yet measured` in every cell with no recorded
+  rate.
+- **Do not omit the column, and do not omit the table.**
+- **Do not invent, interpolate or carry forward a number.** The figures in the
+  template's prose (92.1% / 96.6% / 11.0%) are the calibrated-run measurements
+  for *that* codebase and are cited there as history — they are not this run's
+  rates and must not be printed as though they were.
+
+Absence of data is not evidence of precision. An unlabelled band is exactly
+what this section exists to replace: the v2.5 report called a population "the
+trustworthy spine" with no measurement at all, and half of it was 9.6% true.
+`not yet measured` is an honest cell; a missing column silently restores the
+unlabelled band.
 
 ## 7.8 — Emit `findings.sarif`
 
@@ -877,8 +1142,12 @@ copied to `$OUT/` by Phase 8.)
 > Security audit complete.
 >
 > - **Total findings:** <N> (<C> CRITICAL, <H> HIGH, <M> MEDIUM, <L> LOW, <I> INFO)
+> - **Evidence mix:** <J> agent judgement, <S> external scanner, <G> governance
+>   — plus <A> heuristic-inventory **leads** (not findings, §7.2b)
 > - **Partitions audited:** <N> at full depth, <K> inventory-only
 > - **Confidence mix:** <X> CONFIRMED, <Y> LIKELY, <Z> POSSIBLE
+>   (`confidence` is not provenance and not a reading order — that is the
+>   evidence mix above)
 > - **Unique-to-skill findings:** <U>
 > - **Report:** `<output_dir>/security-audit-report.md`
 > - **SARIF:** `<output_dir>/findings.sarif` (also in
