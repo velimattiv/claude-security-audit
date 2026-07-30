@@ -440,6 +440,76 @@ grep -q "scanners are mechanical ground truth" "$SYN" \
   && bad "§7.3 still asserts 'scanners are mechanical ground truth' unqualified" \
   || ok "§7.3's category error is gone"
 
+# --- 4g. the methodology and Track D's template agree -----------------------
+# Track D owns lib/report-template.md; §7.7 tells the emitter how to fill it.
+# When the two drift, the emitter follows §7.7 and silently undoes the story
+# the template was written for. These are the seams that actually drifted.
+TPL="skills/security-audit/lib/report-template.md"
+
+# (a) story 1.5: class-major / severity-minor. The retired v2.5 sentence must
+# be gone — severity-major with class sub-bands still points the reading path
+# at the worst pile first, which was the measured harm.
+grep -q "grouped by severity (CRITICAL → INFO), within severity" "$SYN" \
+  && bad "§7.7 still specifies v2.5 severity-major ordering — story 1.5 undone" \
+  || ok "§7.7 no longer specifies severity-major findings ordering"
+grep -q "CLASS-MAJOR, SEVERITY-MINOR" "$SYN" \
+  && ok "§7.7a specifies class-major / severity-minor ordering" \
+  || bad "§7.7a missing — the emitter has no ordering rule to follow"
+
+# (b) the routing table must be exclusive and cover every template destination.
+for dest in "What Is Sound" "Annex" "§ C" "§ B" "§ A"; do
+  grep -q "$dest" "$SYN" \
+    && ok "§7.7a routing names destination: $dest" \
+    || bad "§7.7a routing has no destination for $dest"
+done
+
+# (c) every v2.6 placeholder Track D added is given semantics in §7.7. A
+# placeholder the template prints and the methodology never defines is filled
+# by guesswork, which is how {{annex_precision}} would have become a number
+# nobody measured.
+missing=""
+for ph in n_ev_judgement n_ev_scanner n_ev_heuristic n_ev_governance \
+          findings_index_rows judgement_critical_block judgement_info_block \
+          scanner_critical_block scanner_info_block governance_block \
+          refutation_rows unscoped_refutation_ids n_refutations \
+          annex_lead_count annex_attached_count annex_orphan_count \
+          annex_precision annex_orphan_list \
+          sibling_sweeps_run n_high_plus sibling_sites_total \
+          escalation_rules_note; do
+  grep -q "{{$ph}}" "$TPL" || { missing="$missing $ph(not-in-template)"; continue; }
+  grep -q "$ph" "$SYN" || missing="$missing $ph"
+done
+[ -z "$missing" ] \
+  && ok "every v2.6 template placeholder has semantics in §7.7" \
+  || bad "placeholders printed by the template but undefined in §7.7:$missing"
+
+# (d) story 4.5 has not landed: the precision column must degrade to a stated
+# "not yet measured", never vanish. Absence of data is not evidence of
+# precision — an unlabelled band is what §7.7a exists to replace.
+grep -q "not yet measured" "$SYN" \
+  && ok "§7.7b specifies the 'not yet measured' precision fallback" \
+  || bad "§7.7b missing — the precision column can silently vanish"
+grep -q "rule_family_precision" skills/security-audit/manifest.yaml 2>/dev/null \
+  && ok "manifest.yaml carries rule_family_precision (Track E landed)" \
+  || ok "manifest.yaml has no rule_family_precision yet — fallback path is live"
+
+# (e) story 3.3: the fix contradiction check, and the direction it fails in.
+grep -q "FIX RECONCILIATION REQUIRED" "$SYN" \
+  && ok "§7.4b specifies the fix contradiction block" \
+  || bad "§7.4b missing — conflicting fixes still ship silently (story 3.3)"
+grep -q "withholds the FIX, never the FINDING" "$SYN" \
+  && ok "§7.4b withholds the fix, never the finding" \
+  || bad "§7.4b could suppress a finding — a severity-suppression mechanism"
+
+# (f) story 1.1's second door: cross-referencing must not upgrade a row's class.
+grep -q "evidence_class\` DOES NOT MOVE" "$SYN" \
+  && ok "§7.3 forbids evidence_class promotion on cross-reference" \
+  || bad "§7.3 lets a second source upgrade evidence_class — story 1.1 undone"
+grep -q "evidence_class\` does not move" \
+     skills/security-audit/steps/phase-05-deepdives.md \
+  && ok "the matching §5.6 guard is present (both halves of the rule)" \
+  || bad "§5.6's evidence_class guard is missing"
+
 # --- 5. negative control ----------------------------------------------------
 $C $FIX/clean/findings.jsonl --now "$NOW" --quiet
 [ $? -eq 0 ] && ok "clean fixture exits 0 (gate is not a permanent red)" \
