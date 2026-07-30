@@ -1,0 +1,116 @@
+{
+  "_comment": [
+    "Expected output of scripts/calibration-report.py over the sibling fixture.",
+    "Keys are dotted paths into the --json struct. `by_group` asserts the",
+    "default (rolled-up) keying; `by_rule` asserts --by-rule.",
+    "",
+    "Hand-checkable arithmetic, and the point of each row:",
+    "  deep-dive      5 verdicts, 4 true          -> 80.0% / 80.0%   (a duplicate CHAIN resolves)",
+    "  R-rules        5 verdicts, 1 true, 2 cycle -> 20.0% / 33.3%   (with- vs excl-cycles diverge)",
+    "  C-rules        3 verdicts, 0 true, 2 cycle ->  0.0% /  0.0%   (unresolvable != true)",
+    "  ASVS           1 verdict UNCERTAIN         ->  0.0%           (counted as NOT true, reported)",
+    "  LINDDUN        1 NOT_TRIAGED               -> n=0, rate null  (outside every denominator)",
+    "  config         1 with no verdict row       -> n=0, rate null  (untriaged, outside denominators)",
+    "  scanner        1 verdict, 1 true           -> 100.0%",
+    "  TOTAL          15 verdicts, 6 true, 4 unresolvable -> 40.0% / 54.5%",
+    "",
+    "If the with-cycles and excl-cycles columns ever collapse into each other,",
+    "the R-rules and TOTAL rows are what notice."
+  ],
+  "by_group": {
+    "findings_total": 17,
+    "families_inferred_from_sources": 1,
+    "verdicts_total": 16,
+
+    "by_rule_family.Category deep-dive agent.n": 5,
+    "by_rule_family.Category deep-dive agent.true": 4,
+    "by_rule_family.Category deep-dive agent.rate": 0.8,
+    "by_rule_family.Category deep-dive agent.unresolvable_duplicates": 0,
+
+    "by_rule_family.R-rules (validate-egress.py).n": 5,
+    "by_rule_family.R-rules (validate-egress.py).true": 1,
+    "by_rule_family.R-rules (validate-egress.py).rate": 0.2,
+    "by_rule_family.R-rules (validate-egress.py).n_excl_cycles": 3,
+    "by_rule_family.R-rules (validate-egress.py).rate_excl_cycles": 0.3333333333,
+    "by_rule_family.R-rules (validate-egress.py).unresolvable_duplicates": 2,
+
+    "by_rule_family.C-rules (validate-collection-scoping.py).n": 3,
+    "by_rule_family.C-rules (validate-collection-scoping.py).true": 0,
+    "by_rule_family.C-rules (validate-collection-scoping.py).rate": 0.0,
+    "by_rule_family.C-rules (validate-collection-scoping.py).n_excl_cycles": 1,
+    "by_rule_family.C-rules (validate-collection-scoping.py).unresolvable_duplicates": 2,
+
+    "by_rule_family.ASVS checklist.n": 1,
+    "by_rule_family.ASVS checklist.true": 0,
+    "by_rule_family.ASVS checklist.uncertain": 1,
+
+    "by_rule_family.LINDDUN.n": 0,
+    "by_rule_family.LINDDUN.rate": null,
+    "by_rule_family.LINDDUN.not_triaged": 1,
+
+    "by_rule_family.config (methodology).n": 0,
+    "by_rule_family.config (methodology).rate": null,
+    "by_rule_family.config (methodology).untriaged": 1,
+
+    "by_rule_family.External scanner.n": 1,
+    "by_rule_family.External scanner.true": 1,
+    "by_rule_family.External scanner.rate": 1.0,
+
+    "by_evidence_class.agent_judgement.n": 6,
+    "by_evidence_class.agent_judgement.true": 4,
+    "by_evidence_class.heuristic_inventory.n": 8,
+    "by_evidence_class.heuristic_inventory.true": 1,
+    "by_evidence_class.heuristic_inventory.rate": 0.125,
+    "by_evidence_class.heuristic_inventory.n_excl_cycles": 4,
+    "by_evidence_class.heuristic_inventory.rate_excl_cycles": 0.25,
+    "by_evidence_class.external_scanner.n": 1,
+    "by_evidence_class.external_scanner.true": 1,
+
+    "by_attacked.not_attempted.n": 7,
+    "by_attacked.not_attempted.true": 5,
+    "by_attacked.confirmed.n": 6,
+    "by_attacked.confirmed.true": 1,
+    "by_attacked.confirmed.unresolvable_duplicates": 3,
+    "by_attacked.partial.n": 1,
+    "by_attacked.partial.rate_excl_cycles": null,
+    "by_attacked.refuted.n": 1,
+    "by_attacked.refuted.true": 0,
+
+    "total.n": 15,
+    "total.true": 6,
+    "total.rate": 0.4,
+    "total.n_excl_cycles": 11,
+    "total.rate_excl_cycles": 0.5454545454,
+    "total.unresolvable_duplicates": 4,
+    "total.uncertain": 1,
+    "total.not_triaged": 1,
+    "total.untriaged": 1
+  },
+  "by_rule": {
+    "keyed_by": "rule_family",
+
+    "by_rule_family.validate-egress:R5.n": 3,
+    "by_rule_family.validate-egress:R5.true": 0,
+    "by_rule_family.validate-egress:R5.unresolvable_duplicates": 2,
+
+    "by_rule_family.validate-egress:R2.n": 1,
+    "by_rule_family.validate-egress:R2.true": 1,
+
+    "by_rule_family.validate-egress:R3.n": 1,
+    "by_rule_family.validate-egress:R3.true": 0,
+
+    "by_rule_family.validate-collection-scoping:C1.n": 2,
+    "by_rule_family.validate-collection-scoping:C1.unresolvable_duplicates": 2,
+    "by_rule_family.validate-collection-scoping:C5.n": 1,
+
+    "by_rule_family.deepdive:cat-02.n": 2,
+    "by_rule_family.deepdive:cat-02.true": 2,
+    "by_rule_family.deepdive:cat-01.n": 1,
+    "by_rule_family.deepdive:cat-01.true": 1,
+    "by_rule_family.deepdive:cat-08.n": 1,
+    "by_rule_family.deepdive:cat-08.true": 0,
+
+    "total.n": 15,
+    "total.true": 6
+  }
+}
