@@ -423,3 +423,48 @@ Both are now *modelled*. There is **no claim that either model is complete**. Th
 sink model still enumerates modalities we thought of; the availability class in
 particular is a large space (exhaustion, ordering, quota, cache, scheduler) of
 which one shape is now represented.
+
+### 30. The severity contract test proves agreement, not enforcement
+
+`tests/test-attack-paths.sh` diffs `compose-attack-paths.py --print-contract`
+against the `severity-contract` block in `steps/phase-07-synthesis.md`. That
+catches the v2.5 failure it was written for — prose and code silently disagreeing
+about whether the ±1 cap applies to R3 — but it certifies only that **two
+authored artifacts did not drift apart textually**.
+
+Two keys in that block are declarative rather than derived:
+
+- `context_signal_cap_rungs = 1` — §7.4's context-signal adjustment is applied by
+  the **orchestrator**, not by the composer, so no code path in the composer
+  reads this constant. An orchestrator run that stacks three rungs would pass
+  this suite untouched.
+- `r3_suppression_requires_cite = true` — a literal, not derived from
+  `suppression_evidence()`. If a future edit dropped the cite requirement, the
+  contract and the prose would still agree and CI would still pass.
+
+R3's *uncapped* behaviour is separately proven against fixtures, and
+`suppression_evidence()`'s cite requirement is proven by the `uncited` fixture,
+so neither property is unverified — but the contract block itself is not the
+thing verifying them. **A contract test is a drift alarm, not an enforcement
+mechanism**, and reading it as the latter is the same category error as reading
+`confidence: CONFIRMED` as a measure of truth.
+
+### 31. The annex join is model-executed, and only its *output* is checked
+
+§7.2b's join — deciding that a mechanical row restates a particular judgement
+finding — requires semantic judgement, so it is written as instructions to the
+Phase-7 orchestrator rather than as a script. There is no code that performs it.
+
+What *is* mechanical is the check on its result: `--require-evidence-discipline`
+(required at §7.2b Step 5) refuses a dangling `annexed_to` or one set on a
+non-heuristic row, and `compose-attack-paths.py` reports unresolvable references
+as DANGLING ANNEXES and reclassifies them as orphans. So the two ways the annex
+can *delete* a finding are both caught.
+
+What is **not** caught is a join that is merely *wrong*: a mechanical row folded
+into a real but incorrect parent, within the ±40-line window, is invisible. It
+corrupts that finding's `sibling_sites` rather than removing anything, so the
+failure direction is misattribution, not silence — but it is unverified, and on
+a codebase with several same-CWE defects per file it is the likeliest annex
+error. Treat `sibling_sites` on a finding with many same-CWE neighbours as a
+claim to spot-check, not a result.
