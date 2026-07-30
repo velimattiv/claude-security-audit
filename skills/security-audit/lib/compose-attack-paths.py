@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-compose-attack-paths.py — Phase-7 severity gate (v2.5).
+compose-attack-paths.py — Phase-7 severity gate (v2.6).
 
 WHY THIS EXISTS
 ---------------
@@ -47,6 +47,14 @@ RULES (each maps to an observed real-world failure)
      actually CONTRIBUTE to reaching it (backward slice), not every finding that
      happens to be reachable. This is the precision fix over the reference
      implementation, which escalated bystanders too.
+     R3 is UNCAPPED and deliberately so: it is a distinct mechanism from §7.4's
+     ±1 context-signal nudge, and the founding case (M6 above) only works if a
+     MEDIUM can reach CRITICAL in one step. v2.6 gates it on evidence instead:
+     a contributing member declared `structurally_unreachable` WITH a cite
+     suppresses the escalation, and the suppression is reported loudly.
+     (v2.6) Rows carrying `annexed_to` — mechanical enumeration legs folded into
+     a judgement finding, Wave 2b — are excluded from the graph entirely, which
+     is where 47% of the calibrated run's capability tags came from.
   R4 SEVERITY-RATCHET         Severity may never decrease across runs without a
      recorded reason naming what changed (fix commit / compensating control /
      disproven exploitability / rescope). A downgrade with no reason FAILS the
@@ -72,6 +80,10 @@ Usage:
       [--max-age-days 30] [--strict-closure] \
       [--out governance.jsonl] [--rewrite corrected.jsonl] \
       [--json-summary summary.json] [--quiet]
+  python3 compose-attack-paths.py --print-contract
+      Print the severity contract and exit 0. tests/test-attack-paths.sh diffs
+      this against the `severity-contract` block in steps/phase-07-synthesis.md,
+      so the prose and the arithmetic agree by assertion rather than by reading.
 
 Exit codes:
   0  clean — no escalation required, no governance failure
@@ -131,6 +143,145 @@ def evidence_class(f):
 
 def _l1_eligible(f):
     return evidence_class(f) not in _L1_EXCLUDED_EVIDENCE
+
+
+# --- R3 escalation contract (v2.6, story 1.4) -------------------------------
+#
+# The prose in steps/phase-07-synthesis.md §7.4 caps context-signal adjustment
+# at ±1 rung "regardless of how many triggers fire". v2.5 shipped that sentence
+# next to a composer that sets CRITICAL outright, and a reader calibrating on
+# §7.4 therefore mis-read every composed severity.
+#
+# THE CODE IS RIGHT AND THE PROSE WAS WRONG. These are two mechanisms:
+#
+#   §7.4  context signals (trust_zone, data_ops, evidence_class) — a calibration
+#         nudge over ONE finding read in isolation. Capped at ±1, because the
+#         severity was already set by the rubric and context only corroborates.
+#   R3    chain composition — a claim about a PATH, not a nudge. The founding
+#         case was a MEDIUM whose mitigation ("only if the UUID is known") was
+#         discharged by a HIGH in the same document. Cap R3 at one rung and that
+#         finding becomes HIGH, which is exactly the rating that let it rot for
+#         96 days. Capping the composer kills the thesis.
+#
+# So R3 stays uncapped and is gated on EVIDENCE instead. The measured defect it
+# has to answer for: a dev-mode finding asserted LOW and computed CRITICAL on a
+# genuine chain, whose `isDemoCapableEnv` allowlists only {local, sandbox} with
+# a fail-closed `unknown` default — structurally unreachable in dev, staging and
+# production. The analyst who rated it LOW already knew that. The information
+# existed and had no channel to reach the composer. `deployment_reachability` is
+# that channel.
+#
+# These constants ARE the contract: `--print-contract` prints them, and
+# tests/test-attack-paths.sh diffs that output against the fenced
+# `severity-contract` block in steps/phase-07-synthesis.md. Prose and behaviour
+# agree because a test says so, not because someone read both.
+
+#: R3's target. Not a rung offset — a claim that the path is fully exploitable.
+R3_ESCALATION_TARGET = "CRITICAL"
+
+#: R3 is NOT subject to §7.4's ±1 cap. See the block comment above.
+R3_ESCALATION_CAPPED = False
+
+#: §7.4's cap, restated here only so the contract carries it. The composer does
+#: not implement §7.4 (that is the orchestrator's job in phase-07), so this key
+#: is a declared constant rather than an observed behaviour — the test asserts
+#: prose/contract agreement for it, and asserts R3's uncapped behaviour against
+#: fixtures separately.
+CONTEXT_SIGNAL_CAP_RUNGS = 1
+
+#: Every value `deployment_reachability.state` may take (lib/finding-schema.json).
+_REACHABILITY_STATES = ("reachable", "gated_by_runtime_flag",
+                        "structurally_unreachable")
+
+#: The ONLY state that can suppress an R3 escalation, and only with a cite.
+#:
+#: `gated_by_runtime_flag` deliberately does NOT suppress: a flag an admin can
+#: toggle in a deployed environment is live, not theoretical. That discriminator
+#: is the one the calibration triage itself drew — "App mode is toggled at
+#: runtime by admins, so this is live". Only a build-time or deploy-time
+#: structural constraint counts.
+_SUPPRESSING_REACHABILITY = "structurally_unreachable"
+_NONSUPPRESSING_REACHABILITY = tuple(s for s in _REACHABILITY_STATES
+                                     if s != _SUPPRESSING_REACHABILITY)
+
+#: Wave 2b.3 — annexed rows leave the capability graph entirely.
+ANNEXED_ROWS_IN_GRAPH = False
+
+
+def contract_lines():
+    """The machine-checked severity contract, as `key = value` text.
+
+    Kept in `key = value` form rather than JSON so the fenced block in
+    steps/phase-07-synthesis.md can be diffed against it byte-for-byte.
+    """
+    def b(v):
+        return "true" if v else "false"
+    return [
+        f"context_signal_cap_rungs = {CONTEXT_SIGNAL_CAP_RUNGS}",
+        f"promotable_evidence = {','.join(sorted(PROMOTABLE_EVIDENCE))}",
+        f"r3_escalation_target = {R3_ESCALATION_TARGET}",
+        f"r3_escalation_capped = {b(R3_ESCALATION_CAPPED)}",
+        f"r3_suppressing_state = {_SUPPRESSING_REACHABILITY}",
+        "r3_suppression_requires_cite = true",
+        f"r3_nonsuppressing_states = {','.join(_NONSUPPRESSING_REACHABILITY)}",
+        f"annexed_rows_in_graph = {b(ANNEXED_ROWS_IN_GRAPH)}",
+    ]
+
+
+def reachability(f):
+    """-> (state, cite). Absent / malformed reads as `reachable`, with no cite.
+
+    Fail-open toward escalation: missing a reachable chain is unrecoverable,
+    escalating an unreachable one costs triage time. So a row that says nothing
+    escalates normally, and only a positive, cited claim stops it.
+    """
+    dr = (f or {}).get("deployment_reachability")
+    if not isinstance(dr, dict):
+        return "reachable", None
+    state = dr.get("state")
+    if not isinstance(state, str) or not state:
+        return "reachable", None
+    ev = dr.get("evidence")
+    ev = ev.strip() if isinstance(ev, str) else ""
+    return state, (ev or None)
+
+
+def suppression_evidence(f):
+    """-> the cite that suppresses R3 for this finding, else None.
+
+    Requires BOTH `structurally_unreachable` and a non-empty cite. Without the
+    cite requirement `deployment_reachability` becomes the next self-asserted
+    CONFIRMED: a label anyone can set that silently buys a severity concession,
+    with nothing downstream able to check it. v2.5 shipped exactly that shape —
+    `validate-egress.py` hardcoded `"confidence": "CONFIRMED"` at emission,
+    before anything was attacked, and bought a rung with it.
+    """
+    state, cite = reachability(f)
+    return cite if (state == _SUPPRESSING_REACHABILITY and cite) else None
+
+
+def uncited_unreachable(f):
+    """A `structurally_unreachable` claim with no cite — ignored, but loudly."""
+    state, cite = reachability(f)
+    return state == _SUPPRESSING_REACHABILITY and not cite
+
+
+def annexed_to(f):
+    """The parent finding id when this row is a Wave-2b annex leg, else None."""
+    v = (f or {}).get("annexed_to")
+    return v.strip() if isinstance(v, str) and v.strip() else None
+
+
+def in_capability_graph(f):
+    """Wave 2b.3 — an annexed row is a LEG of another finding, not a finding.
+
+    It contributes no severity of its own, so it must not mint capabilities
+    either: 47% of the calibrated run's 1120 capability tags were minted by the
+    C-rules with no evidence check, and 53 of 73 HIGH+ C-rule findings ended
+    CRITICAL while 72 of 73 were false. Excluding annexed rows removes that
+    escalation path at its source rather than by threshold tuning.
+    """
+    return ANNEXED_ROWS_IN_GRAPH or annexed_to(f) is None
 
 
 # --- Capability normalisation ----------------------------------------------
@@ -344,6 +495,10 @@ def alias_map(findings):
     """id / display_id / declared aliases -> finding index. Case-folded."""
     amap = {}
     for i, f in enumerate(findings):
+        # Wave 2b: an annexed row carries no severity of its own, so it can
+        # neither be raised by prose nor lend its rating to something else.
+        if not in_capability_graph(f):
+            continue
         keys = [f.get("id"), f.get("display_id")]
         keys += list(f.get("aliases") or [])
         fid = str(f.get("id") or "")
@@ -360,6 +515,8 @@ def prose_escalations(findings):
     amap = alias_map(findings)
     hits = []
     for i, f in enumerate(findings):
+        if not in_capability_graph(f):
+            continue
         blob = " ".join(str(f.get(k, "")) for k in _PROSE_FIELDS)
         if not blob.strip() or not _CHAIN_PROSE.search(blob):
             continue
@@ -733,8 +890,13 @@ def governance_checks(findings, baseline, changed_files, now, run_id,
 # --- Main -------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("findings", nargs="+", type=Path,
+    ap.add_argument("findings", nargs="*", type=Path,
                     help="Findings JSONL file(s) — e.g. phase-05-*.jsonl phase-06-*.jsonl")
+    ap.add_argument("--print-contract", action="store_true",
+                    help="Print the severity contract (key = value) and exit. "
+                         "tests/test-attack-paths.sh diffs this against the "
+                         "`severity-contract` block in phase-07-synthesis.md so "
+                         "prose and behaviour agree by assertion, not by reading.")
     ap.add_argument("--profile", type=Path,
                     help="phase-00-profile.json — supplies capability_lexicon "
                          "(personas / unprivileged / crown_jewels).")
@@ -755,6 +917,12 @@ def main():
     ap.add_argument("--json-summary", type=Path)
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
+
+    if args.print_contract:
+        print("\n".join(contract_lines()))
+        return 0
+    if not args.findings:
+        ap.error("at least one findings file is required")
 
     now = parse_ts(args.now) or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -786,10 +954,18 @@ def main():
                    if l.strip()]
 
     personas, unpriv, jewels, jewels_derived = resolve_lexicon(profile)
-    tagged = [f for f in findings if f["preconditions"] or f["postconditions"]]
+    # Wave 2b.3: annexed rows are enumeration legs of another finding, not
+    # findings. They leave the graph here, before a single capability is read.
+    annexed = [f for f in findings if not in_capability_graph(f)]
+    tagged = [f for f in findings
+              if in_capability_graph(f)
+              and (f["preconditions"] or f["postconditions"])]
 
     if not args.quiet:
         print(f"loaded {len(findings)} finding(s); {len(tagged)} carry capability tags")
+        if annexed:
+            print(f"  {len(annexed)} annexed row(s) excluded from the capability "
+                  "graph (Wave 2b.3 — they are legs of a judgement finding)")
         if jewels_derived:
             print("  note: no crown_jewels in profile.capability_lexicon — using "
                   "built-in patterns (Phase 0 §0.14 should derive these)")
@@ -812,9 +988,11 @@ def main():
     # --- R1 (undischarged mitigation), to a fixpoint ------------------------
     supply = []   # (supplier_idx, consumer_idx, capability)
     for j, consumer in enumerate(findings):
+        if not in_capability_graph(consumer):
+            continue
         for pre in consumer["preconditions"]:
             for i, supplier in enumerate(findings):
-                if i == j:
+                if i == j or not in_capability_graph(supplier):
                     continue
                 if any(satisfies(post, pre) for post in supplier["postconditions"]):
                     supply.append((i, j, normcap(pre)))
@@ -832,19 +1010,53 @@ def main():
 
     # --- R3 (crown jewel from an unprivileged persona) ----------------------
     persona_report = {}
+    #: gi -> (blocking finding id, cite, persona). Reported, never silent.
+    suppressed_by = {}
+    #: (gi, persona) for `structurally_unreachable` with no cite — ignored, loud.
+    uncited_claims = []
+    #: every capability minted by a member of some contributing slice, so the
+    #: provenance block below can say which heuristic tags carried a chain.
+    contributing_caps = set()
     for persona, held0 in personas.items():
         path, held = compose(tagged, held0)
         if not path:
             continue
         reached = sorted({c for c in held if is_jewel(c, jewels)})
+        fires = bool(reached) and persona in unpriv
+
+        # --- v2.6 story 1.4: evidence-aware escalation ----------------------
+        # `contributing_slice()` already walked back from the jewels and dropped
+        # bystanders, so every member it returns is load-bearing BY
+        # CONSTRUCTION. One member that cannot be reached in any deployed
+        # environment therefore means the whole path cannot be walked — no
+        # special-casing of the chain "entry" is needed, and a bystander (which
+        # is not in this list) cannot suppress a chain it does not carry.
+        #
+        # Computed BEFORE the persona line is printed so `chain_severity` never
+        # advertises a CRITICAL that was in fact declined. A summary field that
+        # disagrees with the findings underneath it is how this release's
+        # headline defect started.
+        contrib_g, blockers = [], []
+        if fires:
+            contrib = contributing_slice(tagged, path, held0, reached)
+            contrib_g = [idx_of[id(tagged[i])] for i in sorted(contrib)]
+            for gi in contrib_g:
+                contributing_caps |= {normcap(c)
+                                      for c in findings[gi]["postconditions"]}
+            blockers = [(gi, suppression_evidence(findings[gi]))
+                        for gi in contrib_g
+                        if suppression_evidence(findings[gi])]
+
         chain_sev = "INFO"
         for i in path:
             chain_sev = smax(chain_sev, target[idx_of[id(tagged[i])]])
-        if reached and persona in unpriv:
-            chain_sev = "CRITICAL"
+        if fires and not blockers:
+            chain_sev = R3_ESCALATION_TARGET
         persona_report[persona] = {
             "reachable": len(path), "chain_severity": chain_sev,
             "crown_jewels_reached": reached, "unprivileged": persona in unpriv,
+            "r3_suppressed_by": findings[blockers[0][0]].get("id") if blockers
+                                else None,
         }
         if not args.quiet:
             print(f"\nPERSONA {persona}: {len(path)} finding(s) reachable "
@@ -857,40 +1069,121 @@ def main():
             if reached:
                 print(f"    CROWN JEWELS REACHED: {', '.join(reached)}")
 
-        if reached and persona in unpriv:
-            contrib = contributing_slice(tagged, path, held0, reached)
-            for i in contrib:
-                gi = idx_of[id(tagged[i])]
-                if sidx(target[gi]) < SEV_IDX["CRITICAL"]:
-                    target[gi] = "CRITICAL"
-                    rules_fired[gi].add("R3")
-            bystanders = [idx_of[id(tagged[i])] for i in path if i not in contrib]
+        if fires:
+            # An uncited `structurally_unreachable` is IGNORED — but never
+            # silently. A field that quietly buys a severity concession with no
+            # checkable evidence is how `confidence: CONFIRMED` became a 9.6%-
+            # true label that bought a rung.
+            for gi in contrib_g:
+                if uncited_unreachable(findings[gi]):
+                    uncited_claims.append((gi, persona))
+                    if not args.quiet:
+                        print(f"    ! {findings[gi].get('id')} claims "
+                              "structurally_unreachable with NO cite — ignored. "
+                              "deployment_reachability.evidence (file:line) is "
+                              "required before it can suppress anything.")
+
+            if blockers:
+                bgi, bcite = blockers[0]
+                for gi in contrib_g:
+                    if sidx(target[gi]) < SEV_IDX[R3_ESCALATION_TARGET]:
+                        # setdefault: report the FIRST persona that hit this, so
+                        # the block is stable across persona iteration order.
+                        suppressed_by.setdefault(
+                            gi, (findings[bgi].get("id"), bcite, persona))
+                if not args.quiet:
+                    print(f"    R3 SUPPRESSED for this chain by "
+                          f"{findings[bgi].get('id')} "
+                          f"(structurally_unreachable, cite: {bcite})")
+            else:
+                for gi in contrib_g:
+                    if sidx(target[gi]) < SEV_IDX[R3_ESCALATION_TARGET]:
+                        target[gi] = R3_ESCALATION_TARGET
+                        rules_fired[gi].add("R3")
+
+            bystanders = [idx_of[id(tagged[i])] for i in path
+                          if idx_of[id(tagged[i])] not in contrib_g]
             if bystanders and not args.quiet:
                 print(f"    (not escalated — reachable but not contributing: "
                       f"{', '.join(str(findings[b].get('id')) for b in bystanders)})")
 
     # --- orphan capabilities: the drift alarm -------------------------------
-    all_post = {normcap(c) for f in findings for c in f["postconditions"]}
-    all_pre = {normcap(c) for f in findings for c in f["preconditions"]}
+    graph = [f for f in findings if in_capability_graph(f)]
+    all_post = {normcap(c) for f in graph for c in f["postconditions"]}
+    all_pre = {normcap(c) for f in graph for c in f["preconditions"]}
     persona_caps = {normcap(c) for v in personas.values() for c in v}
     orphan_pre = sorted(p for p in all_pre
                         if not satisfied_by(p, all_post | persona_caps))
     orphan_post = sorted(p for p in all_post
                          if not any(satisfies(p, n) for n in all_pre)
                          and not is_jewel(p, jewels))
-    if (orphan_pre or orphan_post) and not args.quiet:
+
+    # --- v2.6 story 1.3 (composer half): capability provenance --------------
+    #
+    # A capability tag used to be an anonymous string. 47% of the calibrated
+    # run's 1120 tags were minted by validate-collection-scoping.py, which
+    # synthesised `knows:any_<entity>_id`, `reads:any_<entity>_metadata` and
+    # `reads:any_<entity>_pii` from the entity name and the profile's pii_cols
+    # with NO check that the collection was actually unscoped — and 72 of the 73
+    # HIGH+ findings that produced were false. A chain resting on those tags was
+    # indistinguishable, in the output, from one resting on a human reading the
+    # code. Track A gates the minting; this records where each tag came from so
+    # the ones that survive are VISIBLE rather than anonymous.
+    minters = {}
+    for f in graph:
+        for c in f["postconditions"]:
+            minters.setdefault(normcap(c), []).append(
+                (str(f.get("id") or "?"), evidence_class(f),
+                 str(f.get("rule_family") or "")))
+    heuristic_minted = {
+        cap: srcs for cap, srcs in sorted(minters.items())
+        if srcs and all(ec == "heuristic_inventory" for _id, ec, _rf in srcs)
+    }
+
+    if (orphan_pre or orphan_post or heuristic_minted) and not args.quiet:
         print("\nORPHAN CAPABILITIES (vocabulary drift alarm — see "
               "lib/capability-lexicon.md §6)")
         for p in orphan_pre[:15]:
             print(f"  precondition never supplied by any finding or persona: {p}")
         for p in orphan_post[:15]:
             print(f"  postcondition feeds nothing and is not a crown jewel: {p}")
+        for cap, srcs in list(heuristic_minted.items())[:15]:
+            mark = "  [CARRIED AN ESCALATING CHAIN]" if cap in contributing_caps else ""
+            who = ", ".join(f"{i} ({rf or 'heuristic'})" for i, _ec, rf in srcs[:3])
+            print(f"  capability minted ONLY by heuristic_inventory rows: "
+                  f"{cap} <- {who}{mark}")
+
+    # --- Wave 2b.2: orphan annexes — the low-confidence lead list -----------
+    #
+    # A mechanical row with no judgement twin is the ONLY thing that saw its
+    # area. Of the 17 true mechanical findings in the calibrated run, 15 were
+    # restatements of a deep-dive finding on the same line — but the rules also
+    # enumerated a credential-exfil class's nine distinct legs at exact line
+    # granularity, which no agent did. Deleting them trades a mechanical
+    # guarantee for an agent's diligence, and 34 missed defects say that trade
+    # is bad. So orphans surface, explicitly labelled and capped out of the
+    # headline band by the report (§7.2b), rather than being dropped.
+    orphan_annex = [f for f in findings
+                    if evidence_class(f) == "heuristic_inventory"
+                    and annexed_to(f) is None]
+    if orphan_annex and not args.quiet:
+        print("\nORPHAN ANNEXES (heuristic rows with no judgement twin — "
+              "low-confidence leads, NOT headline findings; see §7.2b)")
+        for f in orphan_annex[:15]:
+            print(f"  {str(f.get('rule_family') or 'heuristic'):<34} "
+                  f"{f.get('file')}:{f.get('line')}  {str(f.get('title',''))[:60]}")
 
     # --- escalation ledger ---------------------------------------------------
     escalations = [(i, findings[i].get("severity", "INFO"), target[i],
                     sorted(rules_fired[i]))
                    for i in range(len(findings))
                    if sidx(target[i]) > sidx(findings[i].get("severity", "INFO"))]
+
+    # A suppression only stands if the finding did NOT reach CRITICAL by some
+    # other route — a second persona's chain, or R1/R2. Fail-open: one blocked
+    # path does not license a rating below what another path already earned.
+    suppressed = {gi: v for gi, v in suppressed_by.items()
+                  if sidx(target[gi]) < SEV_IDX[R3_ESCALATION_TARGET]}
 
     # --- R4 + lifecycle ------------------------------------------------------
     gov, blocking = governance_checks(findings, baseline, changed, now,
@@ -904,6 +1197,35 @@ def main():
         for i, was, nowsev, rules in escalations:
             print(f"  [{'/'.join(rules)}] {findings[i].get('id','?')}: {was} -> {nowsev}")
             print(f"          {str(findings[i].get('title',''))[:88]}")
+
+    # --- SUPPRESSED ESCALATIONS ---------------------------------------------
+    #
+    # Deliberately as loud as ORPHAN CAPABILITIES and the governance gate.
+    # Suppression is now the DANGEROUS direction. The calibrated run's worst
+    # single defect was not a false positive — it was a wrong refutation, true
+    # of one module and generalised to a system property, which filed a live
+    # HIGH under a "What is sound" heading readers are told to trust. A false
+    # positive costs a triager minutes and is self-correcting; a wrong
+    # suppression stops them reading the code and nothing downstream reopens it.
+    # Printing every suppression WITH its cite is what stops
+    # `deployment_reachability` becoming the next self-asserted CONFIRMED.
+    if suppressed and not args.quiet:
+        print("\n" + "=" * 72)
+        print("SUPPRESSED ESCALATIONS (R3 blocked by cited structural "
+              "unreachability)")
+        print("=" * 72)
+        for gi, (bid, bcite, persona) in sorted(
+                suppressed.items(), key=lambda kv: str(findings[kv[0]].get("id"))):
+            print(f"  {findings[gi].get('id','?')}: staying {target[gi]} — "
+                  f"would have been {R3_ESCALATION_TARGET} "
+                  f"(persona {persona})")
+            print(f"          {str(findings[gi].get('title',''))[:88]}")
+            print(f"          blocked by {bid} "
+                  f"[{_SUPPRESSING_REACHABILITY}] cite: {bcite}")
+        print("  VERIFY EVERY CITE ABOVE. A wrong suppression buries a live "
+              "finding under a heading you are told to trust — the same shape "
+              "as a wrong refutation, and nothing downstream reopens it.")
+
     if gov and not args.quiet:
         print("\n" + "=" * 72)
         print("GOVERNANCE GATE (R4 ratchet + L1-L3 lifecycle)")
@@ -931,7 +1253,15 @@ def main():
                     "at": now.isoformat(),
                 })
                 g["severity_history"] = hist
+            # v2.6: stamped whenever a composition rule fired, not only when the
+            # severity moved. "Every finding computed CRITICAL names the
+            # composition rule that made it so" — an unexplained CRITICAL is
+            # what made the calibrated run hard to triage, and 13 of 15 findings
+            # in one cluster arrived CRITICAL with 8 of them asserted LOW/INFO.
+            if rules_fired[i]:
                 g["escalation_rules"] = sorted(rules_fired[i])
+            if i in suppressed:
+                g["escalation_suppressed_by"] = suppressed[i][0]
             g["severity"] = target[i]
             stamped.append(g)
         args.rewrite.parent.mkdir(parents=True, exist_ok=True)
@@ -961,6 +1291,26 @@ def main():
         "orphan_postconditions": orphan_post,
         "escalated": [{"id": findings[i].get("id"), "from": was, "to": to,
                        "rules": rules} for i, was, to, rules in escalations],
+        # v2.6 story 1.3: which capability tags exist only because a heuristic
+        # said so, and whether any of them carried a chain to a crown jewel.
+        "heuristic_minted_capabilities": {
+            cap: {"minted_by": [i for i, _ec, _rf in srcs],
+                  "rule_families": sorted({rf for _i, _ec, rf in srcs if rf}),
+                  "in_contributing_slice": cap in contributing_caps}
+            for cap, srcs in heuristic_minted.items()},
+        # v2.6 story 1.4: never silent. See the SUPPRESSED ESCALATIONS block.
+        "suppressed_escalations": [
+            {"id": findings[gi].get("id"), "staying": target[gi],
+             "would_have_been": R3_ESCALATION_TARGET,
+             "blocked_by": bid, "state": _SUPPRESSING_REACHABILITY,
+             "evidence": bcite, "persona": persona}
+            for gi, (bid, bcite, persona) in sorted(
+                suppressed.items(), key=lambda kv: str(findings[kv[0]].get("id")))],
+        "uncited_unreachable_claims": sorted(
+            {str(findings[gi].get("id")) for gi, _p in uncited_claims}),
+        # Wave 2b: the annex split, so the report can band them correctly.
+        "annexed_rows": [str(f.get("id")) for f in annexed],
+        "orphan_annexes": [str(f.get("id")) for f in orphan_annex],
     }
     if args.json_summary:
         args.json_summary.parent.mkdir(parents=True, exist_ok=True)
