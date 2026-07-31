@@ -52,11 +52,32 @@ for f in "${files[@]}"; do
   done < <(grep -E -- "--branch v[0-9]" "$f" || true)
 done
 
+# The manifest stamps `skill_version` into EVERY artifact a run emits, and
+# SKILL.md tells the operator to reason about cross-run comparability from it.
+# A stale value there is worse than a stale README pin: the README is read once,
+# the stamp is carried in every SARIF, baseline and JSONL a run produces, so a
+# v2.6 run would label its own output v2.5 and a delta comparison would silently
+# straddle two rule sets. v2.6 shipped this way and the release tag caught it by
+# hand — which is exactly the kind of check that should not be by hand.
+MANIFEST="$REPO_ROOT/skills/security-audit/manifest.yaml"
+if [ -f "$MANIFEST" ]; then
+  stamped="$(sed -nE 's/^skill_version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$MANIFEST" | head -1)"
+  if [ -z "$stamped" ]; then
+    echo "MISMATCH: manifest.yaml declares no top-level skill_version" >&2
+    mismatches=$((mismatches + 1))
+  elif [ "$stamped" != "$EXPECTED" ]; then
+    echo "MISMATCH in skills/security-audit/manifest.yaml:" >&2
+    echo "    skill_version: $stamped" >&2
+    echo "    expect:        $EXPECTED" >&2
+    mismatches=$((mismatches + 1))
+  fi
+fi
+
 if [ "$mismatches" -gt 0 ]; then
   echo
-  echo "FAIL: $mismatches install-snippet(s) pin a different version than VERSION." >&2
-  echo "Either bump VERSION or update the install snippets to match." >&2
+  echo "FAIL: $mismatches version reference(s) disagree with VERSION." >&2
+  echo "Either bump VERSION or update the reference(s) to match." >&2
   exit 1
 fi
 
-echo "PASS: all install-snippet pins match VERSION (v${EXPECTED})."
+echo "PASS: install-snippet pins and manifest skill_version match VERSION (v${EXPECTED})."
