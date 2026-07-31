@@ -142,6 +142,14 @@ Bracketed `[NN]` tags cite the source report in `research/`.
   flipped no security defaults. [06]
 - OWASP **LLM Top 10 is still 2025** (no newer edition) — keep `LLMxx:2025`
   tags. API Top 10 still **2023**; ASVS still **5.0.0** (5.0.1 only planned). [03][05]
+  > **Corrected in v2.6.** The ASVS half of this line was checked against the
+  > wrong thing. `research/05-methodology-standards.md` verified the skill's
+  > *label* ("ASVS 5.0 L2") against the world, found 5.0.0 current, and concluded
+  > "no version change needed" — without checking that the body under the label
+  > was 5.0. It was **4.0.3**, and so is every `ASVS-V*.*.*` id the skill emits.
+  > `lib/asvs-l2.md` is retitled to 4.0.3 in v2.6; the content migration to 5.0
+  > is a separate item below. See `docs/KNOWN-GAPS.md` #24 — a check that
+  > verifies one half of a claim is not a check.
 - Offensive agentic cyber gyms (Cybench, NYU CTF Bench, CyberGym,
   AutoPenBench) are the **wrong instrument** for a defensive static auditor.
   Only **CyberSecEval's** Insecure-Code-Detector rule corpus is reusable. [07]
@@ -277,6 +285,106 @@ Phase 2 + Phase 3 when the data flows sequentially.
 
 **Fix.** Detect single-partition case in workflow §5 and run Phase 2
 and Phase 3 as a single sub-agent.
+
+## Deferred from v2.6 (calibrated severity)
+
+See `docs/EPIC-v2.6-calibrated-severity.md` and `docs/KNOWN-GAPS.md` #24-#30.
+
+### ASVS 4.0.3 → 5.0 content migration
+
+**Problem.** `lib/asvs-l2.md` was headed *"OWASP ASVS 5.0 Level 2"* from v2.1
+through v2.5 while enumerating **4.0.3's** chapter set. v2.6 story 4.2 fixed the
+**label**, not the content, because the content is genuinely 4.0.3 and so is
+every id downstream of it: `ASVS-V4.2.1` (IDOR) in
+`lib/validate-collection-scoping.py` and `steps/deepdive/cat-02-idor-bola.md`,
+`V6`/`V2.4`/`V3.5` in `cat-05-crypto.md`, the `ASVS-V6.2.1` example in
+`steps/phase-05-deepdives.md:228`, and the `ASVS 5.0` claim in `README.md:320`.
+ASVS 5.0.0 (May 2025) renumbered every chapter — under 5.0, `V6` is
+*Authentication* and `V8` is *Authorization* — so a partial migration produces a
+**mixed-edition tag set, which is worse than either edition alone**.
+
+**Fix (one atomic change, all of it or none):**
+1. Rewrite `lib/asvs-l2.md` against ASVS 5.0.0's 17 chapters.
+2. Renumber every emitted `ASVS-V*.*.*` id in `steps/deepdive/cat-*.md` and
+   `lib/validate-collection-scoping.py`.
+3. Update the edition claim in `steps/phase-05-deepdives.md:228` and
+   `README.md:320`, and the fan-out note in `manifest.yaml`.
+4. Add an edition assertion to `scripts/validate-schemas.sh`: every emitted
+   `ASVS-V*` id must resolve against the edition `lib/asvs-l2.md` declares. This
+   is the check whose absence let the mislabel survive four releases.
+
+**Effort** M. **Do not** re-label without doing 1-4.
+
+### Collapse the ASVS fan-out from 17 slots to 14
+
+**Problem.** ASVS 4.0.3 has 14 chapters. `steps/phase-06-config.md §6.9`
+dispatches 17 sub-agents and hard-fails when it does not receive 17 per-category
+files, so v2.6 leaves slots 15-17 in place emitting a single explicit `N/A` row
+each. Three sub-agent invocations per run do nothing.
+
+**Fix.** Edit §6.9's `-ne 17` count check and the V1-V17 loop bound to 14, drop
+the compatibility rows from `lib/asvs-l2.md`, update the `manifest.yaml`
+`asvs.pairs` note. Superseded entirely if the 5.0 migration above lands first
+(5.0 genuinely has 17). **Effort** S. Sequence after the migration decision, not
+before.
+
+### Wire the calibration gate into Phase 7
+
+**Problem.** v2.6 ships the standing calibration control as data plus an
+enforcer: `manifest.yaml` `calibration:` records each rule family's last measured
+true-positive rate and the headline-band policy, and
+`scripts/calibration-report.py --gate <findings.jsonl>` applies it (exit 3 on a
+barred family in the headline band). Phase 7 does not yet **call** it, and the
+`unmeasured_requires_visible_marker` half of the policy has no renderer — the
+report has no PROVISIONAL marker for findings from an unmeasured family.
+
+**Fix.** (a) `steps/phase-07-synthesis.md` invokes `--gate` over
+`phase-07-findings-computed.jsonl` and caps barred families at
+`barred_family_severity_cap`; (b) `lib/report-template.md` gains a precision
+provenance block listing every family that reached the headline band with an
+unmeasured rate. Until (b) exists, an unmeasured family is silent in the report,
+which is the condition `KNOWN-GAPS` #26 documents. **Effort** S-M.
+
+### Calibrate on a second, non-TypeScript target
+
+**Problem.** Every measured rate in `manifest.yaml` comes from one Nuxt 4 /
+h3 / drizzle monolith (`KNOWN-GAPS` #25). The deep-dive prompts were written
+against idioms that target uses. A polyglot repo may produce a materially
+different precision profile and nothing would reveal it.
+
+**Fix.** Triage a full-mode run against a second target of a different language
+family and record a second `rule_family_precision` block keyed by target. Cost
+anchor: the first calibration was 255 verdicts. A meaningful second run needs
+n ≥ 30 per family for the families the gate actually judges — so roughly 100-150
+verdicts, not 255, if scoped to the mechanical families and the deep-dives.
+**Effort** L (human triage, not code).
+
+### Re-measure the C-rules
+
+**Problem.** The recorded 1.4% for `validate-collection-scoping.py` measures
+`_strip_literals`, not C1/C5 — the rules never got to evaluate their own idea
+(`KNOWN-GAPS` #27). v2.6 fixes the mechanism and bars the family from the
+headline band, which is the correct holding position, but a barred family that is
+never re-measured stays barred forever and eventually gets deleted for being
+useless.
+
+**Fix.** After the Wave 2 template-awareness fix has run against a drizzle or
+Kysely target, triage the C-rule output specifically and update
+`rule_family_precision`. `calibration-report.py --by-rule` splits C1 from C5, so
+the two can be judged separately — they may not deserve the same verdict.
+**Effort** M.
+
+### Precision measurement is unverifiable without stable ids
+
+**Problem.** `calibration-report.py` joins findings to verdicts on the finding
+`id`. Story 4.1 found 1361 rows carrying only 1256 distinct ids (seven `config`
+ids appeared six times each, with three distinct payloads among the six). A
+duplicated id makes a verdict ambiguous, and the script currently resolves it
+last-wins with a warning.
+
+**Fix.** Once id uniqueness is asserted before SARIF is written (story 4.1),
+promote the script's duplicate-id warning to a hard error. Leaving it a warning
+today is deliberate — it must stay usable against pre-v2.6 runs. **Effort** S.
 
 ## Methodology / tagging
 

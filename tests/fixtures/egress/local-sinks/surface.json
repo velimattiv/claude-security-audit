@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "skill_version": "2.6.0",
+  "audit_id": "fixture-local-sinks",
+  "generated_at": "2026-07-31T00:00:00Z",
+  "by_category": {"scheduler": 1},
+  "flags_summary": {},
+  "surfaces": [
+    {
+      "id": "report:cron:nightly-rollup",
+      "partition": "reports",
+      "category": "scheduler",
+      "method": null,
+      "path": "cron:0 3 * * *",
+      "registration_file": "server/workers/nightly-rollup.ts",
+      "handler_file": "server/workers/nightly-rollup.ts",
+      "line_range": [1, 120],
+      "handler_hash": null,
+      "auth_required": true,
+      "auth_middleware": ["verifySchedulerHmac"],
+      "roles_required": ["service"],
+      "params": [],
+      "trust_zone": "internal",
+      "data_ops": ["read", "write"],
+      "framework": "Nitro",
+      "serves_resource": "Report",
+      "intended_gate": "scheduler HMAC signature + service role check",
+      "emits_bytes": false,
+      "guarded_paths": [
+        {"branch_id": "scheduled", "condition": "invoked by the scheduler", "enforced_gate": "scheduler HMAC signature + service role check", "serves_bytes": false}
+      ]
+    }
+  ]
+}

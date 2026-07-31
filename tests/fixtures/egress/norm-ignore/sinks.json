@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "STORY 2.8, BUGS 2 AND 3 — the two that together produced 64 phantom coverage",
+    "failures which MASKED 7 real credential gaps and 129 real collection gaps.",
+    "Bug 3: `_norm` used `str(p).lstrip('./')`, and lstrip takes a CHARACTER SET, not",
+    "a prefix — so `.output/` became `output/` and stopped matching the built-artifact",
+    "ignore list. The `.output/` candidate here must be dropped; it will not be if",
+    "_norm eats the leading dot.",
+    "Bug 2: neither this validator nor the collection validator read an ignore file,",
+    "so the run demanded inventory entries for an unrelated repository the operator",
+    "had cloned under `tmp/`. That candidate must be dropped by ignore.txt — and",
+    "tests/test-egress.sh re-runs this fixture WITHOUT the ignore file to prove the",
+    "ignore file is what drops it rather than something else."
+  ],
+  "sinks": [
+    {
+      "id": "ok:sink:handler",
+      "sink_file": "server/api/ok.get.ts",
+      "line": 5,
+      "kind": "db_entity",
+      "framework": "Nitro",
+      "serves_resource": "Widget",
+      "reachable_via": ["/api/ok"],
+      "guarded_paths": [
+        {
+          "branch_id": "authorized",
+          "condition": "always",
+          "enforced_gate": "requireRole('viewer') + tenant ownership",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}

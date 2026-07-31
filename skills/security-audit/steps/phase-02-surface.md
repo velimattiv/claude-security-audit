@@ -88,6 +88,8 @@ Every surface row in `surfaces[]` MUST include:
 | `id` | unique within the audit; format `<partition-id>:<category>:<idx>` (e.g., `juice-shop:http:0042`) |
 | `partition` | partition id this surface belongs to |
 | `category` | one of the categories in §2.3 |
+| `layer` | (v2.6, strongly recommended) `http` \| `browser` \| `cli` \| `worker` \| `build` \| `ipc`. §6.19 computes the gate floor per `(resource, layer)`; without it a browser component and a cron worker are compared against each other's gates. See §2.11a. |
+| `gate_rank_hint` | (v2.6, optional) `none` \| `authn` \| `authz` \| `verified` — the rank you actually read, overriding the keyword ranker. See §2.11a. |
 | `method` | for http/grpc/graphql: method or verb; for others: `null` |
 | `path` | the external identifier (URL path, queue name, gRPC service/method, cron cadence, topic name) |
 | `registration_file` | file where the route is *registered* (e.g., `server.ts` for `app.post('/x', ...)`) |
@@ -291,6 +293,10 @@ enumerate from memory — that is how sinks get missed:
    capability/api-key/session/feature-flag/licence), record `writers[]`,
    `readers[]`, `validation_at_readers[]`, and `protects_resources[]` (canonical
    entity ids it is meant to gate).
+5. **Type each sink (v2.6).** Set `layer`, `destination`, and — for any
+   `local_fs` sink — `path_control`. Set `gate_rank_hint` on any branch whose
+   gate you actually read. These are what make §6.19 precise rather than noisy;
+   §2.11a explains each and what it cost when it was missing.
 
 Write `phase-02-sinks.json` (schema `lib/sink-schema.json`) and
 `phase-02-credentials.json` (schema `lib/credential-ledger-schema.json`).
@@ -311,6 +317,46 @@ proceeding.
 > entered `phase-02-sinks.json` and §6.19 never evaluated it. If a surface emits
 > a resource's *identity or metadata* to someone who should not know the resource
 > exists, inventory it.
+
+### 2.11a — Four fields that decide whether §6.19 is precise (v2.6)
+
+The R-rules measured **19.8% true** over the first externally-triaged run. The
+rules were not the problem — the *inputs* were. §6.19 joined every path that
+named the same `serves_resource`, a free-text string, so a Vue click handler was
+compared against a cron worker's HMAC gate. These four fields type that join.
+**Every one is optional and defaults to v2.5 behaviour, so omitting them is
+silent — it costs precision, not correctness. Set them.**
+
+**`layer`** ∈ `http` | `browser` | `cli` | `worker` | `build` | `ipc` — on both
+sinks and surfaces. The gate `floor` is computed per `(resource, layer)`, so this
+is what stops a cron worker's HMAC being read as a weaker sibling of an HTTP RBAC
+check. Set it explicitly wherever the path is ambiguous; the path-based fallback
+cannot know that `app/` is the browser in Nuxt and server code in Rails. **A
+browser row can never enforce a gate — the browser *is* the caller** — so
+`layer: browser` removes the row from R2/R3/R5 rather than flagging it for a
+gate it could not hold.
+
+**`destination`** ∈ `network` | `local_fs` | `local_stdout` — on sinks. Only
+`network` reaches R2/R3/R5. A `console.log` to the invoking developer's own
+stdout and a `0600` write to the device's own home are not egress to an untrusted
+caller; six of 49 sampled false positives were exactly that.
+
+**`path_control`** ∈ `fixed` | `own_config` | `env` | `argv` | `repo` | `caller`
+— on `local_fs` sinks. **This is the field new rule R6 keys on, and it is the
+one most likely to be left unset on a real finding.** The calibrated run *missed*
+a CRITICAL because a repo-steerable state directory made a hook write a live
+access token into an attacker's working tree — no network call, so no egress rule
+could see it. The discriminator is not "is it a file" but **who controls the
+path**: `repo` or `caller` means an untrusted party steers it.
+
+**`gate_rank_hint`** ∈ `none` | `authn` | `authz` | `verified` — on a branch
+whose gate you have read and understood. It **overrides** the keyword ranker,
+which is a fallback and no longer the authority. Set it whenever your gate
+description is precise, because the v2.5 behaviour was perverse: the ranker
+scores unrecognised text as `none`, so **the more accurately you described a real
+control, the more likely it was to rank 0 and be filed CRITICAL.** One paragraph
+of genuine, correct hardening — atomic rename, compare-and-swap, fail-closed
+parse — was filed CRITICAL for containing none of the ranker's keywords.
 
 ## 2.12 — Collection inventory (v2.5, GLOBAL) — row scoping, not gate presence
 

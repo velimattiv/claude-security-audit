@@ -160,7 +160,7 @@ From `profile.deployment.ci.*`:
 Cross-reference zizmor SARIF if present. Findings tagged
 `category: deployment`, `owasp_ids: ["ASVS-V14.1", "API8:2023"]`.
 
-## 6.9 — ASVS 5.0 Level 2 spine
+## 6.9 — ASVS 4.0.3 Level 2 spine
 
 Invoke the **Agent tool** once per ASVS L2 category (V1 through V17 —
 17 sub-agents). For each category, the Agent invocation has:
@@ -434,15 +434,41 @@ fail"):
   entry to bytes. Read the actual handler + every middleware in its chain — do
   NOT trust the inventory's summary. Return the `verification_probe` (the curl an
   attacker runs + the expected denial), set `actual` if you can statically
-  determine the live result, and a confidence: CONFIRMED if you produced a
-  concrete bypass request, REFUTED if you proved the gate holds on every path
-  (with the line that enforces it)."*
+  determine the live result, and set **`attacked`**: `confirmed` if you produced
+  a concrete bypass request, `refuted` if you proved the gate holds on every
+  path, `partial` if part held and part did not. **A `refuted` verdict MUST also
+  carry `refutation_scope`** — the boundary of what you actually read (the
+  module, the file set, or the call-graph depth). A refutation may only be
+  scoped to what was examined."*
 
-Merge each confirmation back into `phase-06-egress.jsonl`: promote to
-`confidence: CONFIRMED` + attach the `verification_probe` when the sub-agent
-constructs a bypass; **demote/drop** the finding (record as INFO with the
-refuting line) when it proves the gate holds. This adversarial pass is what
-turns "the inventory says weak" into "here is the request that proves it".
+Merge each confirmation back into `phase-06-egress.jsonl`: set `attacked`
+accordingly and attach the `verification_probe` when the sub-agent constructs a
+bypass; **demote/drop** the finding (record as INFO with the refuting line and
+its `refutation_scope`) when it proves the gate holds. This adversarial pass is
+what turns "the inventory says weak" into "here is the request that proves it".
+
+> **v2.6 — two corrections to how this pass's output is read.**
+>
+> 1. **It sets `attacked`, not `confidence`.** In v2.5 this pass wrote a
+>    run-level `verification_status` that appeared nowhere in the skill, and
+>    because §6.19/§6.20 were the *only* steps that produced it, the label
+>    silently recorded **which phase emitted a finding** rather than how
+>    trustworthy it was. Measured against ground truth: findings marked
+>    `CONFIRMED` were **9.6%** true; findings carrying no label — the deep-dive
+>    population, which this pass structurally cannot reach — were **92.1%** true.
+>    A reader who rationally trusted the label was wrong roughly 10:1. Never
+>    present a finding attacked here in the same severity band as an
+>    unattacked judgement finding.
+> 2. **A wrong refutation is more dangerous than a false positive.** A false
+>    positive costs a triager minutes and is self-correcting — they read the code
+>    and move on. A wrong refutation files a real HIGH under a heading the reader
+>    is told to trust and *stops* them reading the code; nothing downstream
+>    reopens it. In the calibrated run, a refutation true of one module was
+>    generalised to a system property and buried a live HIGH in which two call
+>    sites handed a signing key to a function that set `Authorization: Bearer`.
+>    When the finding alleges *credential X reaches sink Y* and the sub-agent
+>    refutes it by reading X's producer, **require a caller enumeration of the
+>    accessor before accepting the refutation.**
 
 > Honest framing (carries into the report): a clean §6.19 means every *known*
 > egress candidate was accounted for and gated — it is high-signal but **NOT a
@@ -476,7 +502,7 @@ python3 "$SKILL_DIR/lib/validate-collection-scoping.py" \
 The script (a) re-extracts list-query candidates from the handler files and
 **FAILS the run if any candidate was neither inventoried nor dismissed** in Phase
 2 §2.12 (line-scoped, same discipline as §6.19), and (b) emits one finding per
-scoping deficit via rules C1-C5:
+scoping deficit via rules C1-C6:
 
 - **C1** — a collection of a sensitive entity with no caller-bound predicate,
   no filtering visibility helper, and no `public_resources` entry (CWE-1220).
@@ -521,14 +547,23 @@ For each C1/C2 deficit, invoke the **Agent tool** (concurrency cap 8) per
   client extension, or database row-level-security policy. Read the actual query
   builder; do NOT trust the inventory's summary. Return the
   `verification_probe` (the request an attacker runs + the expected denial) and
-  a confidence: CONFIRMED if you produced a cross-principal read, REFUTED if you
-  found the scope."*
+  set **`attacked`**: `confirmed` if you produced a cross-principal read,
+  `refuted` if you found the scope, `partial` if some rows are bound and some are
+  not. **A `refuted` verdict MUST name the `file:line` of the predicate it found
+  and carry `refutation_scope`** — a refutation with no line is not a
+  refutation."*
 
-Merge each result back into `phase-06-collections.jsonl`: promote to
-`CONFIRMED` with the probe when the sub-agent constructs a cross-principal read;
+Merge each result back into `phase-06-collections.jsonl`: set `attacked` and
+attach the probe when the sub-agent constructs a cross-principal read;
 **demote to INFO with the refuting line** when it finds the base scope. Missing a
 base scope is this rule's main false-positive mode, and this pass is what
 retires it.
+
+> **v2.6 — read the note at the end of §6.19 Step 2; it applies here verbatim.**
+> This pass sets `attacked`, never `confidence`. The C-rules measured **1.4%**
+> true at HIGH+ over a calibrated run, and this pass is the only thing standing
+> between that number and the reader — but its own verdicts are not evidence of
+> trustworthiness for any finding it never saw.
 
 > Honest framing (carries into the report): a clean §6.20 means every *known*
 > list-query candidate was accounted for and scoped. It is high-signal but

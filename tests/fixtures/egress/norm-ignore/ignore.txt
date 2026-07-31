@@ -1,0 +1,3 @@
+# Fixture stand-in for .claude-audit/ignore.txt (v2.6 story 2.8 bug 2).
+# Same file, flag and glob semantics as validate-partition-coverage.py.
+tmp/

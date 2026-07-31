@@ -7,6 +7,239 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.6.0] — 2026-07-31
+
+**Calibrated severity.** The first release measured against ground truth. Eight
+security engineers triaged all 263 HIGH-or-above findings from a v2.5.0
+full-mode run against the real code — 255 verdicts — and recorded 34 defects the
+audit missed. An adversarial reviewer then attacked the remediation plan built
+from the triage. See `docs/EPIC-v2.6-calibrated-severity.md`.
+
+The headline result: **the audit's own confidence marker was anti-correlated
+with truth.** Findings labelled `CONFIRMED` were **9.6%** true; findings carrying
+no label at all were **92.1%** true. The cause was structural — the adversarial
+confirmation pass existed only in Phase 6, so it could only ever label the two
+*least* precise rule families, and the most precise family could never be
+labelled at all. The marker recorded *which phase emitted a row*, not how much to
+trust it. A reader following the report's own advice to "read the confidence
+bands" was sent to the 9.6% pile first and the 92.1% pile last.
+
+Two numbers frame the rest. The category deep-dive agents ran at **96.6%** true
+(98.9% excluding unresolvable duplicate cycles), with four categories at 100% —
+that part of the pipeline works and is untouched here. The two mechanical rule
+families were **19.8%** and **1.4%** true, together 60% of all HIGH+ findings and
+15% of the true ones.
+
+> Denominators: 255 is *verdicts*, not the 263 HIGH+ findings — 8 were never
+> triaged — so these are precision-over-triaged. 51 unresolvable duplicate cycles
+> count as not-true, making every rate a lower bound.
+
+### The invariant this release restores
+
+v2.5's design bet — over-flag, then retire via the adversarial pass — is sound
+only while a false positive is **locally** expensive. By v2.5 it was not:
+`validate-collection-scoping.py` minted `reads:any_*_pii` capability tags from an
+entity name and a profile column list with **no check that the collection was
+actually unscoped**, producing **47%** of every capability tag in the composition
+graph; the composer then escalated contributing findings straight to CRITICAL.
+**53 of 73** HIGH+ C-rule findings ended CRITICAL while **72 of 73** were false —
+and the escalation reached their *neighbours*, including true findings.
+
+`docs/KNOWN-GAPS.md` #23 had predicted the precise defect and dismissed it:
+*"the failure direction is a false positive — which a human closes — not a silent
+pass."* That reasoning was correct when written and expired silently when the
+composer landed. Nobody re-checked it.
+
+> **A low-evidence finding must not be able to raise the severity of anything —
+> itself or its neighbours.** And: a "the failure direction is safe" argument is
+> scoped to the consumers that existed when it was written. Adding a downstream
+> consumer of a finding obliges you to re-check every such argument against it.
+
+### Added
+
+- **Typed evidence** (`lib/finding-schema.json`). `confidence` conflated three
+  orthogonal things; they are now separate fields:
+  - `evidence_class` (**required**) ∈ `external_scanner` | `heuristic_inventory`
+    | `agent_judgement` | `governance`. **Only `external_scanner` earns the §7.4
+    +1 severity promotion.** Unset falls back to `agent_judgement`, never to a
+    promotable class — the fail-safe direction is toward *not* promoting.
+  - `attacked` ∈ `not_attempted` | `confirmed` | `partial` | `refuted`, replacing
+    the run-level `verification_status` that appeared **nowhere** in the skill.
+  - `fix_confidence` ∈ `verified` | `inferred` | `untested`.
+  - `sibling_sites[]` + `sibling_pattern`, `refutation_scope`,
+    `deployment_reachability`, `rule_family`, `annexed_to`,
+    `escalation_suppressed_by`.
+- **New source kind `heuristic`.** Both reconcilers previously declared
+  `sources[].kind = "scanner"`, which is what tripped §7.3's *"scanners are
+  mechanical ground truth"* rule and handed the 1.4%- and 19.8%-true families a
+  CONFIRMED label plus a severity rung. The rule is now structurally unable to
+  match them — fixed at the type level rather than in prose.
+- **Evidence-aware escalation** (`lib/compose-attack-paths.py`, story 1.4). R3
+  chain escalation stays **uncapped** — capping it would kill v2.5's founding
+  case, where a MEDIUM had to be able to reach CRITICAL in one step — but is now
+  suppressed when a **load-bearing** member of the contributing slice declares
+  `deployment_reachability: structurally_unreachable` **with a cited line**.
+  `gated_by_runtime_flag` does **not** suppress: a flag an admin can toggle in a
+  deployed environment is live, not theoretical. Uncited claims do not suppress
+  and are printed. Every suppression is reported in a `SUPPRESSED ESCALATIONS`
+  block — suppression is now the dangerous direction, so it is made loud.
+- **Mechanical findings become an annex** (Wave 2b). Of the 17 true mechanical
+  findings, **15 were restatements of a deep-dive finding on the same line**, and
+  the families surfaced **no unique CRITICAL** — but they *did* enumerate one
+  credential-exfil class's **nine distinct legs at exact line granularity**,
+  which no agent did. So rows now attach to the judgement finding they restate as
+  a fix-surface annex, carry no severity of their own, and are excluded from the
+  capability graph. **Orphan annexes** — no judgement twin — still surface as an
+  explicitly low-confidence lead list, capped out of the headline band; on a
+  codebase with no deep-dive coverage of an area, the mechanical rule is the only
+  thing that sees it.
+- **Sibling sweep** (story 3.1). Every HIGH+ finding must derive its defect's
+  shape as a pattern, run it repo-wide, and report the full site list — or state
+  that the cited site is the only one. `sibling_sites: []` is a **claim** and
+  must carry the `sibling_pattern` that backs it. The majority of the 34 missed
+  defects were the second, third and fourth site of a defect found once: 10
+  `postgres()` call sites filed as "all four", **25 RLS bypass clauses across 10
+  migrations filed as one policy**, 10 mutable action tags filed as 4, 7
+  plain-HTTP downgrades filed as 1. Each is a one-line grep.
+- **Refutation discipline** (story 3.2). `refutation_scope` is required, and a
+  "What is sound" row backed by a single module may not make a system-level
+  assertion. Where a finding alleges *credential X reaches sink Y*, a refutation
+  from reading X's producer requires a **caller enumeration of the accessor**
+  first. In the calibrated run exactly that shape — true of one module,
+  generalised to a system property — buried a live HIGH in which two call sites
+  handed a GitHub App signing key to a function that set `Authorization: Bearer`.
+  **A wrong refutation is more dangerous than a false positive:** the false
+  positive costs a triager minutes and self-corrects; the wrong refutation stops
+  them reading the code and nothing downstream reopens it.
+- **Fix-contradiction check** (story 3.3, §7.4b). Two findings on one defect
+  whose `suggested_fix` texts disagree are flagged rather than both shipped.
+  Never resolved by majority, severity or recency — in the measured case the
+  correct fix was **1 of 6** and the only one citing driver source, so every one
+  of those heuristics picks the wrong text. This withholds the **fix**, never the
+  **finding**: findings still ship at full computed severity with the fix line
+  replaced by a `WITHHELD` notice.
+- **`--require-evidence-discipline`** (`lib/validate-findings.py`) — the Wave-3
+  obligations enforced mechanically rather than as methodology prose, plus
+  `tests/test-evidence-discipline.sh` and a CI step. The calibrated run found the
+  audit's headline defect class, across five of five themes, was
+  *control-versus-prose gaps*; an obligation living only in a step file is that
+  same defect, committed by the tool built to detect it.
+- **`scripts/calibration-report.py`** — joins a run's findings to a triage
+  verdict file and emits measured true-positive rates by `rule_family`,
+  `evidence_class` and `attacked`. Handles duplicate resolution, unresolvable
+  cycles, and untriaged rows (excluded from the denominator, reported as
+  coverage, so a run cannot improve its number by triaging less). Makes the next
+  calibration a command rather than eight engineers.
+- **Standing calibration control** (`manifest.yaml`). Per-family measured
+  precision, seeded from this triage. A family measured below 0.50 on n≥30 is
+  **barred from the headline band**; unmeasured families are admitted but marked
+  PROVISIONAL and can never report `pass`; a family with no entry at all is
+  barred hardest. Gating uses the with-cycles lower bound — gating on the
+  flattering number is the failure this release exists to fix.
+- **Availability/integrity lens** (`steps/deepdive/lens-availability-integrity.md`)
+  — attack paths with no confidentiality component. The calibrated run missed a
+  HIGH where uncapped provisioning displaces every real row from a downstream
+  fixed-size scan, causing an estate-wide silent attribution stop.
+- **Local-filesystem exfil** as an egress modality. A repo-steerable state
+  directory made a hook write a live access token into an attacker's working
+  tree; with no network call, no egress rule could see it.
+- **New rule C6** — the cited predicate is not at the cited line — split out from
+  C5, which keeps the access-control claim. Different claims with different
+  follow-ups: 9 of 14 sampled C-rule false positives fired on the miscitation
+  branch against handlers whose predicate was genuinely present two frames up the
+  call stack.
+
+### Fixed
+
+- **`_strip_literals()` was not template-aware** (`lib/validate-collection-scoping.py`).
+  A backtick sat in the same delimiter set as `'` and `"`, so the entire body of a
+  tagged template — including its `${…}` interpolations — was blanked, and
+  `predicate_binds_caller()` derived both its token list and its `components`
+  from the blanked text. Fatal on any drizzle/Kysely codebase, where the caller
+  predicate lives inside a tagged template by construction. **72 of 73** HIGH+
+  C-rule findings were false because of it. Compounding it, `_CALLER_TOKENS` had
+  no entry for the Postgres RLS-GUC idiom — and a GUC name is a single-quoted
+  literal, precisely what the stripper correctly discards for
+  `eq(decks.scope, 'session')`. Neither fix alone is sufficient; both landed,
+  pinned by a seven-case truth table where three cases must flip to `True` **and
+  three must stay `False`**.
+- **Cross-layer egress joins.** `floor` was computed per `serves_resource` — a
+  free-text string an inventory agent wrote — so everything sharing the string
+  was compared regardless of layer, process or trust boundary. A Vue click
+  handler was compared against a cron worker's HMAC gate. Joins are now typed by
+  layer.
+- **Kind-derived gate floors no real gate text could reach.** `_KIND_RANK` mapped
+  `capability`/`verification` to `GATE_VERIFIED`, a rank only the keywords
+  `2fa|mfa|otp|verif|step-up|…` reach — so request-scoped RLS GUCs gave every
+  resource they touch floor 3 in an app with no step-up auth, and the
+  **correctly gated** branch was filed HIGH. Now capped unless a rank-3 gate is
+  actually observed, with an explicit `gate_rank_hint` overriding the keyword
+  ranker. The old behaviour meant *the more precisely an analyst described a real
+  control, the more likely it was to rank 0 and be filed CRITICAL*.
+- **Three silent-corruption bugs, all shipped in v2.5.0:** an `IndexError` on a
+  sink whose `reachable_via` was present-but-empty (`.get(k, default)[0]` only
+  defaults on a *missing* key) that **crashed §6.19 entirely**; neither
+  reconciler reading an ignore file, so a run scanned an unrelated cloned repo;
+  and `_norm` using `str(p).lstrip("./")` — a **character set**, not a prefix, so
+  `.output/` became `output/`. The last two together produced **64 phantom
+  coverage failures that masked 7 real credential gaps and 129 real collection
+  gaps**. These were fail-closed gates failing in the *noisy* direction, which is
+  the specific way a fail-closed gate stops being trusted.
+- **The L1 age gate was keyed on the same broken label** — `confidence ==
+  "CONFIRMED"` — so the gate that exists to stop a real finding rotting for 96
+  days fired on the 9.6%-true population and skipped the 92.1%-true one. Re-keyed
+  on `evidence_class`. *(Found while implementing; not in the calibration
+  analysis.)*
+- **`chain_severity` was computed before suppression**, so a suppressed chain
+  still advertised CRITICAL in the per-persona summary while nothing underneath
+  it was escalated.
+- **Refutations were forced to declare capabilities.** `--require-capabilities`
+  demands non-empty `postconditions` for access-control categories, which for a
+  refutation meant tagging it with the capability the *disproven* defect would
+  have granted — feeding a refuted capability into the composition graph to
+  satisfy other findings' preconditions. Refuted rows are now exempt.
+- **Duplicate ids survived Phase 7.** 1361 rows carried 1256 distinct ids; seven
+  `config` ids appeared six times each with three distinct payloads. Dedup keyed
+  on `(file, line, category, fingerprint)` while only 420 of 1361 rows carried a
+  fingerprint at all. Nine surplus rows sat inside the HIGH+ population, so every
+  headline count in the report was overstated. Id-first dedup plus a uniqueness
+  assertion before SARIF.
+- **SARIF carried no finding `id`** — only `ruleId` as `<category>/<CWE>`, which
+  is neither unique nor joinable. This is why 255 triage verdicts could not be
+  mechanically rejoined and the calibration had to be rebuilt from the JSONL.
+  `properties.id` is now required, alongside `rule_family`, `evidence_class`,
+  `attacked` and `sibling_sites`.
+- **`lib/asvs-l2.md` was headed "OWASP ASVS 5.0 Level 2" while enumerating
+  4.0.3's category set.** Retitled rather than rewritten, because every ASVS id
+  the skill emits is a 4.0.3 id and 5.0.0 renumbered every chapter — rewriting
+  the file alone would have produced a mixed-edition tag set, worse than either
+  edition applied consistently. Five other files asserting 5.0 were corrected to
+  match. A fabricated `V2.11` entry was removed.
+- **LINDDUN could not be expressed.** The `category` enum had no member and the
+  `owasp_ids` pattern excluded `LINDDUN-*`, while §6.12 instructs the artifact to
+  carry them — so LINDDUN findings were smuggled through `config`.
+
+### Changed
+
+- **The report's reading path is now class-major, severity-minor.** v2.5 told
+  readers *"the 182 CONFIRMED + deep-dive findings are the trustworthy spine"* —
+  half that spine was 9.6% true and the other half 92.1%, and merging them hid a
+  factor of ten. No band may mix `evidence_class` values. Severity-major *with*
+  class sub-bands is explicitly not sufficient: it satisfies the letter while
+  still pointing the reading path at the worst pile first.
+- **§6.19/§6.20 emit `attacked`, not a confidence.** Both must now scope their
+  refutations; §6.20 additionally requires the `file:line` of the predicate it
+  claims to have found — a refutation with no line is not a refutation.
+- **A subsystem-wide remediation must enumerate its members.** The calibrated run
+  advised adding a clamp across a path glob where **11 of 16 handlers had nothing
+  to clamp** — the pivotal table has no such column, so the change would either
+  no-op or deny every legitimate caller. "Add X across `path/**`" is a claim
+  about every member and now needs the same evidence bar as a finding.
+- **Design records outrank inference.** Where a decision record ratifies an
+  asymmetry, an inference that the asymmetry *is* the finding requires an
+  explicit rebuttal of the record. In the calibrated run this theme's
+  remediation would have added a call that cannot fire, against the design record.
+
 ## [2.5.0] — 2026-07-25
 
 **Sufficiency & severity arithmetic.** A live v2.4.0 run (all six scanners, no

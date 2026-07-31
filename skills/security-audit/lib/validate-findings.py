@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 
+_CITE_RE = re.compile(r"[\w./\\-]+\.\w+:\d+")
+
 _CAP_GRAMMAR = re.compile(r"^[a-z][a-z0-9_]*(:[a-z0-9_]+)?$")
 
 
@@ -81,6 +83,15 @@ def capability_errors(lineno: int, finding: dict, require_cats: set[str]) -> lis
     days of exposure."""
     if not require_cats or finding.get("category") not in require_cats:
         return []
+    # v2.6: a REFUTATION grants the attacker nothing — that is the whole content
+    # of the claim. Requiring non-empty `postconditions` here would force the
+    # analyst to tag it with the capability the *alleged* defect would have
+    # granted, feeding a **disproven** capability into the composition graph,
+    # where it would satisfy other findings' preconditions and escalate them.
+    # A refuted finding must be able to carry its real category and grant
+    # nothing; `refutation_scope` (checked separately) is what keeps it honest.
+    if finding.get("attacked") == "refuted":
+        return []
     errs = []
     if "preconditions" not in finding:
         errs.append(
@@ -106,8 +117,131 @@ def capability_errors(lineno: int, finding: dict, require_cats: set[str]) -> lis
     return errs
 
 
+_HIGH_PLUS = {"CRITICAL", "HIGH"}
+
+
+def _sev(finding: dict) -> str:
+    """Effective severity: computed wins, asserted is the fallback."""
+    return str(finding.get("severity_computed")
+               or finding.get("severity") or "").upper()
+
+
+def evidence_class_of(finding: dict) -> str:
+    ec = finding.get("evidence_class")
+    return ec if isinstance(ec, str) and ec else "agent_judgement"
+
+
+def evidence_discipline_errors(lineno: int, finding: dict,
+                               known_ids: set[str] | None = None) -> list[str]:
+    """v2.6: the Wave-3 obligations, enforced mechanically rather than in prose.
+
+    Every one of these was written as methodology guidance first. The audit's own
+    headline finding across five themes was `control-versus-prose gaps` — a
+    control exists in a comment, a policy table or a design doc and is not
+    enforced on the path that matters. An obligation that lives only in a step
+    file is that same defect, committed by the tool that exists to detect it.
+
+    Annexed rows (v2.6 Wave 2b) are enumeration legs folded into a parent
+    finding, not findings in their own right, so the parent carries the
+    obligations and these checks skip them.
+    """
+    annex = finding.get("annexed_to")
+    if annex:
+        # An annexed row is exempt because its PARENT carries the obligations.
+        # If the parent does not exist, nothing carries them and the row has
+        # vanished from the report instead of being demoted — `annexed_to` would
+        # be a one-field way to delete a finding. Only `heuristic_inventory` rows
+        # are annexable: a judgement finding may never fold itself into another.
+        if known_ids is not None and annex not in known_ids:
+            return [f"line {lineno}: `annexed_to` points at `{annex}`, which is "
+                    "not a finding in this corpus — an annexed row is exempt from "
+                    "the HIGH+ obligations because its PARENT carries them, so a "
+                    "dangling parent deletes the finding rather than demoting it"]
+        if evidence_class_of(finding) != "heuristic_inventory":
+            return [f"line {lineno}: only `heuristic_inventory` rows may be "
+                    f"annexed; this row is `{evidence_class_of(finding)}`. The "
+                    "annex exists to fold MECHANICAL enumeration legs into the "
+                    "judgement finding they restate, not to let a judgement "
+                    "finding suppress itself"]
+        return []
+    errs = []
+
+    # --- Sibling sweep (story 3.1). The single highest-value check here.
+    # Of 34 defects an eight-engineer triage found and the audit missed, the
+    # majority were the second, third and fourth site of a defect the audit
+    # correctly found ONCE: 10 postgres() call sites filed as "all four",
+    # 25 RLS bypass clauses filed as 1 policy, 7 plain-HTTP downgrades filed
+    # as 1. Each of those counts is a one-line grep. A mechanical sweep does
+    # not get bored at nine; both the tool and eight engineers did.
+    if _sev(finding) in _HIGH_PLUS:
+        if "sibling_sites" not in finding:
+            errs.append(
+                f"line {lineno}: HIGH+ finding requires `sibling_sites` — run the "
+                "defect's shape repo-wide and list every other site, or pass [] to "
+                "claim the cited site is the only one")
+        elif not finding.get("sibling_pattern"):
+            # An empty list is a CLAIM ("this is the only site"), and a claim
+            # needs the evidence that backs it. Without the pattern, [] is an
+            # omission wearing a claim's clothes — which is the exact shape
+            # this field exists to prevent.
+            errs.append(
+                f"line {lineno}: `sibling_sites` present but no `sibling_pattern` — "
+                "state the grep/AST pattern actually run repo-wide; an empty list "
+                "with no pattern is an omission, not a claim")
+
+    # --- Refutation scoping (story 3.2). The most dangerous class measured.
+    # A refutation true of ONE module was generalised to a system property and
+    # buried a live HIGH: two call sites handed a signing key to a function that
+    # set `Authorization: Bearer`. A false positive costs a triager minutes and
+    # self-corrects; a wrong refutation stops them reading the code, and nothing
+    # downstream reopens it.
+    if finding.get("attacked") == "refuted" and not finding.get("refutation_scope"):
+        errs.append(
+            f"line {lineno}: `attacked: refuted` requires `refutation_scope` — "
+            "name the boundary actually examined (module / file set / call-graph "
+            "depth). A refutation may only be scoped to what was read")
+
+    # --- Fix confidence (story 3.3).
+    # Six findings on one Postgres-TLS defect: the FINDING was right on all six,
+    # the FIX was wrong on five. Fix text is what gets executed, and it currently
+    # inherits the finding's confidence for free.
+    fc = finding.get("fix_confidence")
+    if finding.get("suggested_fix") and not fc:
+        errs.append(
+            f"line {lineno}: `suggested_fix` present but no `fix_confidence` — "
+            "rate the FIX separately from the finding "
+            "(verified requires a cited line in the dependency being asserted about)")
+    elif fc == "verified" and not _CITE_RE.search(str(finding.get("suggested_fix") or "")):
+        # `verified` is the only value that buys anything downstream (§7.4b lets
+        # it win a fix-contradiction), so it is the one that must be earned. In
+        # the measured case the CORRECT fix of six was the only one citing driver
+        # source; an unearned `verified` hands the win to the wrong text.
+        errs.append(
+            f"line {lineno}: `fix_confidence: verified` requires a cited "
+            "`file:line` in `suggested_fix`, naming the dependency/driver/API "
+            "the claim is about — otherwise `verified` is self-asserted, which "
+            "is exactly how `confidence: CONFIRMED` became a 9.6%-true label")
+
+    # --- Reachability evidence (story 1.4).
+    # Fail-open by design: this suppresses an R3 escalation, so an uncited claim
+    # must not be able to do it. Otherwise the field becomes the next
+    # self-asserted CONFIRMED.
+    dr = finding.get("deployment_reachability")
+    if isinstance(dr, dict) and dr.get("state") in (
+            "structurally_unreachable", "gated_by_runtime_flag"):
+        if not dr.get("evidence"):
+            errs.append(
+                f"line {lineno}: `deployment_reachability.state = "
+                f"{dr.get('state')}` requires an `evidence` cite (file:line) — "
+                "an uncited unreachability claim does not suppress escalation")
+
+    return errs
+
+
 def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None,
-                             require_cats: set[str] | None = None):
+                             require_cats: set[str] | None = None,
+                             evidence_discipline: bool = False,
+                             known_ids: set[str] | None = None):
     import jsonschema  # type: ignore
     validator = jsonschema.Draft202012Validator(schema)
     errors = []
@@ -126,11 +260,15 @@ def validate_with_jsonschema(schema: dict, findings, cwe_ids: set[str] | None,
                     f"(schema pattern allows any CWE-\\d+; semantic check requires map entry)"
                 )
         errors.extend(capability_errors(lineno, finding, require_cats or set()))
+        if evidence_discipline:
+            errors.extend(evidence_discipline_errors(lineno, finding, known_ids))
     return errors
 
 
 def validate_manual(schema: dict, findings, cwe_ids: set[str] | None,
-                    require_cats: set[str] | None = None):
+                    require_cats: set[str] | None = None,
+                    evidence_discipline: bool = False,
+                    known_ids: set[str] | None = None):
     """Minimal manual validator used when jsonschema is unavailable.
     Checks only the top-level `required` list + CWE-in-map + capability
     requirements when provided. Not a substitute for jsonschema — CI must
@@ -149,6 +287,8 @@ def validate_manual(schema: dict, findings, cwe_ids: set[str] | None,
             if cwe and cwe not in cwe_ids:
                 errors.append(f"line {lineno}: cwe `{cwe}` not in cwe-map.json")
         errors.extend(capability_errors(lineno, finding, require_cats or set()))
+        if evidence_discipline:
+            errors.extend(evidence_discipline_errors(lineno, finding, known_ids))
     return errors
 
 
@@ -171,6 +311,17 @@ def main():
              "the Phase-7 attack-path arithmetic has nothing to compose, and "
              "chained findings silently keep their in-isolation severity.",
     )
+    parser.add_argument(
+        "--require-evidence-discipline",
+        action="store_true",
+        help="Enforce the v2.6 Wave-3 obligations mechanically instead of in prose: "
+             "HIGH+ findings must carry `sibling_sites` + `sibling_pattern`; a "
+             "`refuted` verdict must carry `refutation_scope`; a `suggested_fix` "
+             "must carry `fix_confidence`; and a non-`reachable` "
+             "`deployment_reachability` must cite a line. Each of these was a "
+             "measured failure in a calibrated run — see "
+             "docs/EPIC-v2.6-calibrated-severity.md.",
+    )
     parser.add_argument("jsonl", type=Path, help="Path to a findings JSONL file")
     parser.add_argument("--quiet", action="store_true", help="Only emit non-zero exit; no stderr")
     args = parser.parse_args()
@@ -192,11 +343,20 @@ def main():
     require_cats = {c.strip() for c in args.require_capabilities.split(",")
                     if c.strip()} if args.require_capabilities else set()
 
+    # Ids present in THIS file. An `annexed_to` pointing outside it cannot be
+    # resolved here, so the check only fires when the target is absent from a
+    # corpus that plausibly contains it (see evidence_discipline_errors).
+    known_ids = {f.get("id") for _, f in findings if isinstance(f.get("id"), str)}
+
     try:
-        errors = validate_with_jsonschema(schema, findings, cwe_ids, require_cats)
+        errors = validate_with_jsonschema(schema, findings, cwe_ids, require_cats,
+                                          args.require_evidence_discipline,
+                                          known_ids)
         backend = "jsonschema"
     except ImportError:
-        errors = validate_manual(schema, findings, cwe_ids, require_cats)
+        errors = validate_manual(schema, findings, cwe_ids, require_cats,
+                                 args.require_evidence_discipline,
+                                 known_ids)
         backend = "manual-fallback"
         if not args.quiet:
             print(

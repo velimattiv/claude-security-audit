@@ -78,7 +78,7 @@ correctly-looking, and still return every other user's rows — because
 inventories row scoping (`phase-02-collections.json`), Phase 5 category 12
 deep-dives it, and Phase 6 §6.20 runs a deterministic reconciliation
 ([lib/validate-collection-scoping.py](lib/validate-collection-scoping.py), rules
-C1–C5) with a fail-closed coverage gate. C5 re-checks each scoping *claim*
+C1–C6) with a fail-closed coverage gate. C5 re-checks each scoping *claim*
 against the source at the cited `file:line` (a predicate that is not there is
 refused) and C2b catches a denied decoration the handler plainly performs. Those
 are the two claims most likely to be wrong; neither is a general proof that an
@@ -97,7 +97,22 @@ force the action: a CONFIRMED HIGH+ open past 30 days with no fix and no owned,
 unexpired acceptance fails the run, and Phase 8 refuses to write a baseline while
 governance failures stand — so a downgrade cannot launder itself by re-running.
 
-**Honest scope (state this in the report):** C1–C5 make the collection class
+**3. Can this finding raise anything's severity, and has it earned that? (v2.6)**
+Every finding declares an `evidence_class`: `external_scanner` (an independent
+tool), `heuristic_inventory` (this skill's own reconcilers, which are heuristics
+over an inventory a sub-agent *wrote*), `agent_judgement` (a deep-dive read the
+code), or `governance` (a claim about the audit's own state). **Only
+`external_scanner` earns the §7.4 +1 promotion.** Mechanical rows are annexed to
+the judgement finding they restate — they enumerate its fix surface and carry no
+severity of their own — and are excluded from the capability graph. R3 chain
+escalation still runs uncapped, but is suppressed when a load-bearing member of
+the chain is `structurally_unreachable` **with a cited line**, and every
+suppression is printed.
+
+> **The invariant, stated once:** a low-evidence finding must not be able to
+> raise the severity of anything — itself or its neighbours.
+
+**Honest scope (state this in the report):** C1–C6 make the collection class
 expressible and checkable, and make an omitted collection loud — but a clean run
 is **not** a proof of absence. A scope applied by an un-modelled mechanism is
 missed conservatively (over-flagging, then retired by the §6.20 adversarial
@@ -105,3 +120,21 @@ pass), and a runtime-assembled query is recorded as a caveat. The composer can
 only compose what was tagged; R2 backstops untagged chains named in prose, and
 the **ORPHAN CAPABILITIES** list backstops that. What changed is that these
 failures are now loud instead of silent.
+
+**Why over-flagging stopped being free, and what it cost (v2.6).** The paragraph
+above is v2.5 doctrine and it is still right — a missed CRITICAL is
+unrecoverable, a false positive costs triage time. But that trade holds only
+while a false positive is **locally** expensive, and by v2.5 it was not:
+over-flagged findings minted capability tags that escalated their *neighbours*,
+including true findings, to CRITICAL. `docs/KNOWN-GAPS.md` had predicted the
+precise defect and dismissed it — *"the failure direction is a false positive,
+which a human closes"* — reasoning that was correct when written and expired
+silently when the composer landed. Measured over an externally triaged run: the
+two mechanical families were 60% of all HIGH+ findings and 15% of the true ones,
+and the confidence marker was anti-correlated with truth (`CONFIRMED` 9.6% true,
+unlabelled 92.1%).
+
+> **Therefore:** a "the failure direction is safe" argument is scoped to the
+> consumers that existed when it was written. Adding a downstream consumer of a
+> finding — a composer, a gate, a ranking — obliges you to re-check every such
+> argument against it. This is the most transferable lesson in the release.

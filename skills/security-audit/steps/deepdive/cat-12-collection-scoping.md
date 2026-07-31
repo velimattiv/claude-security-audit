@@ -12,6 +12,15 @@
 **Baseline CWEs:** 1220 (insufficient granularity of access control — the
 primary), 863, 284, 359, 200.
 
+> **Cross-cutting lens — apply it here.**
+> [`lens-availability-integrity.md`](lens-availability-integrity.md). You are
+> already reading every list query in the partition, which makes you the one
+> agent positioned to spot the **bounded consumer** half of the chain: a fixed
+> `LIMIT`/`take`/`slice` over an entity anyone can create rows in, ordered by a
+> key the caller can occupy. Asking *whose rows are these* and asking *which
+> rows fell out of the window* are the same read of the same query. File its
+> findings under `collection_scope`.
+
 ---
 
 ## Why this category exists (read this before the rules)

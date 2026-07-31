@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "STORY 2.4 PRECISION FIXTURE. Reproduces the shape of a measured false positive:",
+    "`ExportCsvButton.vue:31` — a client-side `<a download>` click — was filed for not",
+    "having a server gate. The gate lives in `server/api/v1/reports/export.get.ts`,",
+    "which is exactly where it belongs; the browser cannot enforce it and never could.",
+    "v2.5 joined both rows on the free-text `serves_resource` alone, so the component",
+    "was compared against the handler. Neither sink sets `layer` explicitly — the",
+    "inference from the path is what is under test."
+  ],
+  "sinks": [
+    {
+      "id": "reports:sink:export-button",
+      "sink_file": "app/components/ExportCsvButton.vue",
+      "line": 31,
+      "kind": "file",
+      "framework": "Nuxt",
+      "serves_resource": "Report",
+      "reachable_via": ["/reports (client route)"],
+      "guarded_paths": [
+        {
+          "branch_id": "click",
+          "condition": "user clicks the download anchor",
+          "enforced_gate": "none — client-side click handler; the anchor href points at the server endpoint, which is where the gate is",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "reports:sink:export-endpoint",
+      "sink_file": "server/api/v1/reports/export.get.ts",
+      "line": 44,
+      "kind": "stream",
+      "framework": "Nitro",
+      "serves_resource": "Report",
+      "reachable_via": ["/api/v1/reports/export"],
+      "intended_gate": "requireRole('reporting') + tenant ownership on the report row",
+      "guarded_paths": [
+        {
+          "branch_id": "authorized",
+          "condition": "session present and role check passes",
+          "enforced_gate": "requireRole('reporting') + tenant ownership",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}

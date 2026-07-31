@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "RECALL FLOOR — EPIC v2.6 §3.2. These are the shapes of the mechanical findings",
+    "the eight-engineer triage returned REAL or ACCEPTED_RISK. Every one of them must",
+    "still produce a finding at its exact (file, line) after v2.6's precision work.",
+    "A silent drop here is a recall regression and blocks the release, regardless of",
+    "how good the precision number looks.",
+    "Every sink is in the `cli` layer (a plugin/hook runtime) except the enrolment",
+    "endpoint. That is the point: layer typing must NOT be read as 'only HTTP",
+    "handlers can be wrong'. An outbound leg that hands a credential to a host",
+    "somebody else picked is a real deficit whichever process runs it.",
+    "`otel-headers-helper.sh` also carries `reachable_via: []` — story 2.8 bug 1,",
+    "which raised IndexError and crashed the whole of §6.19 in the calibrated run."
+  ],
+  "sinks": [
+    {
+      "id": "plugin:sink:refresh-grant",
+      "sink_file": "plugin/scripts/otel-headers-helper.sh",
+      "line": 120,
+      "kind": "proxy",
+      "framework": "shell",
+      "layer": "cli",
+      "serves_resource": "OAuthRefreshToken",
+      "reachable_via": [],
+      "guarded_paths": [
+        {
+          "branch_id": "refresh-grant",
+          "condition": "the cached access token has expired",
+          "enforced_gate": "none — curls the refresh grant to the host named in the repository's own .otel-config.json",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:bearer-presentation",
+      "sink_file": "plugin/scripts/otel-headers-helper.sh",
+      "line": 283,
+      "kind": "proxy",
+      "framework": "shell",
+      "layer": "cli",
+      "serves_resource": "OAuthAccessToken",
+      "reachable_via": ["/bearer"],
+      "guarded_paths": [
+        {
+          "branch_id": "present-bearer",
+          "condition": "always",
+          "enforced_gate": "none — presents the live access token to whatever host the config names",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:landed-check",
+      "sink_file": "plugin/scripts/landed-check.mjs",
+      "line": 54,
+      "kind": "proxy",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OAuthAccessToken",
+      "reachable_via": ["/landed"],
+      "guarded_paths": [
+        {
+          "branch_id": "landed",
+          "condition": "always",
+          "enforced_gate": "none — sends the live access token to an unvalidated host",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:project-resolve",
+      "sink_file": "plugin/scripts/project-check.mjs",
+      "line": 90,
+      "kind": "proxy",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OAuthAccessToken",
+      "reachable_via": ["/project-resolve"],
+      "guarded_paths": [
+        {
+          "branch_id": "project-resolve",
+          "condition": "always",
+          "enforced_gate": "none — same pattern as landed-check, on the /project-resolve leg",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:runtime-post",
+      "sink_file": "plugin/scripts/plugin-runtime.mjs",
+      "line": 77,
+      "kind": "proxy",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "TelemetryPayload",
+      "reachable_via": ["POST /v1/traces"],
+      "guarded_paths": [
+        {
+          "branch_id": "post-body",
+          "condition": "the endpoint URL is http://",
+          "enforced_gate": "none — node:http, so the POST body goes out in plaintext",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:relay-leg-a",
+      "sink_file": "plugin/scripts/otlp-forwarder.mjs",
+      "line": 146,
+      "kind": "proxy",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OtlpSpan",
+      "reachable_via": ["POST /ingest"],
+      "guarded_paths": [
+        {
+          "branch_id": "relay-in",
+          "condition": "always",
+          "enforced_gate": "none — the relay accepts spans from any local caller",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:relay-leg-b",
+      "sink_file": "plugin/scripts/otlp-forwarder.mjs",
+      "line": 150,
+      "kind": "proxy",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OtlpSpan",
+      "reachable_via": ["POST /ingest"],
+      "guarded_paths": [
+        {
+          "branch_id": "relay-out",
+          "condition": "always",
+          "enforced_gate": "none — and forwards them upstream with the operator's own credential attached",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:healthz",
+      "sink_file": "plugin/scripts/otlp-forwarder.mjs",
+      "line": 123,
+      "kind": "db_entity",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OtlpSpan",
+      "reachable_via": ["GET /healthz"],
+      "guarded_paths": [
+        {
+          "branch_id": "healthz",
+          "condition": "always",
+          "enforced_gate": "none — unauthenticated /healthz echoes the relay's queue contents",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:backfill-post",
+      "sink_file": "plugin/scripts/backfill.mjs",
+      "line": 469,
+      "kind": "proxy",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OtlpSpan",
+      "reachable_via": ["POST /v1/backfill"],
+      "guarded_paths": [
+        {
+          "branch_id": "post",
+          "condition": "always",
+          "enforced_gate": "none on the POST leg",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:capture-write-argv",
+      "sink_file": "plugin/scripts/otlp-capture-server.mjs",
+      "line": 22,
+      "kind": "file",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OtlpSpan",
+      "destination": "local_fs",
+      "path_control": "argv",
+      "reachable_via": ["node otlp-capture-server.mjs <outfile>"],
+      "guarded_paths": [
+        {
+          "branch_id": "open-outfile",
+          "condition": "always",
+          "enforced_gate": "none — the output path is argv[2]",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "plugin:sink:capture-append-argv",
+      "sink_file": "plugin/scripts/otlp-capture-server.mjs",
+      "line": 23,
+      "kind": "file",
+      "framework": "node",
+      "layer": "cli",
+      "serves_resource": "OtlpSpan",
+      "destination": "local_fs",
+      "path_control": "argv",
+      "reachable_via": ["node otlp-capture-server.mjs <outfile>"],
+      "guarded_paths": [
+        {
+          "branch_id": "append-span",
+          "condition": "on every received span",
+          "enforced_gate": "none — appends each span to the argv-named file",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "setup:sink:enroll",
+      "sink_file": "server/api/setup/enroll.post.ts",
+      "line": 145,
+      "kind": "db_entity",
+      "framework": "Nitro",
+      "layer": "http",
+      "serves_resource": "ProvisionalCredential",
+      "reachable_via": ["/api/setup/enroll"],
+      "guarded_paths": [
+        {
+          "branch_id": "emit-only",
+          "condition": "enrolment has not completed yet",
+          "enforced_gate": "none — a provisional emit-only credential is handed out before enrolment completes (triaged ACCEPTED_RISK, not REFUTED: it must keep appearing)",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}

@@ -16,6 +16,14 @@ as the `phase-specific-method-body`.
 **Baseline CWEs:** 284, 285, 287, 288, 306, 307, 345, 347, 352, 384, 521,
 613, 636, 640, 862, 863.
 
+> **Cross-cutting lens — apply it here.**
+> [`lens-availability-integrity.md`](lens-availability-integrity.md). Your gate
+> analysis asks *may this principal do this at all*. The lens asks *how many
+> times*. An authorised, uncapped creation call is invisible to every rule in
+> this file — there is no missing gate, only a missing bound — and it is the
+> first half of an availability/integrity chain. File its findings under
+> `auth`.
+
 > CVE IDs cited in this file are **class anchors**, not asserted facts —
 > verify each against NVD before quoting it in a finding's `sources`
 > (cross-ref `lib/known-vuln-versions.md`).

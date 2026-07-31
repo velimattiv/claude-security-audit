@@ -8,6 +8,26 @@
 #
 #   chain      A(post=[knows:ids]) HIGH + B(pre=[knows:ids], post=[reads:content])
 #              MEDIUM  ->  B escalates to CRITICAL, exit 1.        (R1 + R3)
+#              Plus a LOW third leg -> CRITICAL: the UNCAPPED rung, asserted
+#              explicitly so §7.4's ±1 context cap can never leak into R3.
+#
+# v2.6 escalation matrix (epic §3.4) — R3 is gated on evidence, not on a cap:
+#   unreachable  a CONTRIBUTING member marked structurally_unreachable WITH a
+#                cite suppresses the chain, and says so out loud.
+#   uncited      the same claim with NO cite does NOT suppress. The field must
+#                not become a free pass — that is how `confidence: CONFIRMED`
+#                became a 9.6%-true label worth +1 rung.
+#   flagged      gated_by_runtime_flag does NOT suppress. A flag an admin can
+#                toggle in a deployed environment is live, not theoretical.
+#   bystander    a member OUTSIDE the contributing slice cannot veto a chain it
+#                is not load-bearing in.
+#   annex        a heuristic row on the same file:line as a judgement finding is
+#                annexed: no severity, absent from the capability graph. An
+#                ORPHAN heuristic row still surfaces (the recall preservation).
+#   contract     the prose in steps/phase-07-synthesis.md and the behaviour of
+#                compose-attack-paths.py agree — asserted, not read. v2.5 shipped
+#                "±1 rung regardless of how many triggers fire" next to a
+#                composer that set CRITICAL, for a whole release, undetected.
 #   prose      "Combined with H1, ..." with NO capability tags at all ->
 #              M6 still escalates. Five lines of regex that alone would have
 #              caught the historical case in March.                (R2)
@@ -49,6 +69,14 @@ echo "$out" | grep -q "CROWN JEWELS REACHED: reads:any_deck_content" \
   && ok "crown jewel reached from an unprivileged persona" \
   || bad "crown jewel not detected"
 
+# UNCAPPED (v2.6): §7.4 caps CONTEXT-SIGNAL adjustment at ±1 rung; R3 chain
+# composition is a different mechanism and is not capped. The founding case was
+# a MEDIUM whose mitigation was discharged by a HIGH in the same document —
+# cap R3 at one rung and it becomes HIGH, the rating that let it rot 96 days.
+echo "$out" | grep -q "app:secret_sprawl:0004: LOW -> CRITICAL" \
+  && ok "R3 is uncapped: a contributing LOW goes straight to CRITICAL (3 rungs)" \
+  || bad "LOW -> CRITICAL did not fire — the §7.4 ±1 cap has leaked into R3"
+
 # PRECISION: the bystander LOW must survive untouched.
 if python3 - <<'EOF'
 import json
@@ -58,16 +86,26 @@ assert rows['app:crypto:0003']['severity'] == 'LOW', \
 assert rows['app:idor:0002']['severity_asserted'] == 'MEDIUM'
 assert rows['app:idor:0002']['severity_computed'] == 'CRITICAL'
 assert rows['app:idor:0002']['severity_history'][-1]['reason_kind'] == 'chain_escalation'
+# v2.6: every finding computed CRITICAL names the composition rule that made it
+# so. An unexplained CRITICAL is what made the calibrated run hard to triage —
+# one cluster arrived with 13 of 15 CRITICAL, eight of them asserted LOW/INFO.
+for fid in ('app:idor:0002', 'app:secret_sprawl:0004', 'app:collection_scope:0001'):
+    r = rows[fid]
+    assert r['severity_computed'] == 'CRITICAL', fid
+    assert r.get('escalation_rules'), f"{fid} computed CRITICAL with no escalation_rules"
+    assert 'R3' in r['escalation_rules'], fid
+assert 'escalation_suppressed_by' not in rows['app:idor:0002']
 EOF
 then ok "bystander not escalated; severity_asserted/computed/history stamped"
 else bad "precision or rewrite-stamping regression"
 fi
 
+# 3, not 2: v2.6 adds the LOW third leg that proves R3 is uncapped.
 python3 -c "
 import json,sys
 s=json.load(open('/tmp/ap-chain.json'))
-sys.exit(0 if s['blocking'] and s['escalations']==2 else 1)" \
-  && ok "json-summary reports blocking + escalation count" \
+sys.exit(0 if s['blocking'] and s['escalations']==3 and not s['suppressed_escalations'] else 1)" \
+  && ok "json-summary reports blocking + escalation count, no suppressions" \
   || bad "json-summary wrong"
 
 # --- 2. prose-only chain (acceptance #3) ------------------------------------
@@ -208,6 +246,286 @@ echo "$out" | grep "Unjustified severity downgrade" | grep -q "0001" \
   || ok "the decoy did not consume the baseline entry"
 rm -f "$tmp_b" "$tmp_f"
 
+# --- 4d. v2.6 escalation matrix: R3 is gated on EVIDENCE, not on a cap -------
+# The defect: a finding asserted LOW and computed CRITICAL on a genuine chain,
+# for a dev-mode path whose isDemoCapableEnv allowlists {local, sandbox} with a
+# fail-closed `unknown` default. The analyst who rated it LOW already knew that;
+# the information had no channel to reach the composer. deployment_reachability
+# is that channel — and it only counts when it is cited.
+
+# (a0) two-route: a cited blocker on ONE route must not veto a SECOND live route.
+# contributing_slice() returns the UNION of all routes to a jewel, so membership
+# alone is the wrong suppression test — it would silence a live CRITICAL on the
+# strength of an unrelated finding's unreachability, which is the precise
+# failure this gate exists to prevent. Suppression is decided by re-composition.
+out="$($C $FIX/two-route/findings.jsonl --profile "$PROFILE" --now "$NOW" 2>&1)"
+grep -q "CRITICAL app:idor:0002" <<<"$out" \
+  && ok "two-route: the live route still escalates despite a blocked sibling route" \
+  || bad "two-route: a blocked route suppressed a second, reachable route"
+grep -q "R3 SUPPRESSED" <<<"$out" \
+  && bad "two-route: suppressed a chain that is still reachable without the blocker" \
+  || ok "two-route: no suppression while an unblocked path to the jewel remains"
+grep -qE "^\s+HIGH\s+app:auth:0001" <<<"$out" \
+  && ok "two-route: the unreachable member does not ride the live route's escalation" \
+  || bad "two-route: escalated a member whose own route is dead"
+
+# (a) unreachable: a CONTRIBUTING member, structurally_unreachable WITH a cite.
+out="$($C $FIX/unreachable/findings.jsonl --profile "$PROFILE" --now "$NOW" \
+        --rewrite /tmp/ap-unreach.jsonl --json-summary /tmp/ap-unreach.json 2>&1)"
+echo "$out" | grep -q "CROWN JEWELS REACHED" \
+  && ok "unreachable: the chain still composes (suppression is not blindness)" \
+  || bad "unreachable: chain no longer composes at all"
+echo "$out" | grep -q -- "-> CRITICAL" \
+  && bad "unreachable: R3 escalated a chain with a cited unreachable member" \
+  || ok "unreachable: cited structurally_unreachable suppresses the R3 CRITICAL"
+echo "$out" | grep -q "SUPPRESSED ESCALATIONS" \
+  && ok "unreachable: the suppression is REPORTED, not silent" \
+  || bad "unreachable: suppression was silent — the E1 failure shape"
+# R1 must be untouched: suppression declines the CRITICAL rung, it does not
+# remove the finding or disable the other rules.
+echo "$out" | grep -q "\[R1\] app:idor:0002: MEDIUM -> HIGH" \
+  && ok "unreachable: R1 still applies under a suppressed R3" \
+  || bad "unreachable: suppression wrongly disabled R1"
+if python3 - <<'EOF'
+import json
+rows = {r['id']: r for r in (json.loads(l) for l in open('/tmp/ap-unreach.jsonl') if l.strip())}
+s = json.load(open('/tmp/ap-unreach.json'))
+assert rows['app:idor:0002']['severity_computed'] == 'HIGH'
+assert rows['app:idor:0002']['escalation_suppressed_by'] == 'app:auth:0001'
+assert rows['app:secret_sprawl:0004']['severity_computed'] == 'LOW'
+ids = {e['id'] for e in s['suppressed_escalations']}
+assert ids == {'app:auth:0001', 'app:idor:0002', 'app:secret_sprawl:0004'}, ids
+e = [x for x in s['suppressed_escalations'] if x['id'] == 'app:idor:0002'][0]
+assert e['would_have_been'] == 'CRITICAL' and e['blocked_by'] == 'app:auth:0001'
+assert 'isDemoCapableEnv' in e['evidence'], "the blocking cite is not carried"
+EOF
+then ok "unreachable: escalation_suppressed_by + cite reach the finding and the summary"
+else bad "unreachable: suppression provenance not recorded"
+fi
+
+# (b) uncited: the SAME claim with no cite must NOT suppress.
+out="$($C $FIX/uncited/findings.jsonl --profile "$PROFILE" --now "$NOW" \
+        --json-summary /tmp/ap-uncited.json 2>&1)"
+echo "$out" | grep -q "app:secret_sprawl:0004: LOW -> CRITICAL" \
+  && ok "uncited: an uncited structurally_unreachable does NOT suppress" \
+  || bad "uncited: the field became a free pass — no cite required"
+echo "$out" | grep -q "NO cite" \
+  && ok "uncited: the ignored claim is reported, not swallowed" \
+  || bad "uncited: an uncited reachability claim was ignored SILENTLY"
+python3 -c "
+import json,sys
+s=json.load(open('/tmp/ap-uncited.json'))
+sys.exit(0 if not s['suppressed_escalations']
+         and s['uncited_unreachable_claims']==['app:auth:0001'] else 1)" \
+  && ok "uncited: summary records the claim and suppresses nothing" \
+  || bad "uncited: summary wrong"
+
+# A whitespace-only cite is not a cite. Same free-pass hole, one space wide.
+tmp_ws=$(mktemp /tmp/ap-ws-XXXX.jsonl)
+python3 - "$tmp_ws" <<'EOF'
+import json, sys
+rows = [json.loads(l) for l in
+        open('tests/fixtures/attack-paths/uncited/findings.jsonl') if l.strip()]
+rows[0]['deployment_reachability']['evidence'] = "   "
+with open(sys.argv[1], 'w') as f:
+    for r in rows:
+        f.write(json.dumps(r) + "\n")
+EOF
+out="$($C "$tmp_ws" --profile "$PROFILE" --now "$NOW" 2>&1)"
+echo "$out" | grep -q "app:secret_sprawl:0004: LOW -> CRITICAL" \
+  && ok "uncited: a whitespace-only cite is not a cite" \
+  || bad "uncited: whitespace passed as evidence"
+rm -f "$tmp_ws"
+
+# (c) flagged: a runtime flag is LIVE, not theoretical.
+out="$($C $FIX/flagged/findings.jsonl --profile "$PROFILE" --now "$NOW" \
+        --json-summary /tmp/ap-flagged.json 2>&1)"
+echo "$out" | grep -q "app:secret_sprawl:0004: LOW -> CRITICAL" \
+  && ok "flagged: gated_by_runtime_flag does NOT suppress" \
+  || bad "flagged: a runtime flag suppressed an escalation — only build/deploy-time counts"
+python3 -c "
+import json,sys
+s=json.load(open('/tmp/ap-flagged.json'))
+sys.exit(0 if not s['suppressed_escalations'] else 1)" \
+  && ok "flagged: nothing suppressed" || bad "flagged: summary records a suppression"
+
+# (d) bystander: outside the contributing slice, so it may not veto.
+out="$($C $FIX/bystander/findings.jsonl --profile "$PROFILE" --now "$NOW" \
+        --json-summary /tmp/ap-bystander.json 2>&1)"
+echo "$out" | grep -q "app:secret_sprawl:0004: LOW -> CRITICAL" \
+  && ok "bystander: a non-contributing member cannot suppress the chain" \
+  || bad "bystander: a bystander vetoed a chain it is not load-bearing in"
+echo "$out" | grep -q "not escalated — reachable but not contributing: app:crypto:0003" \
+  && ok "bystander: still correctly excluded from the slice itself" \
+  || bad "bystander: backward slice regression"
+python3 -c "
+import json,sys
+s=json.load(open('/tmp/ap-bystander.json'))
+sys.exit(0 if not s['suppressed_escalations'] else 1)" \
+  && ok "bystander: nothing suppressed" || bad "bystander: summary records a suppression"
+
+# --- 4e. Wave 2b: the annex ---------------------------------------------------
+# Of the 17 TRUE mechanical findings in the calibrated run, 15 were restatements
+# of a deep-dive finding on the same line, and the rules surfaced no unique
+# CRITICAL. But they enumerated a credential-exfil class's nine legs at exact
+# line granularity, which no agent did. So: re-cast, don't delete.
+out="$($C $FIX/annex/findings.jsonl --profile "$PROFILE" --now "$NOW" \
+        --rewrite /tmp/ap-annex.jsonl --json-summary /tmp/ap-annex.json 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "annex exits 0 (the annexed jewel tag mints nothing)" \
+  || bad "annex exit=$rc (want 0)"
+echo "$out" | grep -q "CROWN JEWELS REACHED" \
+  && bad "annex: an annexed row's capability tag still reached a crown jewel" \
+  || ok "annex: the annexed row is absent from the capability graph"
+echo "$out" | grep -q "1 annexed row(s) excluded from the capability graph" \
+  && ok "annex: the exclusion is stated, not silent" \
+  || bad "annex: exclusion not reported"
+echo "$out" | grep -q "ORPHAN ANNEXES" \
+  && ok "annex: the orphan heuristic row still surfaces (recall preserved)" \
+  || bad "annex: ORPHAN ANNEXES block missing — recall regression"
+echo "$out" | grep -q "capability minted ONLY by heuristic_inventory rows: knows:any_report_id" \
+  && ok "annex: capability provenance names the heuristic that minted the tag" \
+  || bad "annex: heuristic-minted capability is still anonymous (story 1.3)"
+if python3 - <<'EOF'
+import json
+rows = {r['id']: r for r in (json.loads(l) for l in open('/tmp/ap-annex.jsonl') if l.strip())}
+s = json.load(open('/tmp/ap-annex.json'))
+a = rows['egress:R2:0002']
+assert a['severity_computed'] == a['severity_asserted'] == 'HIGH', "annexed row was re-rated"
+assert 'escalation_rules' not in a, "an annexed row carries a composition rule"
+assert s['annexed_rows'] == ['egress:R2:0002'], s['annexed_rows']
+assert s['orphan_annexes'] == ['collections:C1:0003'], s['orphan_annexes']
+prov = s['heuristic_minted_capabilities']
+assert 'knows:any_report_id' in prov
+assert prov['knows:any_report_id']['rule_families'] == ['validate-collection-scoping:C1']
+# The annexed row left the graph, so its jewel tag is not even in provenance.
+assert 'reads:any_deck_content' not in prov
+EOF
+then ok "annex: annexed row carries no computed severity; summary splits annex/orphan"
+else bad "annex: rewrite or summary regression"
+fi
+
+# POSITIVE CONTROL: strip annexed_to and the same row DOES escalate the slice.
+# Without this the fixture proves only that the row is inert, not that the
+# exclusion is what made it inert.
+tmp_an=$(mktemp /tmp/ap-an-XXXX.jsonl)
+python3 - "$tmp_an" <<'EOF'
+import json, sys
+rows = [json.loads(l) for l in
+        open('tests/fixtures/attack-paths/annex/findings.jsonl') if l.strip()]
+for r in rows:
+    r.pop('annexed_to', None)
+with open(sys.argv[1], 'w') as f:
+    for r in rows:
+        f.write(json.dumps(r) + "\n")
+EOF
+out="$($C "$tmp_an" --profile "$PROFILE" --now "$NOW" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && echo "$out" | grep -q "CROWN JEWELS REACHED"; } \
+  && ok "annex positive control: un-annexed, the SAME row reaches a jewel" \
+  || bad "annex positive control: the fixture proves nothing (rc=$rc)"
+rm -f "$tmp_an"
+
+# --- 4f. the prose and the code agree — asserted, not read -------------------
+# v2.5 shipped "±1 rung regardless of how many triggers fire" in §7.4 next to a
+# composer that set CRITICAL outright, and nothing detected it for a release.
+SYN="skills/security-audit/steps/phase-07-synthesis.md"
+$C --print-contract > /tmp/ap-contract-code.txt 2>/dev/null
+awk '/^```severity-contract$/{f=1;next} /^```$/{f=0} f' "$SYN" > /tmp/ap-contract-md.txt
+[ -s /tmp/ap-contract-md.txt ] \
+  && ok "phase-07-synthesis.md carries a severity-contract block" \
+  || bad "no severity-contract block in $SYN — prose/code agreement is unasserted"
+if diff -u /tmp/ap-contract-md.txt /tmp/ap-contract-code.txt >/tmp/ap-contract.diff 2>&1; then
+  ok "the §7.15 contract block and --print-contract agree byte-for-byte"
+else
+  bad "prose/code severity contract DISAGREE:"; cat /tmp/ap-contract.diff >&2
+fi
+# And the contract's own claims are what the fixtures above just demonstrated.
+grep -q "^r3_escalation_capped = false$" /tmp/ap-contract-code.txt \
+  && ok "contract declares R3 uncapped — matched by the LOW -> CRITICAL fixture" \
+  || bad "contract claims R3 is capped while the chain fixture escalates 3 rungs"
+grep -q "^promotable_evidence = external_scanner$" /tmp/ap-contract-code.txt \
+  && ok "contract: only external_scanner earns the §7.4 +1 promotion" \
+  || bad "PROMOTABLE_EVIDENCE is not {external_scanner}"
+# §7.4's own table must name evidence_class, not the retired confidence rule.
+grep -q '`evidence_class == "external_scanner"`.*+1' "$SYN" \
+  && ok "§7.4's signal table keys the +1 on evidence_class" \
+  || bad "§7.4 still promotes on something other than evidence_class"
+grep -q '| `confidence == "CONFIRMED"` | \*\*+1\*\*' "$SYN" \
+  && bad "§7.4 still grants +1 for confidence == CONFIRMED (story 1.1 not applied)" \
+  || ok "§7.4 no longer promotes on confidence"
+grep -q "scanners are mechanical ground truth" "$SYN" \
+  && bad "§7.3 still asserts 'scanners are mechanical ground truth' unqualified" \
+  || ok "§7.3's category error is gone"
+
+# --- 4g. the methodology and Track D's template agree -----------------------
+# Track D owns lib/report-template.md; §7.7 tells the emitter how to fill it.
+# When the two drift, the emitter follows §7.7 and silently undoes the story
+# the template was written for. These are the seams that actually drifted.
+TPL="skills/security-audit/lib/report-template.md"
+
+# (a) story 1.5: class-major / severity-minor. The retired v2.5 sentence must
+# be gone — severity-major with class sub-bands still points the reading path
+# at the worst pile first, which was the measured harm.
+grep -q "grouped by severity (CRITICAL → INFO), within severity" "$SYN" \
+  && bad "§7.7 still specifies v2.5 severity-major ordering — story 1.5 undone" \
+  || ok "§7.7 no longer specifies severity-major findings ordering"
+grep -q "CLASS-MAJOR, SEVERITY-MINOR" "$SYN" \
+  && ok "§7.7a specifies class-major / severity-minor ordering" \
+  || bad "§7.7a missing — the emitter has no ordering rule to follow"
+
+# (b) the routing table must be exclusive and cover every template destination.
+for dest in "What Is Sound" "Annex" "§ C" "§ B" "§ A"; do
+  grep -q "$dest" "$SYN" \
+    && ok "§7.7a routing names destination: $dest" \
+    || bad "§7.7a routing has no destination for $dest"
+done
+
+# (c) every v2.6 placeholder Track D added is given semantics in §7.7. A
+# placeholder the template prints and the methodology never defines is filled
+# by guesswork, which is how {{annex_precision}} would have become a number
+# nobody measured.
+missing=""
+for ph in n_ev_judgement n_ev_scanner n_ev_heuristic n_ev_governance \
+          findings_index_rows judgement_critical_block judgement_info_block \
+          scanner_critical_block scanner_info_block governance_block \
+          refutation_rows unscoped_refutation_ids n_refutations \
+          annex_lead_count annex_attached_count annex_orphan_count \
+          annex_precision annex_orphan_list \
+          sibling_sweeps_run n_high_plus sibling_sites_total \
+          escalation_rules_note; do
+  grep -q "{{$ph}}" "$TPL" || { missing="$missing $ph(not-in-template)"; continue; }
+  grep -q "$ph" "$SYN" || missing="$missing $ph"
+done
+[ -z "$missing" ] \
+  && ok "every v2.6 template placeholder has semantics in §7.7" \
+  || bad "placeholders printed by the template but undefined in §7.7:$missing"
+
+# (d) story 4.5 has not landed: the precision column must degrade to a stated
+# "not yet measured", never vanish. Absence of data is not evidence of
+# precision — an unlabelled band is what §7.7a exists to replace.
+grep -q "not yet measured" "$SYN" \
+  && ok "§7.7b specifies the 'not yet measured' precision fallback" \
+  || bad "§7.7b missing — the precision column can silently vanish"
+grep -q "rule_family_precision" skills/security-audit/manifest.yaml 2>/dev/null \
+  && ok "manifest.yaml carries rule_family_precision (Track E landed)" \
+  || ok "manifest.yaml has no rule_family_precision yet — fallback path is live"
+
+# (e) story 3.3: the fix contradiction check, and the direction it fails in.
+grep -q "FIX RECONCILIATION REQUIRED" "$SYN" \
+  && ok "§7.4b specifies the fix contradiction block" \
+  || bad "§7.4b missing — conflicting fixes still ship silently (story 3.3)"
+grep -q "withholds the FIX, never the FINDING" "$SYN" \
+  && ok "§7.4b withholds the fix, never the finding" \
+  || bad "§7.4b could suppress a finding — a severity-suppression mechanism"
+
+# (f) story 1.1's second door: cross-referencing must not upgrade a row's class.
+grep -q "evidence_class\` DOES NOT MOVE" "$SYN" \
+  && ok "§7.3 forbids evidence_class promotion on cross-reference" \
+  || bad "§7.3 lets a second source upgrade evidence_class — story 1.1 undone"
+grep -q "evidence_class\` does not move" \
+     skills/security-audit/steps/phase-05-deepdives.md \
+  && ok "the matching §5.6 guard is present (both halves of the rule)" \
+  || bad "§5.6's evidence_class guard is missing"
+
 # --- 5. negative control ----------------------------------------------------
 $C $FIX/clean/findings.jsonl --now "$NOW" --quiet
 [ $? -eq 0 ] && ok "clean fixture exits 0 (gate is not a permanent red)" \
@@ -228,6 +546,17 @@ if python3 "$LIB/validate-findings.py" \
 else
   bad "rewritten findings FAILED schema validation"
 fi
+# The v2.6 fields the composer WRITES must also validate: escalation_suppressed_by
+# on a suppressed row, annexed_to / deployment_reachability carried through.
+for f in /tmp/ap-unreach.jsonl /tmp/ap-annex.jsonl; do
+  if python3 "$LIB/validate-findings.py" \
+       --schema "$LIB/finding-schema.json" --cwe-map "$LIB/cwe-map.json" \
+       "$f" --quiet 2>/dev/null; then
+    ok "$(basename "$f") validates (v2.6 escalation_suppressed_by / annexed_to)"
+  else
+    bad "$(basename "$f") FAILED schema validation"
+  fi
+done
 
 echo
 if [ "$fails" -eq 0 ]; then

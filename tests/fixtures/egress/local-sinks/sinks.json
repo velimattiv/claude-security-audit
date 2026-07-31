@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "skill_version": "2.6.0",
+  "notes": [
+    "STORY 2.5 PRECISION FIXTURE, plus the second measured layer false positive.",
+    "A `console.log(JSON.stringify(summary))` in a developer's own CLI was filed",
+    "because the resource's floor came from a CRON SCHEDULER resolve-layer surface.",
+    "Two independent defects in one row: the floor crossed a layer boundary (2.4),",
+    "and stdout was treated as egress to an untrusted caller (2.5). Six of 49 sampled",
+    "R-rule false positives were this shape or the `0600`-write-to-own-home shape",
+    "below. Neither sink has a caller who could have been asked for a credential.",
+    "Run the same inventory with `destination` stripped and it fires — see",
+    "tests/test-egress.sh, which does exactly that so this silence is not vacuous."
+  ],
+  "sinks": [
+    {
+      "id": "report:sink:cli-summary",
+      "sink_file": "plugin/scripts/summarise.mjs",
+      "line": 47,
+      "kind": "db_entity",
+      "framework": "node",
+      "serves_resource": "Report",
+      "destination": "local_stdout",
+      "reachable_via": ["npx summarise --since 7d"],
+      "guarded_paths": [
+        {
+          "branch_id": "print",
+          "condition": "always",
+          "enforced_gate": "none — console.log to the invoking developer's own stdout",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    },
+    {
+      "id": "report:sink:cli-cache",
+      "sink_file": "plugin/scripts/cache-state.mjs",
+      "line": 88,
+      "kind": "file",
+      "framework": "node",
+      "serves_resource": "Report",
+      "destination": "local_fs",
+      "path_control": "own_config",
+      "reachable_via": ["npx summarise --cache"],
+      "guarded_paths": [
+        {
+          "branch_id": "persist",
+          "condition": "always",
+          "enforced_gate": "none — writeFileSync(mode 0o600) under the device's own XDG state dir",
+          "serves_bytes": true
+        }
+      ],
+      "coverage": "complete"
+    }
+  ],
+  "dismissed": []
+}

@@ -1,0 +1,29 @@
+# tests/fixtures/calibration/verdicts.jsonl
+#
+# Reference verdict file for scripts/calibration-report.py --self-test.
+# Doubles as the documented example of the format: JSONL (or a JSON array)
+# of {id, verdict}, with optional `duplicate_of` and free-text `notes`.
+# Blank lines and #-comments are ignored so the file stays hand-editable
+# by a triager working through a run.
+#
+# verdict := REAL | ACCEPTED_RISK | FALSE_POSITIVE | UNCERTAIN | DUPLICATE | NOT_TRIAGED
+# true    := REAL or ACCEPTED_RISK
+
+{"id":"CAL-001","verdict":"REAL","notes":"confirmed by reading the handler; no predicate anywhere on the query path"}
+{"id":"CAL-002","verdict":"ACCEPTED_RISK","notes":"real, but the DB is on a private subnet and the team accepts it until the CA bundle lands"}
+{"id":"CAL-003","verdict":"DUPLICATE","duplicate_of":"CAL-001","notes":"same line, filed twice from two categories"}
+{"id":"CAL-004","verdict":"FALSE_POSITIVE","notes":"tagged template — the driver parameterises the interpolation"}
+{"id":"CAL-005","verdict":"FALSE_POSITIVE","notes":"a Vue component cannot enforce a gate; cross-layer join on a free-text resource name"}
+{"id":"CAL-006","verdict":"REAL","notes":"repo-chosen host receives a live refresh grant"}
+{"id":"CAL-007","verdict":"DUPLICATE","duplicate_of":"CAL-008","notes":"folded into the list variant"}
+{"id":"CAL-008","verdict":"DUPLICATE","duplicate_of":"CAL-007","notes":"folded into the grid variant — the pair forms a cycle and never terminates"}
+{"id":"CAL-009","verdict":"FALSE_POSITIVE","notes":"predicate lives inside a tagged sql template that _strip_literals blanked"}
+{"id":"CAL-010","verdict":"DUPLICATE","notes":"marked duplicate with no target recorded — unresolvable"}
+{"id":"CAL-011","verdict":"DUPLICATE","duplicate_of":"CAL-9999","notes":"points at an id that is not in this run — dangling, unresolvable"}
+{"id":"CAL-012","verdict":"UNCERTAIN","notes":"headers may be set at the edge; not decidable from source"}
+{"id":"CAL-013","verdict":"NOT_TRIAGED","notes":"parked by the rota — excluded from every denominator"}
+{"id":"CAL-015","verdict":"REAL","notes":"the literal is a live signing key"}
+{"id":"CAL-016","verdict":"FALSE_POSITIVE","notes":"the host is validated two frames up"}
+{"id":"CAL-017","verdict":"DUPLICATE","duplicate_of":"CAL-003","notes":"two-hop chain: CAL-017 -> CAL-003 -> CAL-001 (REAL)"}
+
+# CAL-014 deliberately has NO verdict row — the `untriaged` case.

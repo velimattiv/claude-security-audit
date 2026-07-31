@@ -41,6 +41,27 @@ import re
 import sys
 from pathlib import Path
 
+
+# v2.6: `lstrip("./")` takes a CHARACTER SET, not a prefix — so `.output/x`
+# became `output/x`, `./.env` became `env`, and any path whose first component
+# starts with a dot was silently rewritten into a different path. Shipped in
+# v2.5 and, together with the missing ignore-file support, produced 64 phantom
+# coverage failures that masked 7 real credential gaps and 129 real collection
+# gaps. Fail-closed gates failing in the NOISY direction is the specific way a
+# fail-closed gate stops being trusted.
+#
+# The calibration analysis filed this as one bug in one file. A repo-wide sweep
+# for the shape found ten call sites across three modules — which is the
+# release's own §1.6 lesson ("the tool finds instances, not classes") landing on
+# the release itself.
+_DOT_PREFIX_RE = re.compile(r"^(?:\./)+")
+
+
+def _strip_dot_prefix(s):
+    """Strip leading `./` path prefixes. Never touches a leading dot that is
+    part of a real name (`.github/`, `.output/`, `.env`)."""
+    return _DOT_PREFIX_RE.sub("", str(s))
+
 # Extensions that carry application logic. A file outside this set cannot hide a
 # handler, so leaving it unpartitioned is not a coverage hole.
 _SOURCE_EXT = {
@@ -59,7 +80,7 @@ _DEFAULT_IGNORE_PARTS = {
 def glob_to_re(pat):
     """Translate a path glob to a regex. Supports **, *, ?, and character
     classes. `**` crosses directory separators; `*` does not."""
-    p = str(pat).strip().lstrip("./")
+    p = _strip_dot_prefix(str(pat).strip())
     out, i = [], 0
     while i < len(p):
         c = p[i]
@@ -100,7 +121,7 @@ def is_catch_all(pat):
     `*/**` compiles to `^[^/]*/.*$`, matches every file below any top-level
     directory, and was invisible to it — so the whole gate was bypassable by a
     one-character variant. Compile the glob and ask what it actually matches."""
-    raw = str(pat).strip().lstrip("./")
+    raw = _strip_dot_prefix(str(pat).strip())
     if raw in ("**", "**/*", "*", "./**"):
         return True
     try:
@@ -133,7 +154,7 @@ def ignored(rel, ignore_res):
         if rx.match(rel):
             return True
         # A bare directory pattern like `dist/` ignores the whole subtree.
-        if raw.endswith("/") and (rel + "/").startswith(raw.lstrip("./")):
+        if raw.endswith("/") and (rel + "/").startswith(_strip_dot_prefix(raw)):
             return True
         if raw.rstrip("/") in parts:
             return True
@@ -221,7 +242,7 @@ def main():
         unanchored = {}
         for p in parts:
             for g in (p.get("paths_included") or []):
-                head = str(g).strip().lstrip("./").split("*")[0].strip("/")
+                head = _strip_dot_prefix(str(g).strip()).split("*")[0].strip("/")
                 if not head:
                     unanchored.setdefault(p.get("id", "?"), g)
         for pid, count in per_partition.items():

@@ -10,6 +10,14 @@
 
 **Baseline CWEs:** 284, 285, 639, 862, 915.
 
+> **Cross-cutting lens — apply it here.**
+> [`lens-availability-integrity.md`](lens-availability-integrity.md). This
+> file is confidentiality-oriented: *can I read someone else's object?* The
+> lens covers the path with no confidentiality component at all — a principal
+> who creates enough of their **own** objects to displace everyone else's from
+> a downstream fixed-size scan. Nothing is disclosed and nothing errors. File
+> its findings under `idor`.
+
 ---
 
 ## Invariants to verify
