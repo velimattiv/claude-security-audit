@@ -20,8 +20,8 @@ WHY A SECOND LAYER EXISTS AT ALL
 `lib/redact-scanner-output.py` already strips scanner output structurally at
 Phase 4 ingest, and that is the control that actually closes the v2.6.0 leak.
 This gate is not a substitute for it. It exists because the structural strip
-covers exactly one source — scanner reports — and the deliverables have a
-second source the strip can never reach: **prose an analyst wrote.**
+covers one directory — `phase-04-scanners/` — and the deliverables draw on a
+second source it never sees: **prose an analyst wrote in Phases 5 to 7.**
 
 `steps/deepdive/cat-06-secret-sprawl.md` hands a sub-agent regexes for locating
 literal credentials, and `lib/report-template.md` prints `{{description}}` and
@@ -104,14 +104,19 @@ def scan_text(text):
     into its own evidence file would be the original bug wearing a hat.
     """
     hits = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
-        for detector, start, end, value in SD.scan(line):
-            hits.append({
-                "line": line_no,
-                "detector": detector,
-                "fingerprint": SD.fingerprint(value, _GATE_CONTEXT),
-                "length": end - start,
-            })
+    if not text:
+        return hits
+    # Scan the WHOLE document, then derive line numbers from offsets. Scanning
+    # line by line was the original shape and it silently defeated every
+    # multi-line detector: a PEM block had its `-----BEGIN-----` header
+    # redacted and every base64 body line copied through untouched.
+    for detector, start, end, value in SD.scan(text):
+        hits.append({
+            "line": text.count("\n", 0, start) + 1,
+            "detector": detector,
+            "fingerprint": SD.fingerprint(value, _GATE_CONTEXT),
+            "length": end - start,
+        })
     return hits
 
 
@@ -120,21 +125,21 @@ def process(path, redact):
     try:
         size = os.path.getsize(path)
     except OSError as exc:
-        return [{"line": 0, "detector": "unreadable", "fingerprint": "",
-                 "length": 0, "error": str(exc)}], False
+        return [{"line": 0, "detector": None, "error": "unreadable: %s" % exc,
+                 "fingerprint": "", "length": 0}], False
 
     if size > MAX_BYTES:
         # Fail closed and loudly: an unscanned deliverable must never be
         # reported as a clean one.
-        return [{"line": 0, "detector": "file_too_large", "fingerprint": "",
-                 "length": size}], False
+        return [{"line": 0, "detector": None, "error": "file_too_large",
+                 "fingerprint": "", "length": size}], False
 
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except OSError as exc:
-        return [{"line": 0, "detector": "unreadable", "fingerprint": "",
-                 "length": 0, "error": str(exc)}], False
+        return [{"line": 0, "detector": None, "error": "unreadable: %s" % exc,
+                 "fingerprint": "", "length": 0}], False
 
     hits = scan_text(text)
     if not hits or not redact:
@@ -187,12 +192,17 @@ def main(argv=None):
         sys.stderr.write("ERROR: no deliverables found in: %s\n" % " ".join(args.paths))
         return 2
 
-    findings, detectors, redacted_files = {}, Counter(), []
+    findings, detectors, redacted_files, errors = {}, Counter(), [], []
     for path in files:
         hits, changed = process(path, args.redact)
         if hits:
             findings[path] = hits
-            detectors.update(h["detector"] for h in hits)
+            # `detector: None` rows are scan FAILURES (unreadable, too large),
+            # not credential hits. Counting them as detector names would render
+            # "file_too_large" as a credential type in the §7.10a finding.
+            detectors.update(h["detector"] for h in hits if h.get("detector"))
+            errors.extend({"file": path, "error": h["error"]}
+                          for h in hits if h.get("error"))
         if changed:
             redacted_files.append(path)
 
@@ -203,7 +213,9 @@ def main(argv=None):
         "files_with_material": len(findings),
         "files_redacted": len(redacted_files),
         "detectors": dict(sorted(detectors.items())),
-        "total_occurrences": sum(len(h) for h in findings.values()),
+        "total_occurrences": sum(
+            1 for hits in findings.values() for h in hits if h.get("detector")),
+        "scan_errors": errors,
         "findings": findings,
     }
 
@@ -228,7 +240,8 @@ def main(argv=None):
             for path, hits in sorted(findings.items()):
                 for hit in hits:
                     print("  %s:%s  %s  fp=%s len=%s"
-                          % (path, hit["line"], hit["detector"],
+                          % (path, hit["line"],
+                             hit.get("detector") or ("SCAN-ERROR: %s" % hit.get("error")),
                              hit["fingerprint"] or "-", hit["length"]))
 
     if not findings:

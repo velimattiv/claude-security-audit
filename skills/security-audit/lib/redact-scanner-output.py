@@ -89,7 +89,13 @@ SD = _load_detectors()
 # them can carry raw file text, and none is read downstream.
 _CONTENT_KEYS = ("snippet", "contents", "insertedContent")
 
-_SCANNER_EXTS = (".sarif", ".json", ".jsonl")
+# Everything Phase 4 declares in `manifest.yaml` required_outputs for its
+# scanner directory, not only the machine formats. `security-review-*.md` and
+# `adversarial-*.md` are LLM prose ABOUT the secrets that were found, written by
+# `/security-review` and the vendored adversarial reviewer, and Phases 5-7 read
+# them. Scoping this tuple to the JSON formats left the two artifact types most
+# likely to quote a credential verbatim walking straight past the redactor.
+_SCANNER_EXTS = (".sarif", ".json", ".jsonl", ".md", ".txt")
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +262,49 @@ def redact_trufflehog_entry(entry, stats):
 # File handling
 # ---------------------------------------------------------------------------
 
+# Paths whose secret hits are about THIS SKILL's own artifacts, not the user's
+# code. Kept here rather than in the step file because the whole reason §4.4c
+# exists is that the judgement call was made wrongly twice, by a reader who had
+# a plausible story for it ("a security report is expected to look full of
+# secrets"). A list the tool computes is auditable; a rule the reader applies is
+# not.
+_SELF_ARTIFACT_PREFIXES = (".claude-audit/", "docs/security-audit-")
+
+
+def _self_leak_candidates(doc, output_dir):
+    """Result rows whose location is inside the audit's own output.
+
+    Returns [{file, rule, tool}] -- never a value. §4.4c escalates each of these
+    to CRITICAL / CWE-538 rather than letting them be triaged as noise.
+    """
+    prefixes = list(_SELF_ARTIFACT_PREFIXES)
+    if output_dir:
+        prefixes.append(output_dir.rstrip("/") + "/")
+    out = []
+    for run in doc.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        tool = ""
+        if isinstance(run.get("tool"), dict) and isinstance(run["tool"].get("driver"), dict):
+            tool = run["tool"]["driver"].get("name") or ""
+        for result in run.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            for loc in result.get("locations") or []:
+                try:
+                    uri = loc["physicalLocation"]["artifactLocation"]["uri"]
+                except (KeyError, TypeError):
+                    continue
+                if not isinstance(uri, str):
+                    continue
+                norm = uri.replace("\\", "/").lstrip("./")
+                if norm.startswith(tuple(prefixes)):
+                    out.append({"file": norm,
+                                "rule": result.get("ruleId") or "",
+                                "tool": tool})
+    return out
+
+
 def _looks_like_sarif(obj):
     return isinstance(obj, dict) and isinstance(obj.get("runs"), list)
 
@@ -275,7 +324,7 @@ def _looks_like_trufflehog(obj):
     )
 
 
-def process_file(path, check_only, stats):
+def process_file(path, check_only, stats, output_dir=None, self_leaks=None):
     """Redact one scanner output file. Returns True if it changed."""
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -298,6 +347,8 @@ def process_file(path, check_only, stats):
     if doc is not None:
         if _looks_like_sarif(doc):
             redact_sarif(doc, stats)
+            if self_leaks is not None:
+                self_leaks.extend(_self_leak_candidates(doc, output_dir))
         elif _looks_like_trufflehog(doc):
             redact_trufflehog_entry(doc, stats)
             _strip_content(doc, "trufflehog:%s" % os.path.basename(path), stats)
@@ -312,7 +363,9 @@ def process_file(path, check_only, stats):
             _atomic_write(path, json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
         return changed
 
-    # JSONL (trufflehog).
+    # Not a single JSON document. Markdown and plain-text scanner artifacts
+    # land here too, and they are scrubbed line by line by the same fallback
+    # that handles a malformed JSONL row.
     out_lines = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -346,9 +399,12 @@ def process_file(path, check_only, stats):
 def _atomic_write(path, content):
     """Write via a temp file in the same directory, then rename.
 
-    A half-written scanner report on a crash would be a JSON parse failure on
-    the next read, and the failure mode of "redaction was interrupted" must
-    never be "the unredacted original is still there".
+    `os.replace` is atomic, so a reader never sees a half-written report: the
+    file is either the original or the fully redacted version. It is NOT
+    durable against interruption -- a crash before the rename leaves the
+    unredacted original in place, and the `.redact.tmp` beside it. That case is
+    caught by the mandatory `--check` rerun in `phase-04-scanners.md` §4.4b,
+    which is the control, not this function.
     """
     tmp = path + ".redact.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -384,6 +440,9 @@ def main(argv=None):
                         help="report without modifying; exit 1 if material is present")
     parser.add_argument("--quiet", action="store_true",
                         help="suppress the JSON summary on stdout")
+    parser.add_argument("--output-dir", metavar="DIR",
+                        help="resolved <output_dir>; hits inside it are listed as "
+                             "self_leak_candidates for §4.4c escalation")
     args = parser.parse_args(argv)
 
     files = _collect(args.paths)
@@ -393,8 +452,9 @@ def main(argv=None):
 
     stats = Counter()
     touched = []
+    self_leaks = []
     for path in files:
-        if process_file(path, args.check, stats):
+        if process_file(path, args.check, stats, args.output_dir, self_leaks):
             touched.append(path)
 
     summary = {
@@ -403,6 +463,10 @@ def main(argv=None):
         "redactions": dict(sorted(stats.items())),
         "total_redactions": sum(stats.values()),
         "mode": "check" if args.check else "redact",
+        # §4.4c. Secret hits located INSIDE the audit's own artifacts. Each one
+        # means a previous run wrote credential material into this repository.
+        # They are CRITICAL findings, never prior-artifact noise.
+        "self_leak_candidates": self_leaks,
     }
     if not args.quiet:
         print(json.dumps(summary, indent=2))

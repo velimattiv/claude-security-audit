@@ -47,7 +47,8 @@ metadata compresses better than single-secret scanner output.
       "file": "app/views.py",
       "start_line": 42,
       "end_line": 42,
-      "message": "Use of user-controlled template variable..."
+      "message": "Use of user-controlled template variable...",
+      "secret_fingerprint": null
     }
   ]
 }

@@ -23,9 +23,9 @@ asserted per finding.
   into a tracked `<output_dir>`, committing live secrets that the audited repo
   had correctly kept out of git. Two enforcers now stand between a scanner and a
   deliverable: a structural strip at Phase 4 ingest that removes SARIF snippets
-  from every scanner run (no detector list, so no coverage gap), and a
-  fail-closed gate before every write that catches values pasted into analyst
-  prose. See [lib/secret-redaction.md](skills/security-audit/lib/secret-redaction.md).
+  from every scanner run and scrubs the markdown review artifacts alongside
+  them, and a fail-closed gate before every write that catches values pasted
+  into analyst prose. See [lib/secret-redaction.md](skills/security-audit/lib/secret-redaction.md).
 - **v2.6.0** — **Calibrated severity.** The first release measured
   against ground truth: eight security engineers triaged all 263 HIGH-or-above
   findings from a v2.5.0 full-mode run against the real code (255 verdicts), and

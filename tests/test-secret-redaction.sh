@@ -46,17 +46,30 @@ for f in "$REDACT" "$GATE" "$DETECTORS"; do
   [ -f "$f" ] && ok "present: ${f#$REPO_ROOT/}" || bad "MISSING: ${f#$REPO_ROOT/}"
 done
 
-# Both must resolve the SAME module file. Two copies of the detector table
-# drift, and the day they drift the gate stops matching the redactor.
+# Both must resolve the SAME module OBJECT. An earlier version of this check
+# counted occurrences of the string "secret-detectors.py" in each source file,
+# which a comment satisfies -- it asserted nothing. Load both enforcers and
+# compare the table they actually bound.
 shared="$(python3 - "$REDACT" "$GATE" "$DETECTORS" <<'PY'
-import re, sys, pathlib
-redact, gate, table = (pathlib.Path(p).read_text() for p in sys.argv[1:4])
-# Both loaders must build the path from their own directory + the same basename.
-hits = [t.count('"secret-detectors.py"') for t in (redact, gate)]
-print("SHARED" if all(h >= 1 for h in hits) else "SPLIT")
+import importlib.util, os, sys
+def load(path):
+    name = "_probe_" + os.path.basename(path).replace("-", "_")[:-3]
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+redact, gate, table = (load(a) for a in sys.argv[1:4])
+same_file = (os.path.realpath(redact.SD.__file__)
+             == os.path.realpath(gate.SD.__file__)
+             == os.path.realpath(table.__file__))
+same_table = redact.SD.DETECTOR_NAMES == gate.SD.DETECTOR_NAMES == table.DETECTOR_NAMES
+same_fp = (redact.SD.fingerprint("probe", "ctx")
+           == gate.SD.fingerprint("probe", "ctx")
+           == table.fingerprint("probe", "ctx"))
+print("SHARED" if (same_file and same_table and same_fp) else "SPLIT")
 PY
 )"
-[ "$shared" = "SHARED" ] && ok "both enforcers load lib/secret-detectors.py" \
+[ "$shared" = "SHARED" ] && ok "both enforcers bind the SAME detector module (path, table, fingerprint)" \
                           || bad "enforcers do not share the detector table"
 
 # ---------------------------------------------------------------------------
@@ -109,6 +122,14 @@ open(scan + "/trufflehog-multi.json", "w").write(
 # A scanner shape the skill has never seen must fail CLOSED, not pass through.
 open(scan + "/unknown-tool.json", "w").write(
     json.dumps({"findings": [{"where": "a.py", "matched": token}]}, indent=2))
+
+# manifest.yaml declares these two as REQUIRED outputs of Phase 4. They are LLM
+# prose about the secrets that were found, and an extension list scoped to the
+# JSON formats skipped both -- the fail-open R1 finding F1 caught.
+open(scan + "/security-review-app.md", "w").write(
+    "# Security review\n\nHardcoded token " + token + " at tmp/scratch/.env:1.\n")
+open(scan + "/adversarial-app.md", "w").write(
+    "The reviewer notes the credential " + token + " is still live.\n")
 PY
 
 before="$(grep -rc "SyNtH3t1cT0k3n" "$SCAN" 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')"
@@ -125,6 +146,13 @@ after="$(grep -rc "SyNtH3t1cT0k3n" "$SCAN" 2>/dev/null | awk -F: '{s+=$2} END{pr
 
 grep -rq "MIIEowIBAAKCAQEA" "$SCAN" && bad "private key body survived redaction" \
                                     || ok "private key body removed"
+
+# R1 finding F1: the markdown review artifacts must be covered too.
+for md in security-review-app.md adversarial-app.md; do
+  grep -q "SyNtH3t1cT0k3n" "$SCAN/$md" \
+    && bad "$md passed through unredacted (manifest-declared Phase 4 output)" \
+    || ok "$md scrubbed"
+done
 
 # Fail-closed on an unrecognised scanner format.
 grep -q "SyNtH3t1cT0k3n" "$SCAN/unknown-tool.json" \
@@ -225,6 +253,24 @@ python3 "$GATE" --check --quiet "$REPORT" 2>/dev/null
 [ $? -eq 0 ] && ok "gate passes after its own redaction (idempotent)" \
              || bad "gate re-flags its own markers"
 
+# R1 finding F2: a PEM spans lines. A line-oriented scan redacted the
+# -----BEGIN----- header and copied every base64 body line through untouched.
+PEMREPORT="$WORK/pem-report.md"
+{
+  echo "# Report"
+  echo "> - **Description:** the deploy key at deploy.pem:1 is:"
+  echo "$PEMHDR"
+  echo "MIIEowIBAAKCAQEA7Zq9vXk2ZmNqRtYuIoPaSdFgHjKlZxCvBnMqWeRtYuIoPaSd"
+  echo "FgHjKlZxCvBnMqWeRtYuIoPaSdFgHjKlZxCvBnMqWeRtYuIoPaSdFgHjKlZxCvBn"
+  echo "-----END RSA PRIVATE KEY-----"
+} > "$PEMREPORT"
+python3 "$GATE" --redact --quiet "$PEMREPORT" 2>/dev/null
+grep -q "MIIEowIBAAKCAQEA" "$PEMREPORT" \
+  && bad "PEM body survived the gate (multi-line detector defeated)" \
+  || ok "whole PEM block redacted, not just the header"
+grep -q "BEGIN RSA PRIVATE KEY" "$PEMREPORT" \
+  && bad "PEM header survived the gate" || ok "PEM header redacted"
+
 # The JSON report feeds §7.10a and must never carry the value it found.
 if [ -f "$WORK/gate.json" ]; then
   grep -q "SyNtH3t1cT0k3n" "$WORK/gate.json" \
@@ -251,7 +297,8 @@ sd = importlib.util.module_from_spec(spec); spec.loader.exec_module(sd)
 must_fire = [
     ("github_pat",               'tok = "ghp_' + 'A1b2C3d4E5f6G7h8I9j0KlMnOpQrStUvWxYz' + '"'),
     ("aws_access_key_id",        'AKIA' + '7QWERTYUIOPASDFG'),
-    ("private_key",              '-----BEGIN EC ' + 'PRIVATE KEY-----'),
+    ("private_key_header",       '-----BEGIN EC ' + 'PRIVATE KEY-----'),
+    ("private_key",              '-----BEGIN RSA ' + 'PRIVATE KEY-----\\nMIIBOgIBAAJBAK\\n-----END RSA PRIVATE KEY-----'),
     ("jwt",                      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N'),
     ("azure_client_secret",      'client_secret="Q~8fLmZ2vKp9xR4tW7yB1nH6jD3sG5aE0cU"'),
     ("basic_auth_url",           'postgres://u:S3cretP4ssw0rdXy@db.host/app'),
@@ -318,6 +365,25 @@ grep -q "7.10a" "$STEPS/phase-07-synthesis.md" \
 grep -q "skill_self_leak" "$STEPS/phase-04-scanners.md" \
   && ok "phase-04 defines the prior-artifact escalation (§4.4c)" \
   || bad "phase-04 has no prior-artifact escalation rule"
+
+# R1 finding F5: the RC=3 obligation must be mechanical, not narrative.
+grep -q "phase-07-gate-fired.marker" "$STEPS/phase-07-synthesis.md" \
+  && ok "phase-07 enforces the fired-gate obligation with a marker" \
+  || bad "phase-07 leaves the GATE_RC=3 obligation to prose only"
+
+# R1 finding F6: every artifact a step file mandates must be in the contract.
+MANIFEST="$REPO_ROOT/skills/security-audit/manifest.yaml"
+for art in phase-04-redaction.json deliverable-gate.json baseline-gate.json; do
+  grep -q "$art" "$MANIFEST" \
+    && ok "manifest declares $art" \
+    || bad "manifest does not declare $art (step files mandate it)"
+done
+
+# R1 finding F3: the gitignore recipe must not write jq errors into .gitignore.
+grep -q "config.json 2>/dev/null || echo docs/security-audit-output" \
+     "$REPO_ROOT/skills/security-audit/workflow.md" \
+  && ok "3.5b resolves output_dir defensively" \
+  || bad "3.5b jq call has no fallback; a missing config.json corrupts .gitignore"
 
 echo
 if [ "$fails" -eq 0 ]; then

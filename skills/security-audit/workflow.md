@@ -291,7 +291,12 @@ Once `output_dir` is resolved, apply the machine-artifact ignore recipe from
 [lib/output-routing.md](lib/output-routing.md) if it is not already present:
 
 ```bash
-OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json)
+# Same defensive form as §7.10 and §8.4. Without the fallback, a missing
+# config.json makes jq print its error to stdout and the printf below writes
+# that error text into .gitignore as an ignore pattern -- so the recipe silently
+# never applies.
+OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output)
+[ -n "$OUT" ] || OUT=docs/security-audit-output
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git check-ignore -q "$OUT/findings.sarif" || {
     printf '\n# claude-security-audit: machine artifacts (v2.6.1)\n%s/*.sarif\n%s/*.cyclonedx.json\n' "$OUT" "$OUT" >> .gitignore

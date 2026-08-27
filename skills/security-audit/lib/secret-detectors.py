@@ -117,7 +117,19 @@ MARKER_RE = re.compile(r"\[REDACTED:[a-z0-9_]+:[0-9a-f]{%d}:len\d+\]" % FINGERPR
 
 _RAW_DETECTORS = [
     # --- asymmetric key material -------------------------------------------
+    # The BLOCK pattern must come first and must stay first. Matching only the
+    # `-----BEGIN ... -----` header redacted the header and left every base64
+    # body line in place, which is the entire key. `scan()` resolves overlaps
+    # longest-match-wins at the same start offset, so the block beats the
+    # header whenever an END marker exists.
     ("private_key",
+     r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----"
+     r"[\s\S]*?"
+     r"-----END (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----",
+     0, False),
+    # Truncated paste: a header with no closing marker. Redacts what is there
+    # rather than nothing, and keeps the header itself out of the deliverable.
+    ("private_key_header",
      r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----",
      0, False),
 
@@ -249,7 +261,13 @@ def scan(text):
     """Return non-overlapping [(detector, start, end, value)] over `text`.
 
     Ordered by position. Overlaps are resolved longest-match-wins so a
-    `generic_secret_assignment` hit never splits a `github_pat` hit.
+    `generic_secret_assignment` hit never splits a `github_pat` hit, and so the
+    `private_key` block beats the `private_key_header` that starts at the same
+    offset.
+
+    `text` MUST be the whole document, never one line at a time: `private_key`
+    spans lines, and feeding this function line by line silently reduces it to
+    the header-only match it used to be.
     """
     if not text:
         return []

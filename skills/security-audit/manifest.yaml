@@ -288,6 +288,12 @@ phases:
         graceful_degradation: true  # if no scanners installed, still emit marker
       - path_glob: .claude-audit/current/phase-04-scanners/security-review-*.md
       - path_glob: .claude-audit/current/phase-04-scanners/adversarial-*.md
+      - path: .claude-audit/current/phase-04-redaction.json
+        # v2.6.1 §4.4b. Summary from lib/redact-scanner-output.py. Its ABSENCE
+        # means the ingest strip did not run, and every artifact above may hold
+        # credential material verbatim -- gitleaks SARIF carries the match in
+        # region.snippet.text, and the security-review-*.md / adversarial-*.md
+        # rows above are LLM prose about those same secrets.
       - path: .claude-audit/current/phase-04.done
     sub_agent_fan_out:
       scanners_parallel: 6   # one per scanner binary (semgrep, osv-scanner, gitleaks, trufflehog, trivy, hadolint)
@@ -443,6 +449,11 @@ phases:
         # v2.5 §7.15 summary. Phase 8 reads .governance_blocking and REFUSES to
         # write a baseline while it is non-zero — that refusal is what stops a
         # silent downgrade from laundering itself into the next baseline.
+      - path: .claude-audit/current/deliverable-gate.json
+        # v2.6.1 §7.10. Fail-closed credential gate result. §7.10a reads it to
+        # build the CRITICAL skill_self_leak finding when the gate fires.
+        # phase-07-gate-fired.marker must NOT survive alongside phase-07.done:
+        # it means the gate fired and the obligated finding was never emitted.
       - path: .claude-audit/current/phase-07.done
     sub_agent_fan_out: none
 
@@ -459,6 +470,10 @@ phases:
       - path: docs/security-audit-output/security-audit-baseline.json
         # Default output dir; actual dir resolved per lib/output-routing.md and
         # recorded in .claude-audit/config.json (.output_dir).
+      - path: .claude-audit/current/baseline-gate.json
+        # v2.6.1 §8.4. The pruned baseline is a TRACKED deliverable carrying
+        # findings_carryover[] titles, so it goes through the same fail-closed
+        # credential gate as the report and SARIF.
       - path: .claude-audit/current/phase-08.done
     sub_agent_fan_out: none
 

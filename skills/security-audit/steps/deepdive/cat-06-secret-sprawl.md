@@ -50,9 +50,9 @@ from the source file at the cited line — which they have, because they own the
 repository.
 
 **Why this is a hard rule and not a style preference.** `lib/verify-deliverable.py`
-strips scanner output structurally at Phase 4, so machine-sourced secrets cannot
-reach the report. Analyst prose is the one path that strip cannot cover: the
-field is free text and the whole point of it is to be read. If you paste a value
+strips `phase-04-scanners/` structurally at Phase 4, so scanner-sourced secrets
+cannot reach the report. Prose you write in THIS phase is the path that strip
+never sees: the field is free text and the whole point of it is to be read. If you paste a value
 here, the write gate will catch it, scrub it, and emit a CRITICAL finding
 against **this skill** — the run then reports its own tooling as defective,
 which is correct but expensive. Cite the location.

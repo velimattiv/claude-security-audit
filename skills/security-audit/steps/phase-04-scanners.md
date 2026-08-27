@@ -166,8 +166,10 @@ it reintroduces CVE-class behaviour in the skill itself.**
 ```bash
 SKILL_DIR=$(cat .claude-audit/.skill-dir)
 [ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
-python3 "$SKILL_DIR/lib/redact-scanner-output.py" \
-    .claude-audit/current/phase-04-scanners/
+OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output)
+python3 "$SKILL_DIR/lib/redact-scanner-output.py" --output-dir "$OUT" \
+    .claude-audit/current/phase-04-scanners/ \
+    > .claude-audit/current/phase-04-redaction.json
 ```
 
 Then confirm it held — the check must exit 0:
@@ -180,8 +182,14 @@ python3 "$SKILL_DIR/lib/redact-scanner-output.py" --check --quiet \
       echo "FATAL: scanner output still carries credential material" >&2; exit 1; }
 ```
 
-Write `phase-04-redaction.json` (the tool's summary) into the blackboard
-alongside the other phase artifacts.
+`phase-04-redaction.json` is a required Phase 4 artifact (`manifest.yaml`). It
+carries the redaction counts and the `self_leak_candidates[]` list that §4.4c
+consumes.
+
+It covers **every** declared output of this phase, not only the JSON formats:
+`security-review-*.md` and `adversarial-*.md` are LLM prose *about* the secrets
+that were found, and they are scrubbed by the pattern pass rather than the
+structural strip.
 
 ### Why this exists
 
@@ -235,8 +243,14 @@ triage is how this defect survived two separate runs that detected it: the hits
 were dismissed as prior-artifact noise, and the reasoning was self-confirming —
 of course the audit's own output has secret hits, it is a security report.
 
-For any secret-scanner hit whose path is under `<output_dir>/`,
-`.claude-audit/`, or a legacy `docs/security-audit-*` path:
+`redact-scanner-output.py --output-dir "$OUT"` computes this list for you:
+read `self_leak_candidates[]` from `phase-04-redaction.json`. It is an artifact
+rather than a judgement call precisely because the judgement call has been made
+wrongly twice, each time with a plausible story attached.
+
+For every row in `self_leak_candidates[]` (equivalently: any secret-scanner hit
+under `<output_dir>/`, `.claude-audit/`, or a legacy `docs/security-audit-*`
+path):
 
 - Emit it as **CRITICAL** / CWE-538 / `category: secret_sprawl`, titled to name
   the cause — *"prior audit run wrote credential material into the repository"*.

@@ -1194,6 +1194,11 @@ python3 "$SKILL_DIR/lib/verify-deliverable.py" --redact \
     .claude-audit/current/findings.cyclonedx.json
 GATE_RC=$?
 [ "$GATE_RC" -eq 2 ] && { echo "FATAL: deliverable gate could not run" >&2; exit 1; }
+# RC 3 obliges §7.10a. Leaving that obligation to prose would be a control with
+# no enforcer, which is this skill's own flagship defect class. The marker makes
+# it a checkable artifact: §7.12 refuses to write phase-07.done while it exists
+# without a matching skill_self_leak finding.
+[ "$GATE_RC" -eq 3 ] && touch .claude-audit/current/phase-07-gate-fired.marker
 
 mkdir -p "$OUT"
 cp .claude-audit/current/phase-07-report.md      "$OUT/security-audit-report.md"
@@ -1232,6 +1237,18 @@ When `GATE_RC == 3`, Phase 7 MUST:
      finding about the audited code**, name the detectors that fired, and give
      the same rotate-then-purge fix as `phase-04-scanners.md §4.4c`.
 3. Say it in the §7.11 summary to the user — not only in the report body.
+4. Clear the marker only once the finding exists:
+
+   ```bash
+   grep -q '"skill_self_leak"[[:space:]]*:[[:space:]]*"true"' \
+       .claude-audit/current/phase-07-findings-computed.jsonl \
+     && rm -f .claude-audit/current/phase-07-gate-fired.marker \
+     || { echo "FATAL: gate fired but no skill_self_leak finding was emitted" >&2; exit 1; }
+   ```
+
+   A leftover `phase-07-gate-fired.marker` at the phase-completion check
+   (`workflow.md §3`) is a hard stop. The obligation is mechanical, not
+   narrative.
 
 ⛔ **Never suppress the gate, never `|| true` it, and never treat a fired gate
 as a finding about the user's repository.** It is this skill's own bug, and the

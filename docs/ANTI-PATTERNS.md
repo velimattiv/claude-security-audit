@@ -28,7 +28,7 @@ Canonical: [`cat-04-mitm.md`](../skills/security-audit/steps/deepdive/cat-04-mit
 Canonical: [`cat-05-crypto.md`](../skills/security-audit/steps/deepdive/cat-05-crypto.md). MD5/SHA1 for security, ECB / raw CBC, static IV, weak PRNG for tokens, password-hash work factors below 2026 OWASP baselines, hardcoded keys, non-constant-time comparison. Baseline CWEs: 208, 311, 321, 326, 327, 328, 329, 330, 331, 338, 522, 916.
 
 ## §6 Secret Sprawl
-Canonical: [`cat-06-secret-sprawl.md`](../skills/security-audit/steps/deepdive/cat-06-secret-sprawl.md). Tracked secret files, Dockerfile ENV secrets, k8s ConfigMap leaks, Terraform tfvars, CI plaintext secrets, secrets in logs / error responses. Cross-references Phase 4's gitleaks + trufflehog output. Baseline CWEs: 200, 522, 532, 538, 798.
+Canonical: [`cat-06-secret-sprawl.md`](../skills/security-audit/steps/deepdive/cat-06-secret-sprawl.md). Tracked secret files, Dockerfile ENV secrets, k8s ConfigMap leaks, Terraform tfvars, CI plaintext secrets, secrets in logs / error responses. Cross-references Phase 4's gitleaks + trufflehog output. Baseline CWEs: 200, 522, 532, 538, 798. v2.6.1 adds two hard rules to that file: never write a credential value into a finding (cite `file:line` plus the fingerprint), and hits inside the audit's own prior artifacts are CRITICAL self-leaks, never noise.
 
 ## §7 Deployment Posture
 Canonical: [`cat-07-deployment.md`](../skills/security-audit/steps/deepdive/cat-07-deployment.md). Dockerfile `USER root` / `:latest` / debug ports, Kubernetes `privileged` / `hostNetwork` / RBAC wildcards, Terraform 0.0.0.0/0 ingress / public buckets / IAM `*`, GitHub Actions `pull_request_target` + PR head checkout, unpinned actions. Baseline CWEs: 276, 284, 732, 749, 829, 1035.

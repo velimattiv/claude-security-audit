@@ -54,6 +54,15 @@ patterns. This is a whitelist: the field is gone, so nothing in it survives,
 whatever format the credential was in and whether or not this skill has ever
 heard of it.
 
+The directory holds two artifact classes, and both are covered. The JSON
+formats (`*.sarif`, `*.json`, `*.jsonl`) get the structural strip. The markdown
+ones — `security-review-*.md` and `adversarial-*.md`, declared in
+`manifest.yaml` and written by `/security-review` and the vendored adversarial
+reviewer — are LLM prose *about* the secrets that were found, so they get the
+pattern pass instead. Scoping the file-extension list to the JSON formats let
+the two artifact types most likely to quote a credential walk straight past the
+redactor; that was caught in review, not in production.
+
 The strip is free because no consumer reads those fields:
 
 | Consumer | What it reads |

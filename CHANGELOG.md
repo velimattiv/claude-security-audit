@@ -120,6 +120,38 @@ Two details about how it *stayed*, which shaped the fix more than the chain did:
   suggested, with a warning against reading it as the credential control: it
   covers two globs and does nothing for `security-audit-report.md`.
 
+### Caught in adversarial review, before release
+
+Two fail-open paths in the first cut of this fix, both found by reviewing the
+*inventory* the enforcers run over rather than the mechanism:
+
+- **The redactor skipped the markdown review artifacts.** Its extension list was
+  `.sarif` / `.json` / `.jsonl`, while `manifest.yaml` declares
+  `phase-04-scanners/security-review-*.md` and `adversarial-*.md` as required
+  Phase 4 outputs. Those are LLM prose *about* the secrets that were found, they
+  are read by Phases 5 to 7, and every one of them walked past the redactor. The
+  mechanism had 45 passing assertions; nothing checked that it ran over
+  everything the phase actually writes.
+- **A multi-line PEM survived the deliverable gate.** The gate scanned line by
+  line and the `private_key` detector matched only the `-----BEGIN-----` header,
+  so the header was redacted and every base64 body line was copied through. The
+  gate now scans whole documents and the detector matches the whole block, with
+  a separate `private_key_header` for a truncated paste.
+
+Also fixed before release: `workflow.md §3.5b` resolved `output_dir` without
+jq's error fallback, so a missing `config.json` wrote jq's error message into
+`.gitignore` as an ignore pattern and Layer 3 silently never applied;
+`GATE_RC == 3` obliged the §7.10a self-finding in prose only, and now writes
+`phase-07-gate-fired.marker` that blocks phase completion until the finding
+exists; the three new gate artifacts were mandated by step files but absent from
+`manifest.yaml`; and `redact-scanner-output.py --output-dir` now computes
+`self_leak_candidates[]` so §4.4c is an artifact rather than a judgement call
+that has already been made wrongly twice.
+
+`scripts/validate-install-pins.sh` now also checks the `# → X.Y.Z` verification
+comments in the install docs, not only `--branch v` lines. It found
+`docs/INSTALL.md` still showing 2.5.0.
+
 ### Note for existing users
 
 If you ran v2.6.0 or earlier against a repo containing secrets in gitignored
