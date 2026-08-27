@@ -273,6 +273,20 @@ python3 "$REDACT" "$SRC" --check --quiet >/dev/null 2>&1
 [ $? -eq 1 ] && ok "--check is read-only and still scans outside the guard" \
              || bad "--check did not scan an out-of-scope path"
 
+# CodeQL pointed at the atomic write; the real weakness it exposed was the temp
+# file's default permissions. Replacing a 0600 scanner report with a 0644 one
+# quietly widens who can read it.
+PERM="$WORK/.claude-audit/perm"; mkdir -p "$PERM"
+printf '{"a":"ghp_%s"}\n' "SyNtH3t1cT0k3nF0rT3stZz9QwErTyUiOp12" > "$PERM/x.json"
+chmod 600 "$PERM/x.json"
+python3 "$REDACT" "$PERM" --quiet >/dev/null 2>&1
+mode="$(stat -c '%a' "$PERM/x.json" 2>/dev/null || stat -f '%Lp' "$PERM/x.json")"
+[ "$mode" = "600" ] && ok "redaction preserves the original file mode ($mode)" \
+                    || bad "redaction widened file permissions to $mode"
+grep -q "REDACTED" "$PERM/x.json" \
+  && ok "the mode-preserving write still redacted the content" \
+  || bad "mode preserved but content not redacted"
+
 # ---------------------------------------------------------------------------
 echo "-- layer 2: deliverable write gate --"
 # ---------------------------------------------------------------------------

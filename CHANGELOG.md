@@ -169,6 +169,16 @@ A second review round found one more fail-open and added a guard:
   reported as `Raw` values. They were not credentials and it had to be restored
   from git. An in-place scrubber pointed at the wrong directory is a destructive
   tool, and "I passed the right path last time" is not a control.
+- **CodeQL surfaced a dead policy constant and a permissions weakness.**
+  `_AUDIT_OWNED` was left defined but unread when the scope guard was rewritten
+  to be cwd-independent: a policy constant documenting a rule it no longer
+  enforced. It now drives the check. Separately, the atomic write created its
+  temp file with default permissions, so redacting a scanner report written
+  `0600` replaced it with one written `0644`. The temp is now created `0600` and
+  the original's mode restored before the rename. (CodeQL's HIGH
+  `py/clear-text-storage-sensitive-data` on that same write is a false positive,
+  since the content being written is the redacted document, but the alert
+  pointed at a real weakness next to it.)
 - **§4.4c now requires stating the matched length before claiming a leak.** A
   short match is often a prefix a document quotes deliberately. On the incident
   that motivated this release, an 11-character prefix in a planning note was

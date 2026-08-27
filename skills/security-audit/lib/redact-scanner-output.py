@@ -416,8 +416,12 @@ def process_file(path, check_only, stats, output_dir=None, self_leaks=None):
 
 
 # Directories this tool is allowed to REWRITE. Everything it touches is an
-# artifact the audit itself produced.
-_AUDIT_OWNED = (".claude-audit/", "docs/security-audit-")
+# artifact the audit itself produced. These two constants ARE the policy: change
+# them and the guard changes. An earlier cut left them defined but unread after
+# the guard was rewritten, which is a policy constant that documents a rule it
+# no longer enforces -- the defect class this skill exists to find.
+_AUDIT_OWNED_DIR_NAMES = (".claude-audit",)
+_AUDIT_OWNED_DIR_PREFIXES = ("security-audit-",)
 
 
 def _is_audit_owned(path, output_dir):
@@ -431,9 +435,9 @@ def _is_audit_owned(path, output_dir):
     """
     absolute = os.path.abspath(path).replace("\\", "/")
     parts = absolute.split("/")
-    if ".claude-audit" in parts:
+    if any(part in _AUDIT_OWNED_DIR_NAMES for part in parts):
         return True
-    if any(part.startswith("security-audit-") for part in parts):
+    if any(part.startswith(_AUDIT_OWNED_DIR_PREFIXES) for part in parts):
         return True
     if output_dir:
         od = os.path.abspath(output_dir)
@@ -452,11 +456,29 @@ def _atomic_write(path, content):
     caught by the mandatory `--check` rerun in `phase-04-scanners.md` §4.4b,
     which is the control, not this function.
     """
+    # CodeQL flags this write as clear-text storage of sensitive data. It is a
+    # false positive in the sense that matters -- `content` is the REDACTED
+    # document, and producing it is this tool's whole purpose -- but the alert
+    # points at a real weakness in the original shape: the temp file was created
+    # with default permissions, so replacing a scanner report written 0600 with
+    # one written 0644 quietly widened who could read it.
+    #
+    # So: create the temp file 0600, then restore the original's mode before the
+    # rename. The window in which the temp exists is never more permissive than
+    # the file it replaces.
+    try:
+        original_mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        original_mode = None
+
     tmp = path + ".redact.tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(content)
         fh.flush()
         os.fsync(fh.fileno())
+    if original_mode is not None:
+        os.chmod(tmp, original_mode)
     os.replace(tmp, path)
 
 
