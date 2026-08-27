@@ -467,6 +467,13 @@
         "failed"
       ],
       "description": "Stamped by the fail-closed reconciliations (validate-collection-scoping.py / validate-egress.py). `failed` means the run's candidate coverage was incomplete, so this finding set is NOT a complete picture. Present so a consumer reading the JSONL directly can tell, without re-deriving it from a shell exit code that may not have propagated."
+    },
+    "skill_self_leak": {
+      "enum": [
+        "true",
+        "false"
+      ],
+      "description": "v2.6.1. `true` marks a finding about THIS SKILL's own artifacts rather than about the audited code: credential material that a prior audit run wrote into the repository (phase-04-scanners.md §4.4c), or that this run's own deliverable gate scrubbed (phase-07-synthesis.md §7.10a). Present because these two must never aggregate with findings about the user's code — through v2.6.0 the skill copied gitleaks' verbatim `region.snippet.text` into a tracked `<output_dir>/findings.sarif`, and the reason it survived two separate detections is that the resulting hits were triaged as prior-artifact noise. A flat, greppable flag is what makes that triage call visible instead of implicit. Phase 7 carries it to the SARIF result as `properties.skill_self_leak`."
     }
   }
 }

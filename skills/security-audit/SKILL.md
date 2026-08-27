@@ -19,6 +19,25 @@ This skill produces **two kinds of output** on every run. Both are required:
    write these on first run (honors an `output:` arg and a persisted choice;
    defaults non-interactively). See [lib/output-routing.md](lib/output-routing.md).
 
+⛔ **Neither kind of output may contain a credential.** Both enforcers are
+mandatory and neither is optional hardening:
+
+- `phase-04-scanners.md §4.4b` — run
+  [lib/redact-scanner-output.py](lib/redact-scanner-output.py) over
+  `phase-04-scanners/` the moment the scanners finish, before anything reads
+  them. `gitleaks detect --no-git` deliberately ignores `.gitignore`, and its
+  SARIF holds the matched secret verbatim.
+- `phase-07-synthesis.md §7.10` and `phase-08-baseline.md §8.4` — run
+  [lib/verify-deliverable.py](lib/verify-deliverable.py) before every copy into
+  the output directory.
+
+Through v2.6.0 neither existed, and the audit committed live credentials that
+the audited repository had correctly kept untracked — it was the sole reason
+they entered git history. The full chain and the reasoning behind the two-layer
+fix are in [lib/secret-redaction.md](lib/secret-redaction.md). **If you find
+yourself reasoning "the scanner output is just working state" — it is copied
+verbatim into a tracked deliverable in §7.8.1. Run the redactor.**
+
 **Producing only the report is INVALID.** A run that writes the human
 report but skips the blackboard artifacts breaks downstream value:
 delta mode fails (no baseline), GitHub Security tab integration fails

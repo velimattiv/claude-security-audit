@@ -7,6 +7,197 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing queued.
 
+## [2.6.1] — 2026-08-28
+
+**The audit stops writing credentials into the repository it audits.**
+
+A v2.6.0 full-mode run committed a live GitHub token — plus an Azure AD client
+secret, a second one from a different `.env`, and an RSA private key — into the
+audited project's git history. None of that material was ever in version
+control before the audit: it lived in gitignored scratch paths, exactly where it
+belonged. `git log --all -S<token>` returned the audit's own SARIF files and
+nothing else. **The skill read the credentials from outside version control and
+wrote them inside it.**
+
+### The chain
+
+Four links, each behaving exactly as specified:
+
+1. `phase-04-scanners.md` runs `gitleaks detect --no-git`. The flag makes
+   gitleaks ignore `.gitignore` — correctly; uncommitted secrets are the ones
+   worth finding. Its SARIF carries the match verbatim in
+   `region.snippet.text`. `trufflehog --results=verified` carries it in `Raw` /
+   `RawV2` / `Redacted`, and `verified` means the scanner authenticated the
+   credential against the live provider.
+2. `phase-07-synthesis.md §7.8.1` assembles `findings.sarif` as one run per
+   scanner plus one synthetic run, instructing that scanner runs be "copied
+   through *verbatim* — do NOT rewrite". The instruction was written about CWE
+   metadata. It moved snippets.
+3. `§7.10` copies that document to `<output_dir>`.
+4. `lib/output-routing.md` defaults `<output_dir>` to
+   `docs/security-audit-output/` and calls it "tracked".
+
+Two details about how it *stayed*, which shaped the fix more than the chain did:
+
+- **`workflow.md §1` gitignored `.claude-audit/` and never `<output_dir>`.** The
+  protection sat on the scratch directory and was absent from the one whose
+  entire purpose is to be committed.
+- **The skill had no concept that its own output was secret-bearing.** A later
+  run's gitleaks flagged its predecessor's `findings.sarif`; the hits were
+  triaged away as prior-artifact noise, because a security report is *expected*
+  to look full of secrets. The dismissal confirmed itself. It happened twice,
+  and a human's `git rm --cached` + `.gitignore` fix in between removed the file
+  from `HEAD` while leaving the blob and the live token reachable in history.
+
+### Added
+
+- **`lib/secret-detectors.py`** — the single detector table both enforcers
+  import by absolute path from the directory they ship in. Two copies would
+  drift, and the day they drift the gate stops matching the redactor: a control
+  whose enforcer no longer covers it, which is the defect class this skill
+  exists to detect.
+- **`lib/redact-scanner-output.py`** — Layer 1, the structural strip, invoked at
+  the new **`phase-04-scanners.md §4.4b`** immediately after the scanners write
+  and before §4.5 normalization, §4.6 slimming, or any sub-agent read.
+
+  It removes SARIF `snippet` / `contents` / `insertedContent` from **every**
+  scanner run unconditionally — not by matching credential patterns. That is a
+  whitelist: the field is gone, so nothing in it survives regardless of format
+  or of whether this skill has heard of the credential type. It is free because
+  no consumer reads those fields — `lib/sarif-postprocess.md` discards them when
+  slimming, Phases 5-7 read the slim form, and
+  `tests/e2e/assertions.py:_sarif_result_to_finding` keys on `ruleId`,
+  `properties.cwe`, `properties.cwes` and `tags`.
+
+  Findings keep rule, level, file, line and column, and gain
+  `properties.secret_fingerprint` — stable across runs, so Phase 7 still dedupes
+  and Phase 8 still carries secret findings forward now that the value is gone.
+- **`lib/verify-deliverable.py`** — Layer 2, a fail-closed gate at
+  `phase-07-synthesis.md §7.10` and `phase-08-baseline.md §8.4`, before every
+  `cp` into `<output_dir>`. It gates the **blackboard** copies and the `cp`
+  follows, so no raw value is left behind in `.claude-audit/current/` to be
+  archived into `history/<ts>/`.
+- **`phase-07-synthesis.md §7.10a`** — what to do when the gate fires. It scrubs
+  and writes rather than aborting (a user 45 minutes into an audit will find
+  whatever flag silences an abort, and that flag becomes the hole), then obliges
+  Phase 7 to emit a CRITICAL finding naming **this skill** as defective. A
+  firing gate means Layer 1 did not hold; it is a bug report, not a finding
+  about the audited code.
+- **`phase-04-scanners.md §4.4c`** — secret-scanner hits under `<output_dir>/`,
+  `.claude-audit/`, or legacy `docs/security-audit-*` paths are **not** noise.
+  They escalate to CRITICAL / CWE-538 with `skill_self_leak: "true"` and a
+  `suggested_fix` that says rotate first, purge history second — and states
+  explicitly that untracking is not purging.
+- **`workflow.md §3.5b`** — gitignore hygiene for `<output_dir>`, applying the
+  `*.sarif` / `*.cyclonedx.json` recipe that `lib/output-routing.md` had only
+  ever suggested. Defence in depth; the report and pruned baseline stay tracked
+  by design so `mode: delta` keeps working on a fresh clone.
+- **`lib/secret-redaction.md`** — the layering contract, including what the
+  fingerprint is *not*: it is domain-separated and rule-salted so a generic
+  rainbow table is useless, and it is not resistant to a targeted guess against
+  a known-weak secret. That is acceptable, and why, is written down.
+- **`tests/test-secret-redaction.sh`** (45 assertions, wired into CI) — both
+  layers, idempotency in both directions, triage-field survival, placeholder
+  negatives, and the control-with-no-enforcer check that the step files actually
+  invoke the enforcers. Every credential-shaped string is synthesised at runtime;
+  committing a token-shaped fixture would make this repo's own secret scan
+  permanently noisy, which is the exact triage failure §4.4c exists to stop.
+- **`finding-schema.json`** — optional `skill_self_leak` (`"true"` / `"false"`).
+
+### Changed
+
+- `lib/sarif-postprocess.md` — the "raw SARIF is **kept on disk**" note now says
+  *raw means un-slimmed, not un-redacted*, and warns against reading the slim
+  step as a security control. Its incidental discarding of `snippet` is what
+  made the leak look impossible; the consolidated SARIF never passes through it.
+- `steps/deepdive/cat-06-secret-sprawl.md` — a hard reporting rule: never write
+  the value, not in `description`, `attack_scenario`, `suggested_fix`,
+  `verification_probe`, a fenced block "for context", or hand-masked. Cite
+  `file:line` and the fingerprint. Analyst prose is the one path into a
+  deliverable that a structural strip cannot cover.
+- `lib/report-template.md` — the same rule at the per-finding block.
+- `lib/output-routing.md` — the `.gitignore` recipe is applied rather than
+  suggested, with a warning against reading it as the credential control: it
+  covers two globs and does nothing for `security-audit-report.md`.
+
+### Caught in adversarial review, before release
+
+Two fail-open paths in the first cut of this fix, both found by reviewing the
+*inventory* the enforcers run over rather than the mechanism:
+
+- **The redactor skipped the markdown review artifacts.** Its extension list was
+  `.sarif` / `.json` / `.jsonl`, while `manifest.yaml` declares
+  `phase-04-scanners/security-review-*.md` and `adversarial-*.md` as required
+  Phase 4 outputs. Those are LLM prose *about* the secrets that were found, they
+  are read by Phases 5 to 7, and every one of them walked past the redactor. The
+  mechanism had 45 passing assertions; nothing checked that it ran over
+  everything the phase actually writes.
+- **A multi-line PEM survived the deliverable gate.** The gate scanned line by
+  line and the `private_key` detector matched only the `-----BEGIN-----` header,
+  so the header was redacted and every base64 body line was copied through. The
+  gate now scans whole documents and the detector matches the whole block, with
+  a separate `private_key_header` for a truncated paste.
+
+Also fixed before release: `workflow.md §3.5b` resolved `output_dir` without
+jq's error fallback, so a missing `config.json` wrote jq's error message into
+`.gitignore` as an ignore pattern and Layer 3 silently never applied;
+`GATE_RC == 3` obliged the §7.10a self-finding in prose only, and now writes
+`phase-07-gate-fired.marker` that blocks phase completion until the finding
+exists; the three new gate artifacts were mandated by step files but absent from
+`manifest.yaml`; and `redact-scanner-output.py --output-dir` now computes
+`self_leak_candidates[]` so §4.4c is an artifact rather than a judgement call
+that has already been made wrongly twice.
+
+`scripts/validate-install-pins.sh` now also checks the `# → X.Y.Z` verification
+comments in the install docs, not only `--branch v` lines. It found
+`docs/INSTALL.md` still showing 2.5.0.
+
+A second review round found one more fail-open and added a guard:
+
+- **Self-leak detection could not see the blackboard.** `_self_leak_candidates`
+  normalised paths with `lstrip("./")`, and `str.lstrip` takes a *set of
+  characters*, so it ate the leading dot of `.claude-audit/…` and turned it into
+  `claude-audit/…`, matching no prefix. Every self-leak inside the blackboard and
+  its rotated history was invisible to §4.4c, which is the one place the rule
+  most needed to fire.
+- **The redactor will no longer rewrite files outside the audit's own
+  directories.** In redact mode it refuses anything not under `.claude-audit/`
+  or the resolved `<output_dir>` unless `--allow-any-path` is passed; `--check`
+  stays read-only and unguarded. This is not hypothetical: during the v2.6.0
+  cleanup a remediation pass aimed at audit outputs also rewrote *source* copies
+  of a project, replacing localhost dev connection strings that trufflehog had
+  reported as `Raw` values. They were not credentials and it had to be restored
+  from git. An in-place scrubber pointed at the wrong directory is a destructive
+  tool, and "I passed the right path last time" is not a control.
+- **CodeQL surfaced a dead policy constant and a permissions weakness.**
+  `_AUDIT_OWNED` was left defined but unread when the scope guard was rewritten
+  to be cwd-independent: a policy constant documenting a rule it no longer
+  enforced. It now drives the check. Separately, the atomic write created its
+  temp file with default permissions, so redacting a scanner report written
+  `0600` replaced it with one written `0644`. The temp is now created `0600` and
+  the original's mode restored before the rename. (CodeQL's HIGH
+  `py/clear-text-storage-sensitive-data` on that same write is a false positive,
+  since the content being written is the redacted document, but the alert
+  pointed at a real weakness next to it.)
+- **§4.4c now requires stating the matched length before claiming a leak.** A
+  short match is often a prefix a document quotes deliberately. On the incident
+  that motivated this release, an 11-character prefix in a planning note was
+  reported as the full token, turning a tidy-up into a rotation emergency. Write
+  what the length supports.
+
+### Note for existing users
+
+If you ran v2.6.0 or earlier against a repo containing secrets in gitignored
+paths, check `<output_dir>/findings.sarif` and your history for them.
+**Rotate first** — the credential is live until rotated and everything else is
+irrelevant until it is done — **then** purge with `git filter-repo` or BFG,
+force-push, and have collaborators re-clone. `git rm --cached` plus a
+`.gitignore` line is not a fix: it removes the file from `HEAD` and leaves the
+blob reachable.
+
+A v2.6.1 run will now flag such artifacts as CRITICAL rather than dismissing
+them as noise.
+
 ## [2.6.0] — 2026-07-31
 
 **Calibrated severity.** The first release measured against ground truth. Eight

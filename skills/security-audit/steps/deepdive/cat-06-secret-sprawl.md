@@ -24,6 +24,42 @@
    default in workflows.
 7. Logs don't emit token / password / API-key strings.
 
+## ⛔ Reporting rule: never write the value (v2.6.1)
+
+This category is the one that reads live credentials. Everything it produces is
+printed into `security-audit-report.md`, which is a **tracked deliverable** in
+the repository being audited.
+
+**A finding in this category must never contain the credential itself.** Not in
+`description`, not in `attack_scenario`, not in `suggested_fix`, not in a
+fenced code block "for context", not partially masked by hand.
+
+Report instead:
+
+| Write this | Not this |
+|---|---|
+| `tmp/scratch/.env:1` | the line's contents |
+| `github_pat`, 40 chars | `ghp_…` with the value |
+| `properties.secret_fingerprint` from the Phase 4 scanner row | your own excerpt |
+| "value redacted — see `<output_dir>` gate" | a "safe-looking" prefix |
+
+A prefix is not safe. `AKIA…`, `ghp_…`, `sk-ant-…` identify the provider and
+narrow a brute force; the last four characters are how the same credential is
+recognised across two leaks. If a reviewer needs the value to act, they read it
+from the source file at the cited line — which they have, because they own the
+repository.
+
+**Why this is a hard rule and not a style preference.** `lib/verify-deliverable.py`
+strips `phase-04-scanners/` structurally at Phase 4, so scanner-sourced secrets
+cannot reach the report. Prose you write in THIS phase is the path that strip
+never sees: the field is free text and the whole point of it is to be read. If you paste a value
+here, the write gate will catch it, scrub it, and emit a CRITICAL finding
+against **this skill** — the run then reports its own tooling as defective,
+which is correct but expensive. Cite the location.
+
+The same rule applies to `verification_probe`: write the request shape, never a
+working `Authorization:` header.
+
 ## Detection sweeps
 
 ### Tracked secret files (git ls-files check)
@@ -165,6 +201,24 @@ raise .*(?:token|secret).*
 
 Include token / apikey / secret in error message text → **MEDIUM** /
 CWE-209.
+
+## Prior audit artifacts are never "noise"
+
+Hits under `<output_dir>/`, `.claude-audit/`, or a legacy `docs/security-audit-*`
+path are **not** false positives and must not be added to an ignore list.
+
+Through v2.6.0 this skill wrote verbatim gitleaks snippets into its own tracked
+`findings.sarif`, so those paths can hold real, live credentials that the audit
+itself committed. The failure mode is specific and has already happened twice on
+the same repository: a run flags its predecessor's output, the hits are triaged
+as "prior artifact noise" because a security report is *expected* to look full
+of secrets, and the reasoning is self-confirming.
+
+Escalate per `steps/phase-04-scanners.md §4.4c`: CRITICAL, CWE-538,
+`properties.skill_self_leak = "true"`, and a `suggested_fix` that says **rotate
+first, purge history second** — and states that `git rm --cached` plus a
+`.gitignore` line removes the file from `HEAD` while leaving the blob and the
+live credential reachable in history.
 
 ## False-positive notes
 

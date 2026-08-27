@@ -17,7 +17,9 @@ the workflow preflight (`workflow.md §0.5`) and persisted so `mode: delta` and
    - `.claude-audit/config.json` — persisted run config (incl. `output_dir`).
 
 2. **Deliverables (user-facing)** — `<output_dir>/` (default
-   `docs/security-audit-output/`, tracked). Written as the **final** step of
+   `docs/security-audit-output/`, tracked — see the ⚠ under "Consumer
+   `.gitignore` recipe" for what "tracked" obliges). Written as the **final**
+   step of
    Phase 7 (report, sarif, cyclonedx) and Phase 8 (pruned baseline), AFTER the
    blackboard copies already exist. This preserves the blackboard-first
    invariant: the blackboard is written first and is authoritative; the
@@ -59,9 +61,9 @@ Because the default dir is tracked, fresh-clone delta works with no args.
 fresh clone** — a CI delta run that uses a NON-default output dir MUST pass
 `output:` so the baseline is found.
 
-## Consumer `.gitignore` guidance
+## Consumer `.gitignore` recipe (applied, not suggested — v2.6.1)
 
-Track the human deliverables; optionally ignore the bulky machine artifacts:
+Track the human deliverables; ignore the bulky machine artifacts:
 
 ```gitignore
 # keep tracked: docs/security-audit-output/security-audit-report.md
@@ -69,6 +71,18 @@ Track the human deliverables; optionally ignore the bulky machine artifacts:
 docs/security-audit-output/*.sarif
 docs/security-audit-output/*.cyclonedx.json
 ```
+
+Through v2.6.0 this block was advice, and nothing applied it. `workflow.md
+§3.5b` now writes it into the consumer's `.gitignore` when `<output_dir>` is
+inside a git work tree and not already ignored, and reports the change.
+
+⚠ **This recipe is not the credential control and never was.** It ignores two
+file globs; it does nothing for `security-audit-report.md`, which stays tracked
+by design and is written from analyst prose. Credentials are kept out of every
+deliverable by `steps/phase-04-scanners.md §4.4b` (structural strip at scanner
+ingest) and `lib/verify-deliverable.py` (fail-closed gate before each write).
+If you are reading this recipe as the reason the deliverables are safe to
+commit, read those two instead.
 
 CI that uploads SARIF to the GitHub Security tab reads it from the resolved
 `<output_dir>/findings.sarif` (default `docs/security-audit-output/findings.sarif`).

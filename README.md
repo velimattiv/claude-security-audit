@@ -18,7 +18,15 @@ asserted per finding.
 
 ## Version
 
-- **v2.6.0** (current) — **Calibrated severity.** The first release measured
+- **v2.6.1** (current) — **Credential containment.** Through v2.6.0 the audit
+  copied gitleaks' verbatim `region.snippet.text` into `findings.sarif` and then
+  into a tracked `<output_dir>`, committing live secrets that the audited repo
+  had correctly kept out of git. Two enforcers now stand between a scanner and a
+  deliverable: a structural strip at Phase 4 ingest that removes SARIF snippets
+  from every scanner run and scrubs the markdown review artifacts alongside
+  them, and a fail-closed gate before every write that catches values pasted
+  into analyst prose. See [lib/secret-redaction.md](skills/security-audit/lib/secret-redaction.md).
+- **v2.6.0** — **Calibrated severity.** The first release measured
   against ground truth: eight security engineers triaged all 263 HIGH-or-above
   findings from a v2.5.0 full-mode run against the real code (255 verdicts), and
   recorded 34 defects the audit missed. The headline result was that the audit's
@@ -156,16 +164,16 @@ baseline exists).
 User-level (available in every project), pinned to a tagged release:
 
 ```bash
-git clone --depth 1 --branch v2.6.0 \
+git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
 cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.6.0
+cat ~/.claude/skills/security-audit/VERSION   # → 2.6.1
 ```
 
 Project-level (just this repo):
 
 ```bash
-git clone --depth 1 --branch v2.6.0 \
+git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
 mkdir -p .claude/skills
 cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
@@ -210,7 +218,7 @@ git clone <your-target-repo> /workspace/target
 claude login
 
 # Install the skill at user-level inside the container
-git clone --depth 1 --branch v2.6.0 \
+git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
 cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
 

@@ -424,7 +424,31 @@ sink model still enumerates modalities we thought of; the availability class in
 particular is a large space (exhaustion, ordering, quota, cache, scheduler) of
 which one shape is now represented.
 
-### 30. The severity contract test proves agreement, not enforcement
+### 31. The deliverable gate is a blocklist and cannot be complete
+
+`lib/verify-deliverable.py` (v2.6.1) catches credential material in analyst
+prose using the ~19 detectors in `lib/secret-detectors.py`. gitleaks ships
+roughly 170. Anything it detects and this table does not — a niche vendor token,
+a bespoke internal credential format, a high-entropy string with no recognisable
+key name — passes the gate.
+
+This is a bounded gap, not the primary control. The primary control is
+structural: `lib/redact-scanner-output.py` deletes SARIF `snippet` / `contents`
+/ `insertedContent` from every scanner run, so no *scanner-sourced* credential
+can reach a deliverable regardless of format. The blocklist covers only the one
+path a structural strip cannot: free text an analyst typed, where the field must
+survive because the whole point of it is to be read.
+
+So the residual risk is specifically: *an analyst pastes a credential of a
+format this table does not know into a finding description.* The mitigation is a
+hard reporting rule (`cat-06-secret-sprawl.md`, `lib/report-template.md`: cite
+`file:line` and the fingerprint, never the value), and the gap is that the rule
+is prose enforced by an incomplete matcher.
+
+There is no claim of completeness here, and adding detectors narrows the gap
+without closing it. What closes it for a given repository is not pasting values.
+
+### 32. The severity contract test proves agreement, not enforcement
 
 `tests/test-attack-paths.sh` diffs `compose-attack-paths.py --print-contract`
 against the `severity-contract` block in `steps/phase-07-synthesis.md`. That
@@ -449,7 +473,7 @@ thing verifying them. **A contract test is a drift alarm, not an enforcement
 mechanism**, and reading it as the latter is the same category error as reading
 `confidence: CONFIRMED` as a measure of truth.
 
-### 31. The annex join is model-executed, and only its *output* is checked
+### 33. The annex join is model-executed, and only its *output* is checked
 
 §7.2b's join — deciding that a mechanical row restates a particular judgement
 finding — requires semantic judgement, so it is written as instructions to the

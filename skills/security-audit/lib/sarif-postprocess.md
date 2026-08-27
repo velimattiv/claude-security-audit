@@ -15,6 +15,17 @@ The raw SARIF is **kept on disk** at `phase-04-scanners/<tool>.sarif` so
 users who want to upload to GitHub's Security tab / DefectDojo / Jira
 still have the full document.
 
+⚠ **"Raw" means un-slimmed, not un-redacted.** Every file in
+`phase-04-scanners/` has already been through
+[`redact-scanner-output.py`](redact-scanner-output.py) at
+`steps/phase-04-scanners.md §4.4b`, which removes `snippet` / `contents` /
+`insertedContent` from every run. The slim step below is not what protects
+credentials — it happens to discard `snippet`, and relying on that side effect
+is what let v2.6.0 ship a live token to a tracked deliverable, because the
+consolidated SARIF in `phase-07-synthesis.md §7.8.1` is assembled from the raw
+documents and never passes through here at all. Do not treat this file as a
+security control.
+
 **Empirical compression** (measured on the M3 Juice Shop dogfood — see
 `docs/test-runs/m3-*.md`): semgrep 1.4MB → 14KB (99.0% reduction),
 gitleaks 83KB → 15KB (82.2%), gitleaks-history 93KB → 17KB (81.3%). The
@@ -36,7 +47,8 @@ metadata compresses better than single-secret scanner output.
       "file": "app/views.py",
       "start_line": 42,
       "end_line": 42,
-      "message": "Use of user-controlled template variable..."
+      "message": "Use of user-controlled template variable...",
+      "secret_fingerprint": null
     }
   ]
 }
@@ -50,6 +62,11 @@ metadata compresses better than single-secret scanner output.
 Discarded from SARIF: `fingerprints`, `fixes`, `codeFlows`, `properties`,
 `ruleIndex`, `taxa`, `artifacts`, `invocations`, `tool.driver.rules`,
 `message.markdown`, `partialFingerprints`.
+
+Carried through when present (added v2.6.1): `properties.secret_fingerprint` —
+the stable, non-reversible id `§4.4b` leaves in place of a redacted secret. It
+is what lets a secret finding dedupe in Phase 7 and carry forward in the
+Phase 8 baseline now that the value itself is gone.
 
 ## Mapping procedure
 
@@ -112,9 +129,16 @@ for line in trufflehog.json:
     level:      "error" if entry.verified else "warning",
     file:       entry.source.git.file || entry.source.url,
     start_line: entry.source.git.line || 0,
-    message:    "verified " + entry.detector_name + " secret found"
+    message:    "verified " + entry.detector_name + " secret found",
+    secret_fingerprint: entry.SecretFingerprint          # set by §4.4b
   })
 ```
+
+⚠ Never map `entry.Raw` / `entry.RawV2` / `entry.Redacted` into the slim form
+or the message. `verified: true` means trufflehog authenticated the credential
+against the live provider — these are the highest-value secrets in the run, and
+`§4.4b` has already replaced all three fields with markers. Use
+`entry.SecretFingerprint`.
 
 Only rows with `verified: true` by default. A user can re-run Phase 4
 with `--include-unverified` (M7 argument) to widen the sweep.

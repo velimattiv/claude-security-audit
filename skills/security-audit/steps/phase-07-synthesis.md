@@ -16,9 +16,14 @@
 - `properties.cwe`: the CWE id as a string (e.g. `"CWE-798"`). Required for fixture matching, baseline delta, and GitHub Security tab grouping. Look up the CWE in `lib/cwe-map.json`; if absent, use your best judgement and add an entry in a follow-up.
 - `properties.category` (recommended): one of `auth`, `idor`, `token_scope`, `collection_scope`, `mitm`, `crypto`, `secret_sprawl`, `deployment`, `injection`, `llm`, `supply_chain`, `agentic`, `config`.
 
-Per-scanner SARIF runs are copied through verbatim — do NOT rewrite
-scanner results. Scanner CWE lives in `tags[]` / `rule.properties.tags` /
-driver relationships per the scanner's own conventions (§7.8).
+Per-scanner SARIF runs are copied through verbatim **with one exception,
+and the exception is not optional**: they must already have been through
+`phase-04-scanners.md §4.4b`, which strips credential material at ingest.
+"Verbatim" here means *do not rewrite scanner findings to normalise their
+metadata* — scanner CWE lives in `tags[]` / `rule.properties.tags` / driver
+relationships per the scanner's own conventions (§7.8), and rewriting it loses
+information. It has never meant "copy raw secrets into the deliverable", though
+through v2.6.0 that is exactly what it caused. See §7.8.1 and §7.10.
 
 ⛔ **DO NOT emit the human report without also emitting findings.sarif with CWE-per-result.** The report is the cover page; SARIF is the machine-readable deliverable. Producing only the report is a regression to v1 and breaks every downstream integration (delta mode, GitHub Security tab upload, CI gating on CRITICAL counts, fixture-based E2E validation).
 
@@ -1140,7 +1145,16 @@ Every `results[]` item in the synthetic `security-audit-skill` run:
 emit CWE in scanner-specific locations — `tags[]`, `rule.properties.tags`,
 or driver `relationships`. The skill copies those runs through
 *verbatim* — do NOT rewrite scanner results to add `properties.cwe`
-where they already encode CWE elsewhere. The per-result-CWE mandate
+where they already encode CWE elsewhere.
+
+⛔ **"Verbatim" is scoped to metadata, never to credential material.** The runs
+being copied here are the redacted ones from `phase-04-scanners.md §4.4b`. The
+raw gitleaks and trufflehog reports carry the matched secret in
+`region.snippet.text` and `Raw`/`RawV2`, and copying *those* through is the
+v2.6.0 defect that put a live token into a user's git history. If a run in
+`phase-04-scanners/` still has an unredacted `snippet`, §4.4b did not run —
+stop, run it, and do not assemble SARIF until `--check` exits 0. A finding row
+whose `properties.redacted` is `"true"` is the expected state, not a problem. The per-result-CWE mandate
 applies to the synthetic skill run only; scanner-run CWE is consumed by
 the assertion suite via the same multi-source extraction logic that
 `tests/e2e/assertions.py:_sarif_result_to_finding` uses (it inspects
@@ -1165,16 +1179,81 @@ Resolve `<output_dir>` per [../lib/output-routing.md](../lib/output-routing.md)
 read it from there, default `docs/security-audit-output/`). Then, AFTER the
 blackboard files exist:
 
+⛔ **Gate first. Every `cp` in this section is downstream of it.**
+
 ```bash
 OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output)
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+
+# Fail-closed credential gate. Exit 3 means it scrubbed something -> §7.10a.
+python3 "$SKILL_DIR/lib/verify-deliverable.py" --redact \
+    --json-report .claude-audit/current/deliverable-gate.json \
+    .claude-audit/current/phase-07-report.md \
+    .claude-audit/current/findings.sarif \
+    .claude-audit/current/findings.cyclonedx.json
+GATE_RC=$?
+[ "$GATE_RC" -eq 2 ] && { echo "FATAL: deliverable gate could not run" >&2; exit 1; }
+# RC 3 obliges §7.10a. Leaving that obligation to prose would be a control with
+# no enforcer, which is this skill's own flagship defect class. The marker makes
+# it a checkable artifact: §7.12 refuses to write phase-07.done while it exists
+# without a matching skill_self_leak finding.
+[ "$GATE_RC" -eq 3 ] && touch .claude-audit/current/phase-07-gate-fired.marker
+
 mkdir -p "$OUT"
 cp .claude-audit/current/phase-07-report.md      "$OUT/security-audit-report.md"
 cp .claude-audit/current/findings.sarif          "$OUT/findings.sarif"
 cp .claude-audit/current/findings.cyclonedx.json "$OUT/findings.cyclonedx.json"
 ```
 
+The gate scrubs the blackboard copies **before** the `cp`, so the blackboard and
+the deliverable stay byte-identical. A gate that only cleaned the deliverable
+would leave the raw value in `.claude-audit/current/` and then in
+`.claude-audit/history/<ts>/` forever.
+
 Echo `$OUT/security-audit-report.md` to the user. (The pruned baseline is
-copied to `$OUT/` by Phase 8.)
+copied to `$OUT/` by Phase 8, behind the same gate.)
+
+## 7.10a — When the gate fires (`GATE_RC == 3`)
+
+The gate firing means credential material reached the deliverable stage. The
+Phase 4 ingest strip is structural and covers scanner output completely, so a
+hit here almost always came from the one source it cannot reach: **prose an
+analyst wrote.** `cat-06-secret-sprawl.md` sends a sub-agent looking for literal
+credentials, and a finding that quotes the value it found puts that value into
+a tracked markdown file.
+
+When `GATE_RC == 3`, Phase 7 MUST:
+
+1. Read `.claude-audit/current/deliverable-gate.json` (it holds detector names,
+   file, line, fingerprint and length — never the value).
+2. Emit **one CRITICAL finding** into the report, before the severity counts:
+   - `category: secret_sprawl`, CWE-532, `skill_self_leak: "true"` on the
+     finding (carried to the SARIF result as `properties.skill_self_leak`)
+   - `evidence_class: external_scanner`, `confidence: CONFIRMED`
+   - Title: *"The audit's own pipeline carried credential material into a
+     deliverable (skill defect)"*
+   - Body must state plainly that **this is a defect in the audit tool, not a
+     finding about the audited code**, name the detectors that fired, and give
+     the same rotate-then-purge fix as `phase-04-scanners.md §4.4c`.
+3. Say it in the §7.11 summary to the user — not only in the report body.
+4. Clear the marker only once the finding exists:
+
+   ```bash
+   grep -q '"skill_self_leak"[[:space:]]*:[[:space:]]*"true"' \
+       .claude-audit/current/phase-07-findings-computed.jsonl \
+     && rm -f .claude-audit/current/phase-07-gate-fired.marker \
+     || { echo "FATAL: gate fired but no skill_self_leak finding was emitted" >&2; exit 1; }
+   ```
+
+   A leftover `phase-07-gate-fired.marker` at the phase-completion check
+   (`workflow.md §3`) is a hard stop. The obligation is mechanical, not
+   narrative.
+
+⛔ **Never suppress the gate, never `|| true` it, and never treat a fired gate
+as a finding about the user's repository.** It is this skill's own bug, and the
+audit that silently cleans up after itself is the audit that shipped this
+defect for four minor versions.
 
 ## 7.11 — Report summary to user
 

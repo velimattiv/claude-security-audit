@@ -52,6 +52,28 @@ for f in "${files[@]}"; do
   done < <(grep -E -- "--branch v[0-9]" "$f" || true)
 done
 
+# v2.6.1: also check the `# -> X.Y.Z` verification comments in install docs.
+# README.md carried `cat .../VERSION   # -> 2.6.0` through the 2.6.1 bump because
+# this validator only looked at `--branch v` lines, so a reader following the
+# install steps would have seen a mismatch the CI called PASS.
+for f in "${files[@]}"; do
+  [ -f "$f" ] || continue
+  rel="${f#$REPO_ROOT/}"
+  while IFS= read -r line; do
+    # Match any arrow glyph by skipping non-digits after the `#`. An earlier
+    # attempt spelled the U+2192 arrow as a hex escape inside the sed pattern;
+    # sed does not interpret those escapes, so the check silently never fired
+    # on the exact drift it was written to catch.
+    cmt="$(echo "$line" | sed -nE 's/.*VERSION[[:space:]]*#[^0-9]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+    if [ -n "$cmt" ] && [ "$cmt" != "${EXPECTED}" ]; then
+      echo "MISMATCH in $rel (VERSION comment):" >&2
+      echo "    shows:  $cmt" >&2
+      echo "    expect: ${EXPECTED}" >&2
+      mismatches=$((mismatches + 1))
+    fi
+  done < <(grep -E "VERSION[[:space:]]*#" "$f" || true)
+done
+
 # The manifest stamps `skill_version` into EVERY artifact a run emits, and
 # SKILL.md tells the operator to reason about cross-run comparability from it.
 # A stale value there is worse than a stale README pin: the README is read once,
