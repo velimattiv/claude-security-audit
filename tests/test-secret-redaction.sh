@@ -437,6 +437,12 @@ for art in phase-04-redaction.json deliverable-gate.json baseline-gate.json; do
 done
 
 # R1 finding F3: the gitignore recipe must not write jq errors into .gitignore.
+# R2 finding E: a bare `>` redirect truncates the summary before the redactor
+# runs, so a failed pass leaves an empty file that satisfies the manifest check.
+grep -q "phase-04-redaction.json.tmp" "$STEPS/phase-04-scanners.md" \
+  && ok "4.4b writes the redaction summary via a temp file, not a bare redirect" \
+  || bad "4.4b truncates phase-04-redaction.json before the redactor runs"
+
 grep -q "config.json 2>/dev/null || echo docs/security-audit-output" \
      "$REPO_ROOT/skills/security-audit/workflow.md" \
   && ok "3.5b resolves output_dir defensively" \

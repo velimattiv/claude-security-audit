@@ -167,9 +167,18 @@ it reintroduces CVE-class behaviour in the skill itself.**
 SKILL_DIR=$(cat .claude-audit/.skill-dir)
 [ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
 OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output)
+# Write to a temp file and move it into place only on success. A bare `>`
+# redirect truncates the target BEFORE the command runs, so a failed redaction
+# left an empty phase-04-redaction.json that satisfied the manifest's existence
+# check while §4.4c had nothing to read.
 python3 "$SKILL_DIR/lib/redact-scanner-output.py" --output-dir "$OUT" \
     .claude-audit/current/phase-04-scanners/ \
-    > .claude-audit/current/phase-04-redaction.json
+    > .claude-audit/current/phase-04-redaction.json.tmp \
+  && mv .claude-audit/current/phase-04-redaction.json.tmp \
+        .claude-audit/current/phase-04-redaction.json \
+  || { echo "FATAL: scanner redaction failed; see stderr above" >&2
+       rm -f .claude-audit/current/phase-04-redaction.json.tmp
+       exit 1; }
 ```
 
 Then confirm it held — the check must exit 0:
