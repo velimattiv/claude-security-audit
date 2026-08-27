@@ -152,6 +152,29 @@ that has already been made wrongly twice.
 comments in the install docs, not only `--branch v` lines. It found
 `docs/INSTALL.md` still showing 2.5.0.
 
+A second review round found one more fail-open and added a guard:
+
+- **Self-leak detection could not see the blackboard.** `_self_leak_candidates`
+  normalised paths with `lstrip("./")`, and `str.lstrip` takes a *set of
+  characters*, so it ate the leading dot of `.claude-audit/…` and turned it into
+  `claude-audit/…`, matching no prefix. Every self-leak inside the blackboard and
+  its rotated history was invisible to §4.4c, which is the one place the rule
+  most needed to fire.
+- **The redactor will no longer rewrite files outside the audit's own
+  directories.** In redact mode it refuses anything not under `.claude-audit/`
+  or the resolved `<output_dir>` unless `--allow-any-path` is passed; `--check`
+  stays read-only and unguarded. This is not hypothetical: during the v2.6.0
+  cleanup a remediation pass aimed at audit outputs also rewrote *source* copies
+  of a project, replacing localhost dev connection strings that trufflehog had
+  reported as `Raw` values. They were not credentials and it had to be restored
+  from git. An in-place scrubber pointed at the wrong directory is a destructive
+  tool, and "I passed the right path last time" is not a control.
+- **§4.4c now requires stating the matched length before claiming a leak.** A
+  short match is often a prefix a document quotes deliberately. On the incident
+  that motivated this release, an 11-character prefix in a planning note was
+  reported as the full token, turning a tidy-up into a rotation emergency. Write
+  what the length supports.
+
 ### Note for existing users
 
 If you ran v2.6.0 or earlier against a repo containing secrets in gitignored

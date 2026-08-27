@@ -75,7 +75,11 @@ PY
 # ---------------------------------------------------------------------------
 echo "-- layer 1: structural strip of scanner output --"
 # ---------------------------------------------------------------------------
-SCAN="$WORK/phase-04-scanners"
+# Under a realistic blackboard path, so the DEFAULT (guarded) code path is what
+# the suite exercises. Fixtures in a bare temp dir would be refused by the
+# write-scope guard, and passing --allow-any-path to work around that would
+# leave the guard untested in the very suite that owns it.
+SCAN="$WORK/.claude-audit/current/phase-04-scanners"
 mkdir -p "$SCAN"
 
 python3 - "$SCAN" "$TOKEN" "$PEMHDR" <<'PY'
@@ -215,6 +219,59 @@ PY
 python3 "$REDACT" "$WORK/dirty.sarif" --check --quiet 2>/dev/null
 [ $? -eq 1 ] && ok "--check exits 1 on unredacted material" \
              || bad "--check did not fail closed on a dirty file"
+
+# ---------------------------------------------------------------------------
+echo "-- layer 1: self-leak detection and write-scope guard (R2) --"
+# ---------------------------------------------------------------------------
+SL="$WORK/selfleak"; mkdir -p "$SL"
+python3 - "$SL" <<'PYSL'
+import json, sys
+json.dump({"version": "2.1.0", "runs": [{
+  "tool": {"driver": {"name": "gitleaks"}},
+  "results": [
+    {"ruleId": "r1", "locations": [{"physicalLocation": {"artifactLocation": {
+        "uri": ".claude-audit/history/2026/findings.sarif"}}}]},
+    {"ruleId": "r2", "locations": [{"physicalLocation": {"artifactLocation": {
+        "uri": "./docs/security-audit-output/findings.sarif"}}}]},
+    {"ruleId": "r3", "locations": [{"physicalLocation": {"artifactLocation": {
+        "uri": "src/app.py"}}}]}]}]}, open(sys.argv[1] + "/g.sarif", "w"))
+PYSL
+cand="$(python3 "$REDACT" "$SL" --check --output-dir docs/security-audit-output \
+        2>/dev/null | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: print(''); raise SystemExit
+print(','.join(sorted(c['file'] for c in d.get('self_leak_candidates', []))))")"
+
+case "$cand" in
+  *".claude-audit/history/2026/findings.sarif"*)
+    ok "self-leak detection sees .claude-audit/ paths (leading dot preserved)" ;;
+  *) bad "self-leak detection missed .claude-audit/ (lstrip ate the leading dot)" ;;
+esac
+case "$cand" in
+  *"docs/security-audit-output/findings.sarif"*)
+    ok "self-leak detection sees <output_dir> paths through a ./ prefix" ;;
+  *) bad "self-leak detection missed a ./-prefixed <output_dir> path" ;;
+esac
+case "$cand" in
+  *"src/app.py"*) bad "self-leak detection false-positived on user source" ;;
+  *) ok "user source is not a self-leak candidate" ;;
+esac
+
+# The scrubber rewrites in place. Pointing it at source files is destructive,
+# and during the v2.6.0 cleanup a remediation pass did exactly that to localhost
+# dev connection strings in a project's source copies.
+SRC="$WORK/srcguard"; mkdir -p "$SRC"
+printf '{"db":"postgres://u:devpassword123xyz@localhost/app"}\n' > "$SRC/config.json"
+python3 "$REDACT" "$SRC" --quiet >/dev/null 2>&1
+[ $? -eq 2 ] && ok "redact mode refuses paths outside .claude-audit/ and <output_dir>" \
+             || bad "redact mode rewrote a file outside the audit-owned directories"
+grep -q "devpassword123xyz" "$SRC/config.json" \
+  && ok "the refused source file was left byte-identical" \
+  || bad "the source file was modified despite the scope guard"
+python3 "$REDACT" "$SRC" --check --quiet >/dev/null 2>&1
+[ $? -eq 1 ] && ok "--check is read-only and still scans outside the guard" \
+             || bad "--check did not scan an out-of-scope path"
 
 # ---------------------------------------------------------------------------
 echo "-- layer 2: deliverable write gate --"

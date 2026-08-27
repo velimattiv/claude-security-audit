@@ -289,6 +289,10 @@ phases:
       - path_glob: .claude-audit/current/phase-04-scanners/security-review-*.md
       - path_glob: .claude-audit/current/phase-04-scanners/adversarial-*.md
       - path: .claude-audit/current/phase-04-redaction.json
+        # v2.6.1+ ONLY. tests/e2e/assertions.py:91 treats a missing `path` as a
+        # failure, so replaying a pre-2.6.1 artifact directory reports this (and
+        # deliverable-gate.json) as missing. That is correct: those runs had no
+        # redaction pass. Use --skip-manifest-check when replaying old dirs.
         # v2.6.1 §4.4b. Summary from lib/redact-scanner-output.py. Its ABSENCE
         # means the ingest strip did not run, and every artifact above may hold
         # credential material verbatim -- gitleaks SARIF carries the match in

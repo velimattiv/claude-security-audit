@@ -77,6 +77,17 @@ Each result keeps everything triage needs and gains
 strip cannot reach — `message.text`, invocation command lines, trufflehog
 `ExtraData`.
 
+**Scope is guarded.** In redact mode the tool refuses to rewrite anything
+outside `.claude-audit/` and the resolved `<output_dir>`, unless
+`--allow-any-path` is passed. `--check` is read-only and unguarded.
+
+This is not hypothetical. During the v2.6.0 cleanup a remediation pass aimed at
+audit outputs also rewrote *source* copies of a project, replacing localhost dev
+connection strings that trufflehog had reported as `Raw` values. They were not
+credentials, the edit was not wanted, and it had to be restored from git. An
+in-place scrubber pointed at the wrong directory is a destructive tool, and
+"I passed the right path last time" is not a control.
+
 **Ordering matters.** The strip runs before `§4.5` normalization and `§4.6`
 slimming. Redacting later would still leave raw values on disk in
 `phase-04-scanners/`, in every deep-dive sub-agent's context, and in

@@ -271,6 +271,25 @@ def redact_trufflehog_entry(entry, stats):
 _SELF_ARTIFACT_PREFIXES = (".claude-audit/", "docs/security-audit-")
 
 
+def _normalise_uri(uri):
+    """Repo-relative form of a SARIF artifactLocation.uri.
+
+    `lstrip("./")` is wrong here and was the first cut: str.lstrip takes a SET
+    of characters, so it ate the leading dot of `.claude-audit/...` and turned
+    it into `claude-audit/...`, which then matched no prefix. Every self-leak
+    inside the blackboard and its rotated history was invisible to §4.4c -- the
+    one place the rule most needed to fire.
+    """
+    norm = uri.replace("\\", "/")
+    for scheme in ("file://", "file:"):
+        if norm.startswith(scheme):
+            norm = norm[len(scheme):]
+            break
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return norm.lstrip("/")
+
+
 def _self_leak_candidates(doc, output_dir):
     """Result rows whose location is inside the audit's own output.
 
@@ -297,7 +316,7 @@ def _self_leak_candidates(doc, output_dir):
                     continue
                 if not isinstance(uri, str):
                     continue
-                norm = uri.replace("\\", "/").lstrip("./")
+                norm = _normalise_uri(uri)
                 if norm.startswith(tuple(prefixes)):
                     out.append({"file": norm,
                                 "rule": result.get("ruleId") or "",
@@ -396,6 +415,33 @@ def process_file(path, check_only, stats, output_dir=None, self_leaks=None):
     return changed
 
 
+# Directories this tool is allowed to REWRITE. Everything it touches is an
+# artifact the audit itself produced.
+_AUDIT_OWNED = (".claude-audit/", "docs/security-audit-")
+
+
+def _is_audit_owned(path, output_dir):
+    """True when `path` lives inside a directory this audit owns.
+
+    Deliberately NOT cwd-relative. An earlier cut compared
+    `os.path.relpath(path, os.getcwd())` against a prefix list, which meant the
+    same file was in or out of scope depending on where the tool was invoked
+    from -- so the guard would refuse a perfectly legitimate blackboard path any
+    time the caller was not sitting in the repo root.
+    """
+    absolute = os.path.abspath(path).replace("\\", "/")
+    parts = absolute.split("/")
+    if ".claude-audit" in parts:
+        return True
+    if any(part.startswith("security-audit-") for part in parts):
+        return True
+    if output_dir:
+        od = os.path.abspath(output_dir)
+        if absolute == od.replace("\\", "/") or absolute.startswith(od.replace("\\", "/") + "/"):
+            return True
+    return False
+
+
 def _atomic_write(path, content):
     """Write via a temp file in the same directory, then rename.
 
@@ -440,6 +486,10 @@ def main(argv=None):
                         help="report without modifying; exit 1 if material is present")
     parser.add_argument("--quiet", action="store_true",
                         help="suppress the JSON summary on stdout")
+    parser.add_argument("--allow-any-path", action="store_true",
+                        help="permit rewriting files outside .claude-audit/ and "
+                             "<output_dir>. Off by default; see the scope guard "
+                             "in main() for why.")
     parser.add_argument("--output-dir", metavar="DIR",
                         help="resolved <output_dir>; hits inside it are listed as "
                              "self_leak_candidates for §4.4c escalation")
@@ -449,6 +499,33 @@ def main(argv=None):
     if not files:
         sys.stderr.write("ERROR: no scanner output found in: %s\n" % " ".join(args.paths))
         return 2
+
+    # SCOPE GUARD. In read-only --check mode this tool touches nothing, so the
+    # guard does not apply. In redact mode it rewrites files in place, and the
+    # only files it has any business rewriting are artifacts the audit itself
+    # produced.
+    #
+    # This exists because of a real incident during the v2.6.0 cleanup: a
+    # remediation pass aimed at audit outputs also rewrote SOURCE copies of a
+    # project, replacing localhost dev connection strings that trufflehog had
+    # reported as `Raw` values. Those were not credentials, the edit was not
+    # wanted, and it had to be restored from git. An in-place scrubber pointed
+    # at the wrong directory is a destructive tool, and "I passed the right path
+    # last time" is not a control.
+    if not args.check and not args.allow_any_path:
+        stray = [f for f in files if not _is_audit_owned(f, args.output_dir)]
+        if stray:
+            sys.stderr.write(
+                "REFUSING to rewrite %d file(s) outside .claude-audit/ and "
+                "<output_dir>:\n%s\n"
+                "This tool redacts the audit's OWN artifacts. Pointing it at "
+                "source files rewrites them in place.\n"
+                "Use --check to scan read-only, --output-dir to widen the scope "
+                "to your resolved deliverable directory, or --allow-any-path if "
+                "you genuinely mean it.\n"
+                % (len(stray), "\n".join("  " + p for p in stray))
+            )
+            return 2
 
     stats = Counter()
     touched = []

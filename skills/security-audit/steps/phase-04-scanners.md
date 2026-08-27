@@ -259,6 +259,15 @@ path):
   `properties.skill_self_leak`. It exists so these rows never aggregate with
   findings about the user's own code, and so the triage call is greppable
   rather than implicit.
+- **State the matched length before claiming the credential leaked.** Every
+  redaction marker carries `len<N>`, and `self_leak_candidates[]` rows come from
+  a scanner match, not from a full-value comparison. A short match is often a
+  *prefix* that a document quotes deliberately (`gho_` plus seven characters in
+  a planning note is a reference, not a credential). Write "an 11-character
+  prefix of a GitHub OAuth token" when that is what the evidence supports, and
+  "the full 40-character token" only when the length says so. Getting this
+  backwards turns a tidy-up into a rotation emergency, and it happened on the
+  very incident that motivated v2.6.1.
 - The `suggested_fix` must be the two-step one, in this order:
   1. **Rotate the credential.** It is live until rotated, and everything below
      is irrelevant until it is done.
