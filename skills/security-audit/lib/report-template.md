@@ -267,6 +267,23 @@ mixed with claims that are.
 >      no `fix_confidence` is printed as `untested`, never silently as fact.)
 > - **Effort:** {{remediation_effort}}
 
+<!-- ⛔ NO CREDENTIAL VALUES IN ANY FIELD OF THIS BLOCK. This template renders
+     into `<output_dir>/security-audit-report.md`, which is a TRACKED file in
+     the audited repository — `lib/output-routing.md` keeps it tracked so that
+     `mode: delta` works on a fresh clone.
+
+     `{{description}}`, `{{attack_scenario}}`, `{{suggested_fix}}` and
+     `{{verification_probe}}` are free text written by an analyst, and they are
+     the ONE path into a deliverable that the Phase 4 structural strip cannot
+     cover. Cite `{{file}}:{{line}}` and the finding's
+     `properties.secret_fingerprint`; never the value, never a prefix, never a
+     hand-masked excerpt. Full rule: `steps/deepdive/cat-06-secret-sprawl.md`
+     §"Reporting rule: never write the value".
+
+     `lib/verify-deliverable.py` gates this file before it is copied. A value
+     that reaches it is scrubbed and raises a CRITICAL finding against the
+     SKILL (`phase-07-synthesis.md §7.10a`), not against the audited code. -->
+
 <!-- WHY the per-finding block separates the finding from the fix: the
      calibrated run produced six findings on ONE Postgres-TLS defect. The
      finding was right on all six; the fix was wrong on five. Five prescribed

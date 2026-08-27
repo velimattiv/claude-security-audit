@@ -108,6 +108,17 @@ jobs:
           # unreachability claim that suppresses escalation must cite a line.
           bash tests/test-evidence-discipline.sh
 
+      - name: Secret redaction + deliverable gate (v2.6.1)
+        run: |
+          # v2.6.0 and earlier copied gitleaks' verbatim `region.snippet.text`
+          # into findings.sarif and then into a TRACKED <output_dir>, so the
+          # audit committed live credentials the audited repo had correctly
+          # kept out of git. This suite pins both enforcers: the structural
+          # strip at Phase 4 ingest and the fail-closed write gate at Phases
+          # 7-8 -- plus the assertion that the step files actually invoke
+          # them, which is the control-with-no-enforcer check.
+          bash tests/test-secret-redaction.sh
+
       - name: Compile-check cat-*.md regex patterns (polyglot regression guard)
         run: |
           python3 scripts/validate-patterns.py

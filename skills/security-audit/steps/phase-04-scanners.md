@@ -107,9 +107,9 @@ Run these six in parallel (max 4 concurrent — scanners are heavy I/O):
 |---|---|---|
 | **semgrep** | `semgrep scan --config p/security-audit --config p/owasp-top-ten --config p/jwt --sarif --output phase-04-scanners/semgrep.sarif --timeout 600 --metrics=off` | Uses named community rulesets (no telemetry). `--config auto` is the alternate path — it gives broader coverage but requires `--metrics=on`. The skill opts out of metrics by default (per Q4 no-telemetry decision). **Offline / air-gapped:** if `AUDIT_SAST_RULES` is set, replace the `--config p/...` packs with `--config "$AUDIT_SAST_RULES"` (a locally-staged rules dir) — fully offline, no registry fetch (see `lib/scanner-bundle.md`). |
 | **osv-scanner** | `osv-scanner scan --recursive --format sarif --output phase-04-scanners/osv.sarif .` | Ecosystem auto-detected from manifests. Skipped if no lockfiles present — warn, do not fail. |
-| **gitleaks (working tree)** | `gitleaks detect --no-git --report-format sarif --report-path phase-04-scanners/gitleaks.sarif` | Fast — scans the checked-out tree only. |
+| **gitleaks (working tree)** | `gitleaks detect --no-git --report-format sarif --report-path phase-04-scanners/gitleaks.sarif` | Fast — scans the checked-out tree only. `--no-git` deliberately ignores `.gitignore`, so this output carries secrets the repo correctly never committed. ⚠ **Its SARIF holds the matched secret verbatim in `region.snippet.text` — §4.4b is mandatory before anything reads it.** |
 | **gitleaks (git history)** | `gitleaks git . --report-format sarif --report-path phase-04-scanners/gitleaks-history.sarif` | Slow; separate sub-agent with 20 min timeout. Non-blocking for Phase 7 synthesis. |
-| **trufflehog** | `trufflehog git file://. --json --results=verified > phase-04-scanners/trufflehog.json` | Emits JSONL, not SARIF; convert in §4.5. (`--only-verified` is soft-deprecated → `--results=verified`.) |
+| **trufflehog** | `trufflehog git file://. --json --results=verified > phase-04-scanners/trufflehog.json` | Emits JSONL, not SARIF; convert in §4.5. (`--only-verified` is soft-deprecated → `--results=verified`.) ⚠ **`verified` means the scanner proved the credential is live. `Raw`/`RawV2`/`Redacted` hold it — §4.4b is mandatory.** |
 | **trivy** | `trivy fs --scanners vuln,secret,misconfig,license --format sarif --output phase-04-scanners/trivy.sarif .` | Also run `trivy config -f sarif -o trivy-iac.sarif .` if IaC files detected. |
 | **hadolint** | `for f in $(find . -name Dockerfile -not -path ./node_modules/*); do hadolint --format sarif "$f"; done > phase-04-scanners/hadolint.sarif` | Conditional: only if `Dockerfile*` present. |
 
@@ -156,6 +156,107 @@ Execute via a sub-agent that reads
 `skills/security-audit/vendored/adversarial-review/SKILL.md` and applies it
 with scope hint. Save to
 `phase-04-scanners/adversarial-<partition-id>.md`.
+
+## 4.4b — Redact scanner output at ingest (MANDATORY, blocking)
+
+⛔ **Run this before §4.5, before §4.6, and before any sub-agent, phase, or
+`cp` reads `phase-04-scanners/`. It is not an optional hardening step; skipping
+it reintroduces CVE-class behaviour in the skill itself.**
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/redact-scanner-output.py" \
+    .claude-audit/current/phase-04-scanners/
+```
+
+Then confirm it held — the check must exit 0:
+
+```bash
+SKILL_DIR=$(cat .claude-audit/.skill-dir)
+[ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+python3 "$SKILL_DIR/lib/redact-scanner-output.py" --check --quiet \
+    .claude-audit/current/phase-04-scanners/ || {
+      echo "FATAL: scanner output still carries credential material" >&2; exit 1; }
+```
+
+Write `phase-04-redaction.json` (the tool's summary) into the blackboard
+alongside the other phase artifacts.
+
+### Why this exists
+
+Through v2.6.0 the skill wrote live credentials into the repository it was
+auditing. Four links, each working as specified:
+
+1. `gitleaks detect --no-git` ignores `.gitignore` — correctly, because that is
+   where uncommitted secrets live — and its SARIF carries the match verbatim in
+   `region.snippet.text`.
+2. `phase-07-synthesis.md §7.8.1` assembles `findings.sarif` as one run per
+   scanner plus one synthetic run, and instructs that per-scanner runs be
+   "copied through *verbatim*".
+3. `§7.10` copies that document to `<output_dir>`.
+4. `lib/output-routing.md` defaults `<output_dir>` to
+   `docs/security-audit-output/` and calls it "tracked".
+
+A token that the audited project had correctly kept **out** of git was read
+from a gitignored path and committed — by the audit. Meanwhile `workflow.md §1`
+gitignored `.claude-audit/` and never `<output_dir>`: the protection sat on the
+working directory, not the one that gets committed.
+
+### What the redactor does, and what it costs
+
+It removes SARIF `snippet` / `contents` / `insertedContent` from **every**
+scanner run unconditionally — not just the secret scanners, and not by matching
+credential patterns. Nothing downstream reads those fields: `lib/sarif-postprocess.md`
+discards them when slimming, Phases 5-7 read only the slim form, and
+`tests/e2e/assertions.py:_sarif_result_to_finding` keys on `ruleId`,
+`properties.cwe`, `properties.cwes` and `tags`. Removing a field no consumer
+reads cannot lose coverage, and needs no detector list to stay complete.
+
+Each result keeps `ruleId`, `level`, `message`, file and line, and gains
+`properties.secret_fingerprint` — stable across runs for the same secret, so
+Phase 7 still dedupes and Phase 8 still carries the finding forward in the
+baseline. What triage loses is the ability to eyeball the matched string. That
+is the trade, and it is the right one: no triage step in this skill requires
+reading a live credential.
+
+A pattern pass (`lib/secret-detectors.py`) then covers the free text the
+structural strip cannot reach — scanner `message.text`, invocation command
+lines, trufflehog `ExtraData`.
+
+## 4.4c — Hits inside a previous audit's own artifacts are NOT noise
+
+Scanners run over the whole working tree, which includes `<output_dir>/` and
+`.claude-audit/history/` from earlier runs. Pre-v2.6.1 artifacts can contain
+real credentials.
+
+⛔ **Do not add the audit's own output to an ignore list and move on.** That
+triage is how this defect survived two separate runs that detected it: the hits
+were dismissed as prior-artifact noise, and the reasoning was self-confirming —
+of course the audit's own output has secret hits, it is a security report.
+
+For any secret-scanner hit whose path is under `<output_dir>/`,
+`.claude-audit/`, or a legacy `docs/security-audit-*` path:
+
+- Emit it as **CRITICAL** / CWE-538 / `category: secret_sprawl`, titled to name
+  the cause — *"prior audit run wrote credential material into the repository"*.
+- Set the finding's `skill_self_leak` field to `"true"` (see
+  `lib/finding-schema.json`). Phase 7 carries it to the SARIF result as
+  `properties.skill_self_leak`. It exists so these rows never aggregate with
+  findings about the user's own code, and so the triage call is greppable
+  rather than implicit.
+- The `suggested_fix` must be the two-step one, in this order:
+  1. **Rotate the credential.** It is live until rotated, and everything below
+     is irrelevant until it is done.
+  2. **Then purge it from history** (`git filter-repo` / BFG), force-push, and
+     tell every collaborator to re-clone.
+- The fix text must state explicitly that **untracking is not purging**. A
+  `git rm --cached` plus a `.gitignore` line removes the file from `HEAD` and
+  leaves the blob and the live credential reachable in history. That exact
+  half-fix has been applied to this defect before and read as resolved.
+
+If the *current* run's own gate fires instead, that is a different finding —
+see `phase-07-synthesis.md §7.10a`.
 
 ## 4.5 — Format normalization
 

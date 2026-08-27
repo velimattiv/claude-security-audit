@@ -221,7 +221,9 @@ Before any phase runs:
    degraded mode**. Never hard-fail preflight.
 4. **Gitignore hygiene.** If `.claude-audit/` is not in the user's
    `.gitignore`, append it and commit a message to the user reporting the
-   addition.
+   addition. This covers the blackboard only — `<output_dir>` is not resolved
+   yet at this point and gets its own hygiene step in §3.5, which is where the
+   v2.6.0 leak actually landed.
 
 ## 2. Phase Plan
 
@@ -282,6 +284,37 @@ Then persist it: merge `{"output_dir": "<resolved>"}` into
 value. Deliverables are written to `<output_dir>/` as the final step of
 Phase 7 / Phase 8, AFTER the canonical `.claude-audit/current/` copies exist
 (blackboard-first).
+
+### 3.5b Gitignore hygiene for `<output_dir>` (v2.6.1)
+
+Once `output_dir` is resolved, apply the machine-artifact ignore recipe from
+[lib/output-routing.md](lib/output-routing.md) if it is not already present:
+
+```bash
+OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json)
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git check-ignore -q "$OUT/findings.sarif" || {
+    printf '\n# claude-security-audit: machine artifacts (v2.6.1)\n%s/*.sarif\n%s/*.cyclonedx.json\n' "$OUT" "$OUT" >> .gitignore
+    echo "Added $OUT/*.sarif and $OUT/*.cyclonedx.json to .gitignore"
+  }
+fi
+```
+
+Report the addition to the user; do not do it silently.
+
+**Why this step exists.** §1 step 4 has gitignored `.claude-audit/` since v2.1,
+and `<output_dir>` — the directory whose entire purpose is to be committed —
+had no equivalent. Through v2.6.0 the consolidated `findings.sarif` carried
+gitleaks' verbatim `region.snippet.text`, so the audit committed live
+credentials that the audited repo had correctly kept untracked. `§4.4b` now
+strips them at ingest and `lib/verify-deliverable.py` gates the write, so this
+step is defence in depth rather than the fix. It is still worth doing: the
+machine artifacts are bulky, churn every run, and nobody reviews them in a PR.
+
+The human report and the pruned baseline stay **tracked** deliberately — a
+committed baseline is what makes `mode: delta` work on a fresh clone with no
+arguments (`lib/output-routing.md`), and both are gated before they are
+written.
 
 ## 4. Mode-Specific Orchestration
 

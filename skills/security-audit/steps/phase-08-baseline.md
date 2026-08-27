@@ -163,8 +163,28 @@ multi-MB; the pruned file is lightweight enough to diff in PRs.
    `docs/security-audit-output/`, see [../lib/output-routing.md](../lib/output-routing.md))
    and ensure it exists:
    `OUT=$(jq -r '.output_dir // "docs/security-audit-output"' .claude-audit/config.json 2>/dev/null || echo docs/security-audit-output); mkdir -p "$OUT"`.
-7. Write the pruned baseline to `$OUT/security-audit-baseline.json`.
-8. Write `.claude-audit/current/phase-08.done`.
+7. **Gate the baseline before it leaves the blackboard.** The pruned baseline
+   is a tracked deliverable and carries `findings_carryover[]` — finding titles
+   and, for a secret finding, whatever the analyst wrote into them:
+
+   ```bash
+   SKILL_DIR=$(cat .claude-audit/.skill-dir)
+   [ -n "$SKILL_DIR" ] || { echo "ERROR: SKILL_DIR not resolved"; exit 1; }
+   python3 "$SKILL_DIR/lib/verify-deliverable.py" --redact \
+       --json-report .claude-audit/current/baseline-gate.json \
+       .claude-audit/baseline.json
+   [ $? -eq 2 ] && { echo "FATAL: baseline gate could not run" >&2; exit 1; }
+   ```
+
+   Gate the **full** baseline, then re-derive the pruned form from it, so the
+   gitignored copy in `.claude-audit/` is cleaned too. A gate applied only to
+   the pruned file leaves the value in `.claude-audit/baseline.json`, which the
+   next run reads and carries forward — the leak would survive its own fix.
+
+   If it exits 3, emit the same CRITICAL self-finding as
+   `phase-07-synthesis.md §7.10a` and say so in the run summary.
+8. Write the pruned baseline to `$OUT/security-audit-baseline.json`.
+9. Write `.claude-audit/current/phase-08.done`.
 
 ## 8.5 — Rotation of previous runs
 
