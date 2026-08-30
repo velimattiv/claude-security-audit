@@ -108,9 +108,9 @@ Bracketed `[NN]` tags cite the source report in `research/`.
 - PCI DSS 4.0.1 opt-in tagging mode (6.4.3 / 11.6.1 client-side & e-skimming);
   EU CRA / SBOM-completeness note leveraging existing CycloneDX. [05]
 - RAG / memory-poisoning + LLM-output→code-interpreter-sink detections (cat-11). [03]
-- Dogfood: enumerate this repo's own Claude Code skill / agent / MCP surfaces
-  (`.mcp.json`, `.claude/settings*.json` scopes, sub-agent prompt
-  interpolation) as cat-11 self-audit targets. [03]
+- Dogfood: enumerate this repo's own Claude Code and Copilot CLI skill / agent /
+  MCP surfaces (`.mcp.json`, `.claude/settings*.json`, Copilot skill locations,
+  sub-agent prompt interpolation) as cat-11 self-audit targets. [03]
 - Polyglot precision micro-benchmark from **CVEfixes** (CC-BY-4.0, multi-lang);
   optional **OWASP Benchmark** (Java v1.2 + Python v0.1) calibration run; mine
   **CyberSecEval** Insecure-Code-Detector rule corpus (~189 patterns / 50 CWEs
@@ -179,14 +179,14 @@ The following were on the v2.0.0 roadmap and have landed:
 **Problem.** Local-only E2E requires a developer on their host. Can't
 block a PR's CI on an E2E that only runs locally.
 
-**Blockers.** (1) Claude Max auth is OAuth-based; fresh CI runners have
-no claude.ai session. (2) Pay-per-token API key for CI means a dedicated
-key, separately billed. (3) Headless OAuth-for-CI via Claude Code is
-not documented / verified.
+**Blockers.** (1) Developer Claude/Copilot login state is host-local; fresh CI
+runners have no session. (2) Claude API keys and Copilot GitHub tokens require
+separate scope, billing, and policy decisions. (3) Neither hosted-runner auth
+path has been validated with the full audit.
 
-**Fix.** Either: (a) provision a dedicated API key + wire
-`ANTHROPIC_API_KEY_E2E` as a GHA secret, or (b) verify Claude Code
-supports OAuth for headless use. Decide + implement.
+**Fix.** Choose one governed CI identity, provision its secret, run the full
+E2E through `--harness claude|copilot`, and document its least-privilege and
+budget envelope before making the workflow normative.
 
 ### Second E2E target — polyglot coverage
 
@@ -409,7 +409,7 @@ sub-agent fan-out gated on PII column density.
 ### Interactive "fix this finding" workflow
 
 **Problem.** The report says "ask me to fix finding <id>", but the
-flow from report → Claude Code chat → code diff isn't documented.
+flow from report → agent-harness chat → code diff isn't documented.
 
 **Fix.** Add a "Fix flow" section to README and wire an explicit
 `--fix <id>` sub-command.

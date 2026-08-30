@@ -20,6 +20,7 @@ on Twitter / Mastodon / Bluesky before a fix ships.
 
 In scope:
 - The skill's orchestrator (`workflow.md`, `steps/phase-*.md`).
+- The dual-harness skill installer (`scripts/install-skill.sh`).
 - The scanner installer (`scripts/install-scanners.sh`).
 - The sub-agent prompt templates (attack: malicious targets prompting
   the sub-agent to do something outside its allotted tool use).
@@ -31,6 +32,7 @@ Out of scope (report to the respective vendor):
 - Vulnerabilities in the scanner bundle itself (semgrep, osv-scanner,
   gitleaks, trufflehog, trivy, hadolint) — forward to those projects.
 - Vulnerabilities in Claude Code's runtime — report to Anthropic.
+- Vulnerabilities in GitHub Copilot CLI's runtime — report to GitHub.
 - Vulnerabilities discovered *by* the skill in someone else's code —
   those are audit findings, not skill bugs.
 

@@ -4,15 +4,10 @@
 # Runs the full skill orchestration against a pinned Juice Shop tag,
 # then executes the assertion suite in tests/e2e/assertions.py.
 #
-# This script deliberately uses the USER'S HOST Claude Code (and thus
-# the user's existing auth — whether API key or claude.ai OAuth /
-# Claude Max subscription). It does NOT wrap Claude Code in a container
-# because:
-#   (1) A fresh container has no claude.ai OAuth session, breaking
-#       Claude Max users.
-#   (2) Headless OAuth for CI is not currently documented / verified.
-#   (3) A dedicated pay-per-token API key for CI is a separate
-#       operational decision, not a test-script concern.
+# This script deliberately uses the selected USER'S HOST agent harness and its
+# existing auth. It does not put the harness itself in a container because
+# headless auth and billing are operator concerns. Scanner execution can still
+# use Path B.
 #
 # Scanners MAY run in the container-isolated path
 # (scripts/run-audit-in-container.sh) if the user prefers; by default
@@ -21,6 +16,8 @@
 #
 # Usage:
 #   scripts/run-e2e-test.sh              # full E2E (Path A — host scanners)
+#   scripts/run-e2e-test.sh --harness claude|copilot
+#                                        # select agent harness (default: claude)
 #   scripts/run-e2e-test.sh --target X   # select the E2E target / fixture:
 #                                        #   juice-shop (default) → tests/e2e/expected-findings.json
 #                                        #   dvwa                  → tests/e2e/dvwa-fixture.json
@@ -32,15 +29,14 @@
 #                                        # the isolated container, host PATH
 #                                        # binaries (if any) are bypassed via
 #                                        # AUDIT_FORCE_PATH_B=1
-#   scripts/run-e2e-test.sh --dry-run    # skip `claude` invocation; validate existing artifacts
+#   scripts/run-e2e-test.sh --dry-run    # skip harness invocation; validate existing artifacts
 #   scripts/run-e2e-test.sh --keep       # do NOT wipe the target dir (preserve baseline for delta-mode testing)
 #   scripts/run-e2e-test.sh --min-recall N --min-precision N --semantic-floor N
 #                                        # opt-in scorecard floors (precision/recall/
 #                                        # semantic-match; default 0.0 = report-only)
 #   scripts/run-e2e-test.sh --help
 #
-# Cost: expect $5-$20 per run on an API key, or no marginal cost on
-# Claude Max (subject to your plan's usage limits).
+# Cost depends on the selected harness, account, and model.
 
 set -eu
 
@@ -58,6 +54,7 @@ fi
 DRY_RUN=0
 KEEP=0
 PATH_B=0
+HARNESS="claude"
 TARGET="${TARGET_NAME:-juice-shop}"   # default from config.env
 MIN_RECALL=""
 MIN_PRECISION=""
@@ -67,6 +64,8 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --keep)    KEEP=1; shift ;;
     --path-b)  PATH_B=1; shift ;;
+    --harness) HARNESS="${2:?--harness needs claude or copilot}"; shift 2 ;;
+    --harness=*) HARNESS="${1#*=}"; shift ;;
     --target)  TARGET="${2:?--target needs a value (juice-shop|dvwa|crapi)}"; shift 2 ;;
     --target=*) TARGET="${1#*=}"; shift ;;
     --min-recall)    MIN_RECALL="${2:?--min-recall needs a value}"; shift 2 ;;
@@ -80,6 +79,11 @@ while [ $# -gt 0 ]; do
     *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
   esac
 done
+
+case "$HARNESS" in
+  claude|copilot) ;;
+  *) echo "ERROR: --harness must be claude or copilot." >&2; exit 2 ;;
+esac
 
 # --- Target → fixture / repo / ref resolution --------------------------------
 # juice-shop keeps reading config.env (back-compat); dvwa + crapi read their
@@ -127,6 +131,7 @@ fi
 echo "=== /security-audit E2E ==="
 echo "Target:         $TARGET_NAME @ $TARGET_TAG"
 echo "Fixture:        $FIXTURE"
+echo "Harness:        $HARNESS"
 echo "Skill version:  $(cat "$REPO_ROOT/skills/security-audit/VERSION" | tr -d '[:space:]')"
 echo "Target dir:     $TARGET_DIR"
 echo "Artifacts:      $TARGET_DIR/.claude-audit (inside target clone)"
@@ -134,14 +139,12 @@ echo
 
 # --- 1. Version gates --------------------------------------------------------
 echo "[1/5] Version gates + flag preflight..."
-if ! command -v claude >/dev/null 2>&1; then
-  echo "ERROR: 'claude' CLI not found on PATH. Install Claude Code first." >&2
-  echo "See: https://code.claude.com/docs — the installer choice affects" >&2
-  echo "auth (OAuth vs API key), which is outside this script's scope." >&2
+if ! command -v "$HARNESS" >/dev/null 2>&1; then
+  echo "ERROR: '$HARNESS' CLI not found on PATH." >&2
   exit 2
 fi
-CLAUDE_VER="$(claude --version 2>/dev/null | head -1 || echo 'unknown')"
-echo "  claude --version: $CLAUDE_VER"
+HARNESS_VER="$("$HARNESS" --version 2>/dev/null | head -1 || echo 'unknown')"
+echo "  $HARNESS --version: $HARNESS_VER"
 
 # Hard fail if the pinned skill version differs from the fixture's expected
 # calibration. Fixtures depend on CWE tags + file paths that come from the
@@ -155,20 +158,28 @@ if [ "$SKILL_VER" != "$SKILL_VERSION_EXPECTED" ]; then
   exit 2
 fi
 
-# Preflight: verify `claude` accepts the flags we'll use. A `claude --help`
-# output that lacks `-p` or `--dangerously-skip-permissions` means the
-# installed Claude Code is incompatible — fail early with actionable message.
-HELP_OUT="$(claude --help 2>&1 || true)"
-if ! printf "%s" "$HELP_OUT" | grep -qE -- '(-p|--print)'; then
-  echo "ERROR: 'claude --help' does not advertise -p/--print flag." >&2
-  echo "       Script needs Claude Code's non-interactive mode. Your installed" >&2
-  echo "       version may be too old or too new. Documented minimum: $CLAUDE_CODE_VERSION_MIN." >&2
-  exit 2
-fi
-if ! printf "%s" "$HELP_OUT" | grep -q -- '--dangerously-skip-permissions'; then
-  echo "WARN: --dangerously-skip-permissions not advertised; may be gated behind an env var." >&2
-  echo "      If the audit stalls waiting for a tool-permission prompt, export" >&2
-  echo "      CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS=1 and re-run." >&2
+# Fail before cloning or replacing a skill when the installed CLI cannot run
+# the headless command this script needs.
+HELP_OUT="$("$HARNESS" --help 2>&1 || true)"
+if [ "$HARNESS" = "claude" ]; then
+  if ! printf "%s" "$HELP_OUT" | grep -qE -- '(-p|--print)'; then
+    echo "ERROR: 'claude --help' does not advertise -p/--print." >&2
+    echo "Documented minimum: $CLAUDE_CODE_VERSION_MIN." >&2
+    exit 2
+  fi
+  if ! printf "%s" "$HELP_OUT" | grep -q -- '--dangerously-skip-permissions'; then
+    echo "ERROR: 'claude --help' does not advertise --dangerously-skip-permissions." >&2
+    exit 2
+  fi
+else
+  for required_flag in \
+    '--prompt' '--autopilot' '--max-autopilot-continues' '--allow-all' \
+    '--no-ask-user' '--output-format' '--stream'; do
+    if ! printf "%s" "$HELP_OUT" | grep -q -- "$required_flag"; then
+      echo "ERROR: 'copilot --help' does not advertise $required_flag." >&2
+      exit 2
+    fi
+  done
 fi
 
 # --- 2. Clone target at pinned tag -------------------------------------------
@@ -197,47 +208,64 @@ fi
 CURRENT_TAG="$(git -C "$TARGET_DIR" describe --tags --always 2>/dev/null || echo unknown)"
 echo "  checked out: $CURRENT_TAG"
 
-# --- 3. Ensure skill is installed for Claude Code ---------------------------
+# --- 3. Ensure skill is installed for the selected harness -------------------
 #
-# PRECEDENCE NOTE (discovered during v2.0.1 E2E self-dogfood):
-#   Claude Code's skill resolution prefers ~/.claude/skills/ over the
-#   project-local .claude/skills/. If the user has an older security-audit
-#   at user-level, a project-local install does NOT override it.
-#   To guarantee we test the skill under review, we install at user-level
-#   (backing up any pre-existing install) and restore after the run via
-#   a trap handler.
-echo
-echo "[3/5] Installing skill at user-level (~/.claude/skills/security-audit/)..."
-echo "  Rationale: Claude Code prefers ~/.claude/skills/ over project-local."
-USER_SKILLS="$HOME/.claude/skills"
+# Install at user level so the run cannot resolve a stale personal copy ahead
+# of the project copy. AUDIT_SKILL_DIR below also pins workflow resource
+# resolution to this exact installation.
+if [ "$HARNESS" = "claude" ]; then
+  USER_SKILLS="$HOME/.claude/skills"
+  PROJECT_SKILLS="$TARGET_DIR/.claude/skills"
+else
+  USER_SKILLS="${COPILOT_HOME:-$HOME/.copilot}/skills"
+  PROJECT_SKILLS="$TARGET_DIR/.github/skills"
+fi
 USER_SKILL_DIR="$USER_SKILLS/security-audit"
+PROJECT_SKILL_DIR="$PROJECT_SKILLS/security-audit"
 BACKUP_DIR=""
+HAD_USER_SKILL=0
+
+cleanup_user_skill() {
+  if [ -e "$USER_SKILL_DIR" ] || [ -L "$USER_SKILL_DIR" ]; then
+    case "$USER_SKILL_DIR" in
+      "$USER_SKILLS"/security-audit) rm -rf -- "$USER_SKILL_DIR" ;;
+      *) echo "WARN: refusing to remove unexpected user skill path: $USER_SKILL_DIR" >&2; return ;;
+    esac
+  fi
+  if [ "$HAD_USER_SKILL" -eq 1 ] &&
+     { [ -e "$BACKUP_DIR" ] || [ -L "$BACKUP_DIR" ]; }; then
+    mv "$BACKUP_DIR" "$USER_SKILL_DIR"
+    echo "  [cleanup] restored original $HARNESS user skill" >&2
+  fi
+}
+trap cleanup_user_skill EXIT
+
+echo
+echo "[3/5] Installing skill for $HARNESS at $USER_SKILL_DIR..."
 mkdir -p "$USER_SKILLS"
-if [ -d "$USER_SKILL_DIR" ]; then
-  BACKUP_DIR="$USER_SKILLS/.e2e-backup-$(date -u +%Y%m%dT%H%M%SZ)-security-audit"
+if [ -e "$USER_SKILL_DIR" ] || [ -L "$USER_SKILL_DIR" ]; then
+  HAD_USER_SKILL=1
+  BACKUP_DIR="$USER_SKILLS/.e2e-backup-$(date -u +%Y%m%dT%H%M%SZ)-$$-security-audit"
   mv "$USER_SKILL_DIR" "$BACKUP_DIR"
   echo "  backed up pre-existing user-level skill → $BACKUP_DIR"
 fi
 cp -R "$REPO_ROOT/skills/security-audit" "$USER_SKILL_DIR"
 echo "  installed: $USER_SKILL_DIR ($(cat "$USER_SKILL_DIR/VERSION"))"
 
-# Belt-and-braces: also install project-local in case Claude Code's
-# resolution order changes in a future version.
-mkdir -p "$TARGET_DIR/.claude/skills"
-rm -rf "$TARGET_DIR/.claude/skills/security-audit"
-cp -R "$REPO_ROOT/skills/security-audit" "$TARGET_DIR/.claude/skills/"
-echo "  also installed (project-local): $TARGET_DIR/.claude/skills/security-audit"
-
-# Restore on exit so an interrupted run doesn't leave the user's pre-
-# existing skill displaced.
-# shellcheck disable=SC2064
-trap "
-if [ -n '$BACKUP_DIR' ] && [ -d '$BACKUP_DIR' ]; then
-  rm -rf '$USER_SKILL_DIR'
-  mv '$BACKUP_DIR' '$USER_SKILL_DIR'
-  echo '  [cleanup] restored original user-level skill' >&2
+mkdir -p "$PROJECT_SKILLS"
+if [ -e "$PROJECT_SKILL_DIR" ] || [ -L "$PROJECT_SKILL_DIR" ]; then
+  case "$PROJECT_SKILL_DIR" in
+    "$TARGET_DIR"/.claude/skills/security-audit|"$TARGET_DIR"/.github/skills/security-audit)
+      rm -rf -- "$PROJECT_SKILL_DIR"
+      ;;
+    *) echo "ERROR: refusing to replace unexpected project skill path: $PROJECT_SKILL_DIR" >&2; exit 2 ;;
+  esac
 fi
-" EXIT
+cp -R "$REPO_ROOT/skills/security-audit" "$PROJECT_SKILL_DIR"
+echo "  also installed (project-local): $PROJECT_SKILL_DIR"
+
+export AUDIT_SKILL_DIR="$USER_SKILL_DIR"
+export AUDIT_NONINTERACTIVE=1
 
 # --- 3.5. Path B prep (optional) ---------------------------------------------
 if [ "$PATH_B" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
@@ -262,10 +290,9 @@ fi
 # --- 4. Run the skill --------------------------------------------------------
 echo
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "[4/5] --dry-run: skipping claude invocation. Using existing artifacts if present."
+  echo "[4/5] --dry-run: skipping $HARNESS invocation. Using existing artifacts if present."
 else
   echo "[4/5] Running /security-audit (hard wall-time cap: ${E2E_TIMEOUT_MIN} min via timeout(1))..."
-  echo "  Command: claude -p '$AUDIT_INVOCATION' --dangerously-skip-permissions"
   echo "  Working dir: $TARGET_DIR"
   if [ "$PATH_B" -eq 1 ]; then
     echo "  Mode: Path B (scanners-in-container via run-audit-in-container.sh)"
@@ -282,36 +309,51 @@ else
   # the mandate here. Do NOT reintroduce --append-system-prompt without
   # first trying to tighten the in-skill contract.
 
-  # Stream JSON tool-call events to a side log so we can observe progress
-  # without waiting for `claude -p` to finish. Default `claude -p` only
-  # prints the final assistant text — ineffective for diagnosing a stuck
-  # run. Stream-json emits one JSON object per event (assistant text,
-  # tool use, tool result, etc.) which we tee for live monitoring.
-  STREAM_LOG="$TARGET_DIR/.claude-audit/.claude-events.jsonl"
+  # Both harnesses emit JSONL events for live monitoring. Copilot's command
+  # shape includes: --autopilot --max-autopilot-continues 100 --allow-all
+  # --no-ask-user --output-format json --stream on.
+  STREAM_LOG="$TARGET_DIR/.claude-audit/.${HARNESS}-events.jsonl"
   mkdir -p "$TARGET_DIR/.claude-audit"
   : > "$STREAM_LOG"  # truncate at start of each run
   echo "  Stream events: $STREAM_LOG (tail -f to monitor)"
 
+  if [ "$HARNESS" = "claude" ]; then
+    HARNESS_CMD=(
+      claude -p "$AUDIT_INVOCATION"
+      --dangerously-skip-permissions
+      --output-format stream-json
+      --verbose
+    )
+  else
+    HARNESS_CMD=(
+      copilot -p "Use $AUDIT_INVOCATION to audit this repository."
+      --autopilot
+      --max-autopilot-continues 100
+      --allow-all
+      --no-ask-user
+      --output-format json
+      --stream on
+    )
+  fi
+  printf '  Command:'
+  printf ' %q' "${HARNESS_CMD[@]}"
+  printf '\n'
+
   TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
   if [ -z "$TIMEOUT_BIN" ]; then
     echo "WARN: no timeout/gtimeout on PATH — wall-time cap not enforced. Install coreutils." >&2
-    ( cd "$TARGET_DIR" && claude -p "$AUDIT_INVOCATION" \
-        --dangerously-skip-permissions \
-        --output-format stream-json --verbose \
-        | tee "$STREAM_LOG" >/dev/null ) \
-      || echo "WARN: claude -p exited non-zero. Continuing to assertions." >&2
+    ( cd "$TARGET_DIR" && "${HARNESS_CMD[@]}" | tee "$STREAM_LOG" >/dev/null ) \
+      || echo "WARN: $HARNESS exited non-zero. Continuing to assertions." >&2
   else
     ( cd "$TARGET_DIR" && "$TIMEOUT_BIN" -k 30s "${E2E_TIMEOUT_MIN}m" \
-        claude -p "$AUDIT_INVOCATION" \
-        --dangerously-skip-permissions \
-        --output-format stream-json --verbose \
+        "${HARNESS_CMD[@]}" \
         | tee "$STREAM_LOG" >/dev/null ) \
       || {
         rc=$?
         if [ "$rc" -eq 124 ]; then
-          echo "WARN: claude -p killed by timeout at ${E2E_TIMEOUT_MIN}m. Continuing to assertions." >&2
+          echo "WARN: $HARNESS killed by timeout at ${E2E_TIMEOUT_MIN}m. Continuing to assertions." >&2
         else
-          echo "WARN: claude -p exited rc=$rc. Continuing to assertions." >&2
+          echo "WARN: $HARNESS exited rc=$rc. Continuing to assertions." >&2
         fi
       }
   fi

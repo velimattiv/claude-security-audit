@@ -51,14 +51,39 @@ write them.
 set -e
 mkdir -p .claude-audit/current/phase-04-scanners .claude-audit/cache .claude-audit/history
 SKILL_DIR=""
-for p in "$HOME/.claude/skills/security-audit" "./.claude/skills/security-audit" "./skills/security-audit"; do
+SKILL_VERSION=""
+COPILOT_ROOT="${COPILOT_HOME:-$HOME/.copilot}"
+if [ -n "${AUDIT_SKILL_DIR:-}" ]; then
+  set -- "$AUDIT_SKILL_DIR"
+else
+  set -- \
+    "$HOME/.claude/skills/security-audit" \
+    "$COPILOT_ROOT/skills/security-audit" \
+    "$HOME/.agents/skills/security-audit" \
+    "./.claude/skills/security-audit" \
+    "./.github/skills/security-audit" \
+    "./.agents/skills/security-audit" \
+    "./skills/security-audit"
+fi
+for p in "$@"; do
   if [ -d "$p" ]; then
-    SKILL_DIR=$(cd "$p" && pwd -P)
-    break
+    if [ ! -f "$p/VERSION" ]; then
+      echo "ERROR: incomplete security-audit installation at $p (VERSION missing)" >&2
+      exit 1
+    fi
+    candidate_version=$(tr -d '[:space:]' < "$p/VERSION")
+    if [ -z "$SKILL_DIR" ]; then
+      SKILL_DIR=$(cd "$p" && pwd -P)
+      SKILL_VERSION="$candidate_version"
+    elif [ "$candidate_version" != "$SKILL_VERSION" ]; then
+      echo "ERROR: security-audit is installed at different versions: $SKILL_DIR=$SKILL_VERSION, $p=$candidate_version" >&2
+      echo "Remove the stale copy or set AUDIT_SKILL_DIR to the installation this run should use." >&2
+      exit 1
+    fi
   fi
 done
 if [ -z "$SKILL_DIR" ]; then
-  echo "ERROR: security-audit skill not found at any of: \$HOME/.claude/skills/security-audit, ./.claude/skills/security-audit, ./skills/security-audit" >&2
+  echo "ERROR: security-audit skill not found in a Claude, Copilot, Agent Skills, or in-repo location" >&2
   exit 1
 fi
 printf '%s\n' "$SKILL_DIR" > .claude-audit/.skill-dir
@@ -73,20 +98,24 @@ cat "$SKILL_DIR/VERSION"
 fragile `&& \` sequence from earlier rounds. Each step's failure
 produces a specific error message instead of a silent non-zero exit.
 
-The probe order is: canonical user-level install
-(`$HOME/.claude/skills/security-audit`) → project-local under
-`.claude/skills/` → in-repo dev path. The canonical path is what
-Claude Code's skill resolution uses; the other two are dev/edge-case
-fallbacks. We use `cd && pwd -P` instead of `realpath` because it is
-portable across distros without coreutils.
+The probe accepts the canonical personal and project locations for both
+harnesses: `$HOME/.claude/skills/security-audit`,
+`${COPILOT_HOME:-$HOME/.copilot}/skills/security-audit`,
+`$HOME/.agents/skills/security-audit`, `.claude/skills/security-audit`,
+`.github/skills/security-audit`, `.agents/skills/security-audit`, then the
+in-repo development path. `AUDIT_SKILL_DIR` overrides discovery when an
+operator intentionally keeps multiple versions installed. Without that
+override, discovering different versions is a hard error rather than silently
+running workflow resources from a stale copy. We use `cd && pwd -P` instead of
+`realpath` because it is portable across distros without coreutils.
 
 The resolved path is written as a single bare path to
 `.claude-audit/.skill-dir` (no `KEY=value`, no shell-source). Later
 phases read it as data, never as code.
 
-**Resolving `$SKILL_DIR` in later phases.** Every Claude Code Bash tool
-call starts a fresh shell — environment variables do NOT survive
-across invocations. So **every** Bash command that references
+**Resolving `$SKILL_DIR` in later phases.** Agent harness shell tool calls can
+start fresh shells, so environment variables do NOT reliably survive across
+invocations. Therefore **every** Bash command that references
 `$SKILL_DIR` must re-load it from disk at the top of the same Bash
 invocation:
 
@@ -104,12 +133,12 @@ Do NOT `source` or `.` the file — it is data, not shell code. Reading
 it with `cat` cannot trigger code execution if the file is later
 tampered with.
 
-**Substituting `$SKILL_DIR` into sub-agent prompts.** When invoking the
-Agent tool with a prompt rendered from `templates/subagent-prompt.md`,
-substitute `{{skill_dir}}` with the *literal absolute path* you just
-resolved (not the string `$SKILL_DIR`). The sub-agent's prompt should
-contain the actual path so the sub-agent's own Bash invocations work
-without re-discovery.
+**Substituting `$SKILL_DIR` into sub-agent prompts.** When invoking the active
+harness's sub-agent primitive with a prompt rendered from
+`templates/subagent-prompt.md`, substitute `{{skill_dir}}` with the *literal
+absolute path* you just resolved (not the string `$SKILL_DIR`). The
+sub-agent's prompt should contain the actual path so its own Bash invocations
+work without re-discovery.
 
 After this command succeeds, you may proceed to the rest of this file.
 
@@ -273,9 +302,11 @@ Immediately after the blackboard preflight, resolve `output_dir` following
 
 1. `output:` arg, if given.
 2. `.claude-audit/config.json` `.output_dir`, if a prior run set it.
-3. **Ask the user** (one question) — ONLY when interactive: `[ -t 0 ]` AND `$CI`
-   unset AND not `--dangerously-skip-permissions` /
-   `$CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS`. Default offered:
+3. **Ask the user** (one question) — ONLY when interactive: `[ -t 0 ]`, `$CI`
+   unset, `$AUDIT_NONINTERACTIVE` not `1`, and not
+   `--dangerously-skip-permissions` /
+   `$CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS`. `AUDIT_NONINTERACTIVE=1` is the
+   harness-neutral signal used by headless Claude and Copilot runners. Default offered:
    `docs/security-audit-output/`.
 4. Otherwise default to `docs/security-audit-output/` (log it; never block).
 
@@ -390,9 +421,23 @@ Skip Phases 0-6. Re-emit from existing `.claude-audit/current/` artifacts.
 
 ## 5. Fan-Out Rules (Phase 5 Deep Dives)
 
+**Harness sub-agent adapter.** "Spawn one sub-agent" means use the active
+harness's general-purpose sub-agent primitive:
+
+- Claude Code: the Agent tool with `subagent_type: "general-purpose"`.
+- GitHub Copilot CLI: the task/subagent tool with
+  `agent_type: "general-purpose"`.
+
+Do not collapse fan-out when a tool is named differently. If the active
+harness has no writable general-purpose sub-agent primitive, halt Phase 5 and
+report the unsupported runtime rather than synthesizing categories in the
+orchestrator. Use the harness's high-capability general-purpose model. Do not
+force a Claude model ID through Copilot, and do not select a lightweight model.
+
 For each top-N partition × each deep-dive category:
 - Spawn **one sub-agent** using the template at `templates/subagent-prompt.md`.
-- Model: `opus`. **Never downgrade** to Sonnet/Haiku.
+- Model: the harness's high-capability general-purpose default. **Never
+  downgrade to a lightweight model.**
 - **Orchestrator-side re-validation (defense in depth).** After the
   sub-agent returns, the orchestrator re-runs
   After loading `SKILL_DIR=$(cat .claude-audit/.skill-dir)`, run:
@@ -447,15 +492,12 @@ If a sub-agent returns `{"status": "needs_recursion", "suggested_split": [...]}`
 5. **Recursion floor.** Do not recurse more than 2 levels deep.
    A sub-sub-partition that still needs_recursion gets a placeholder
    INFO finding noting the scope was unreachable.
-- **Runtime-resolved model ID.** Claude Code routes `model: opus` to the
-  harness-appropriate variant. As of Claude Code v0.6.x, this resolves to
-  `claude-opus-4-7[1m]` (Opus 4.7 with the 1M-context window) — verified
-  by a self-report test in `docs/test-runs/1m-context-check-*.md`. Other
-  harnesses (Claude API direct, older Claude Code) may route differently;
-  the skill depends on Opus-tier model quality but does **not** hard-
-  require the 1M variant to function. Phases that would exceed a 200K
-  context (e.g., a partition over the 500K soft-ceiling) return
-  `needs_recursion` regardless of harness.
+- **Runtime-resolved model capability.** Use the harness's high-capability
+  general-purpose model without hardcoding a provider-specific model ID. The
+  500K soft / 800K hard raw-code budgets are upper bounds, not assumptions:
+  when the active model's context limit is lower, split early enough to remain
+  below that limit. A partition that cannot fit returns `needs_recursion`
+  regardless of harness.
 - Concurrency cap: **8 sub-agents in flight** (configurable; raise only if
   the runtime handles it).
 - Per-subagent token budget: 500K soft / 800K hard raw code. A partition over

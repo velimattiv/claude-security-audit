@@ -162,19 +162,19 @@ Cross-reference zizmor SARIF if present. Findings tagged
 
 ## 6.9 — ASVS 4.0.3 Level 2 spine
 
-Invoke the **Agent tool** once per ASVS L2 category (V1 through V17 —
-17 sub-agents). For each category, the Agent invocation has:
+Invoke the **active harness's general-purpose sub-agent primitive** once per
+ASVS L2 category (V1 through V17, 17 sub-agents), using the adapter in
+`workflow.md §5`. For each category, the invocation has:
 - `description`: a short label like `"ASVS L2 V6 (Crypto)"`.
-- `subagent_type`: `"general-purpose"`.
+- the host-specific general-purpose selector from `workflow.md §5`.
 - `prompt`: the ASVS L2 spec for that category (curated subset in
   `lib/asvs-l2.md`) plus a category-specific file seed
   (e.g. V6 Crypto → `lib/crypto-imports.md`).
 
-Concurrency cap: 8 in flight (same window-dispatch procedure as
-Phase 5 §5.2 Step B). Do NOT pass a `model` parameter — Claude Code
-routes general-purpose sub-agents to the harness-appropriate Opus
-variant automatically. Do NOT collapse the 17 categories into a
-single summary pass — each sub-agent is doing targeted file inspection
+Concurrency cap: 8 in flight (same window-dispatch procedure as Phase 5 §5.2
+Step B). Use the harness's high-capability general-purpose model without
+hardcoding a provider-specific model ID. Do NOT collapse the 17 categories
+into a single summary pass, each sub-agent is doing targeted file inspection
 against its category's required controls.
 
 Each sub-agent appends JSONL rows to its own per-category file at
@@ -240,12 +240,12 @@ If `profile.pii.detected == false`, write an empty
 and note the skip in the methodology coverage. The empty file is the
 signal that the gate ran; do not omit the file.
 
-If PII *is* detected, invoke the **Agent tool** once per
+If PII *is* detected, invoke the harness sub-agent primitive once per
 `(entity, threat)` pair, where threat is one of: Linkability,
 Identifiability, Non-repudiation, Detectability, Disclosure, Unawareness,
-Non-compliance. Each Agent invocation has:
+Non-compliance. Each sub-agent invocation has:
 - `description`: a short label like `"LINDDUN Disclosure on User"`.
-- `subagent_type`: `"general-purpose"`.
+- the host-specific general-purpose selector from `workflow.md §5`.
 - `prompt`: the LINDDUN threat definition for that threat plus the
   scope of `entity.pii_cols`.
 
@@ -255,10 +255,10 @@ pair. Concurrency cap: 8. Do NOT pass a `model` parameter (per §6.9).
 
 ## 6.13 — STRIDE per surface
 
-Invoke the **Agent tool** once per top-N partition. For each `p` in the
-top-N partition list, the Agent invocation has:
+Invoke the harness sub-agent primitive once per top-N partition. For each `p`
+in the top-N partition list, the invocation has:
 - `description`: a short label like `"STRIDE table for services-api"`.
-- `subagent_type`: `"general-purpose"`.
+- the host-specific general-purpose selector from `workflow.md §5`.
 - `prompt`: STRIDE methodology + `phase-02-surface.json` scoped to `p`,
   plus `profile.auth`, `profile.trust_zones`, plus the partition's
   Phase 5 `auth` and `idor` findings.
@@ -419,13 +419,15 @@ candidates; do not proceed with an incomplete egress inventory. If
 
 ### Step 2 — adversarial confirmation (attack, don't summarize)
 
-For each deficit finding the reconciliation emitted, invoke the **Agent tool**
+For each deficit finding the reconciliation emitted, invoke the harness
+sub-agent primitive
 (concurrency cap 8) per `(resource, sink)` with a task that is an **attack, not a
 review** — this operationalizes RCA §11 ("show me the request that should
 fail"):
 
 - `description`: `"Egress probe: <resource> via <sink_id>"`.
-- `subagent_type`: `"general-purpose"`. Do NOT pass a `model` parameter.
+- the host-specific general-purpose selector from `workflow.md §5`; use its
+  high-capability default.
 - `prompt`: *"Here is a candidate unauthorized-access path: sink `<sink_file>`
   branch `<branch_id>` serves `<resource>` bytes with gate `<enforced_gate>`,
   while the resource's intended gate is `<floor_src>`. **Construct the exact
@@ -533,11 +535,13 @@ candidates. Do not proceed on an incomplete inventory.
 
 ### Step 2 — adversarial confirmation (attack, don't summarize)
 
-For each C1/C2 deficit, invoke the **Agent tool** (concurrency cap 8) per
+For each C1/C2 deficit, invoke the harness sub-agent primitive (concurrency cap
+8) per
 `(handler, entity)` with a task that is an attack, not a review:
 
 - `description`: `"Collection probe: <entity> via <handler_file>"`.
-- `subagent_type`: `"general-purpose"`. Do NOT pass a `model` parameter.
+- the host-specific general-purpose selector from `workflow.md §5`; use its
+  high-capability default.
 - `prompt`: *"Handler `<handler_file>` returns a list of `<entity>` and the
   reconciliation says its rows are not bound to the caller (`<row_scope>`,
   gate `<endpoint_gate>`). **Trace the query from construction to response and

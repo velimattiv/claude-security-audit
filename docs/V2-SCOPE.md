@@ -6,8 +6,9 @@
 > `_bmad-output/` auto-detect), and the v2.1 capability backlog lives in
 > `docs/EPIC-v2.1-refresh.md`. Where this doc and those disagree, they win.
 
-Status: **DRAFT — awaiting review before implementation**.
-Target runtime: Claude Code only.
+Status: **IMPLEMENTED BASELINE — maintained as the authoritative scope**.
+Target runtimes: Claude Code and GitHub Copilot CLI via one Agent Skills
+bundle.
 Source material: 5 parallel research reports (language coverage, scanner tooling, threat modeling, orchestration, cross-language patterns) run 2026-04-24.
 
 ---
@@ -16,11 +17,18 @@ Source material: 5 parallel research reports (language coverage, scanner tooling
 
 1. **Discovery-first.** Every efficient deep-dive requires a map. Phases 0-3 are reconnaissance. Nothing deep happens until the attack surface is inventoried and risk-ranked.
 2. **Blackboard on disk, not in context.** Orchestrator stays small; sub-agents read inputs from `.claude-audit/`, write findings back to `.claude-audit/`. Only JSON summaries return through tool output.
-3. **Saga checkpointing.** Each phase writes `phase-N.done` + artifact. Crash/interrupt resumable via `claude --continue`-friendly marker scan.
+3. **Saga checkpointing.** Each phase writes `phase-N.done` + artifact.
+   Crash/interrupt recovery scans markers independently of the harness's
+   session-resume command.
 4. **Map-reduce per partition, per category.** Fan out along two axes: partition (service/package) × deep-dive category (9). Reduce into a single synthesis.
 5. **Delta mode is first-class.** Baseline artifact lives with the repo. A fresh run against unchanged code is a sub-minute no-op. Incremental review on a PR is the v2 value-add.
-6. **Stay within Claude Code constraints.** No experimental feature flags (no Agent Teams). Subagents don't spawn subagents — all fan-out is in the main skill.
-7. **No skimping on tokens.** All sub-agents use Claude Opus 4.7 (1M context) — no tiered downgrade to Sonnet/Haiku. Security audits are the least cost-sensitive use case; always favor depth over efficiency.
+6. **Stay within shared Agent Skills constraints.** No experimental team
+   features. Subagents don't spawn subagents; all fan-out is in the main skill
+   through the harness adapter.
+7. **No skimping on model capability.** All sub-agents use the active
+   harness's high-capability general-purpose model, never a lightweight tier.
+   Security audits are the least cost-sensitive use case; favor depth over
+   efficiency.
 8. **Partition for quality, not cost.** Sub-partitioning is triggered by reasoning-quality heuristics (partition >500K raw tokens of code ≈ 125K LOC). Rationale: "lost in the middle" — a sub-agent given 800K tokens produces measurably weaker findings than 5 parallel sub-agents each with 160K. Parallelism is additive token cost, paid gladly for better findings.
 
 ---
@@ -94,7 +102,9 @@ Source material: 5 parallel research reports (language coverage, scanner tooling
 - **Sensitivity**: no-data / metadata-only / PII / payments-auth-secrets.
 - **Age**: <6mo / 6-24mo / >2y / >2y + `legacy|admin|v1` in name.
 
-**Output:** `partitions.json` sorted by risk score. Deep-dives run full-depth on top-N (default 8); tail gets inventory-only on Haiku.
+**Output:** `partitions.json` sorted by risk score. Deep-dives run full-depth
+on top-N (default 8); the tail gets inventory-only treatment without subagent
+fan-out.
 
 ---
 
@@ -137,7 +147,9 @@ Source material: 5 parallel research reports (language coverage, scanner tooling
 ---
 
 ### Phase 4 — External Inputs (Scanner Orchestration + Built-in Reviews)
-**Goal.** Run the standardized scanner bundle + Claude Code's built-in reviews in parallel, collect findings as inputs for cross-referencing.
+**Goal.** Run the standardized scanner bundle plus the active harness's
+built-in security review when available, then collect findings as inputs for
+cross-referencing.
 
 **Minimum scanner bundle** (all emit SARIF, single-binary-ish, no paid APIs):
 | Tool | Role | Install | Invocation |
@@ -159,15 +171,18 @@ Source material: 5 parallel research reports (language coverage, scanner tooling
 - **zizmor** for GitHub Actions deep audit.
 
 **Also:**
-- `/security-review` (Claude Code built-in) — run per partition, not whole repo, to avoid budget blow-out.
+- The harness's built-in security review, when available, run per partition
+  rather than whole-repo to avoid budget blow-out.
 - `vendored/adversarial-review/` — as today, applied per partition.
 
 **Execution:** Each scanner runs in its own sub-agent invocation as a Bash call; output SARIF written to `phase-04-scanners/<tool>.sarif`. Orchestrator post-processes: keep only `ruleId, level, uri, startLine, message.text` to cut ~80% SARIF bulk.
 
 ---
 
-### Phase 5 — Parallel Deep Dives (9 categories)
-**Fan-out axes:** partition × category. For top-N risk partitions, spawn N × 9 sub-agents (or fewer if the skill rate-limits parallelism).
+### Phase 5 — Parallel Deep Dives (12 categories)
+**Fan-out axes:** partition × category. For top-N risk partitions, spawn up to
+N × 12 sub-agents (fewer when category gates are false), with at most 8 in
+flight.
 
 Each sub-agent reads `phase-00-profile.json` + `phase-02-surface.json` + partition scope from disk, runs grep-based + semantic checks, writes findings as JSONL to `phase-05-<cat>-<partition>.jsonl`.
 
@@ -185,7 +200,10 @@ Each sub-agent reads `phase-00-profile.json` + `phase-02-surface.json` + partiti
 
 Sub-agents return JSON summaries only (counts by severity + artifact path). Raw findings stay on disk.
 
-**Model for every sub-agent: Claude Opus 4.7 (1M context).** No Sonnet/Haiku routing. Budget per sub-agent: 800K tokens raw code hard ceiling, 500K soft target. Partitions above 500K auto-split into parallel sub-agents for reasoning quality.
+**Model for every sub-agent:** the harness's high-capability general-purpose
+model. The 800K raw-code hard ceiling and 500K soft target are upper bounds;
+split earlier when the active model has a lower context limit. Oversized
+partitions auto-split into parallel sub-agents for reasoning quality.
 
 ---
 
@@ -316,8 +334,8 @@ RETURN SHAPE (stdout, strictly):
 
 CONSTRAINTS:
   - Never echo file contents. Write to disk only.
-  - Model: claude-opus-4-7 (1M context). No downgrade.
-  - If partition >500K raw code tokens, return {"status":"needs_recursion","suggested_split":[...]} so the orchestrator can fan out for reasoning quality.
+  - Model: the harness's high-capability general-purpose model. No lightweight tier.
+  - If the partition exceeds the active model's context-safe limit (500K raw code tokens is the upper soft bound), return {"status":"needs_recursion","suggested_split":[...]} so the orchestrator can fan out for reasoning quality.
   - maxTurns budget: 80.
 ```
 
@@ -355,7 +373,7 @@ CONSTRAINTS:
 | **M1** | Discovery + Partitioning scaffolding | Phases 0-1 + `.claude-audit/` blackboard + sub-agent template | 1-2 dev days |
 | **M2** | Attack Surface Inventory + Keystone Index | Phases 2-3 + handler-hash logic | 1-2 days |
 | **M3** | External Scanner Orchestration | Phase 4, all six scanners, SARIF post-processing | 2-3 days |
-| **M4** | Deep Dives (9 categories) | Phase 5, one sub-agent prompt per category + grep-pattern catalog | 3-5 days |
+| **M4** | Deep Dives (12 categories) | Phase 5, one sub-agent prompt per category + grep-pattern catalog | 3-5 days |
 | **M5** | Config + Methodology Spine + Synthesis | Phases 6-7, report templates, SARIF emitter | 2-3 days |
 | **M6** | Delta mode + baseline persistence | Phase 8 + `mode: delta` flag + invalidation logic | 2-3 days |
 | **M7** | Polish | README updates, NOTICE expansion, CWE map, pattern catalog doc | 1 day |
@@ -369,7 +387,8 @@ Total: ~12-19 dev days, spread across several sessions. Each milestone ships ind
 1. **Scanner install overhead.** Six scanners = six installs. Options:
    - (a) Document as prerequisites; skill fails fast if missing.
    - (b) Skill auto-installs on first run (ubuntu/macOS Homebrew paths).
-   - (c) Provide a Podman/Docker image with everything baked in (aligns with existing `claude-worker` pattern).
+   - (c) Provide a Podman/Docker image with scanners and a supported harness
+     baked in.
    *Recommendation: (a) + (c). Document prereqs; provide an optional `cw-audit` container image.*
 2. **Huge repos (>200K LOC).** Auto-recursive sub-partitioning — no size rejection. Each level of partitioning runs in parallel; depth is determined by per-partition code volume, not a global cap. Token cost scales linearly with codebase size, paid in service of audit quality.
 3. **Handler-hash for semantic change detection.** Simple `sha1(handler body)` is fragile — refactoring that preserves logic invalidates baseline unnecessarily. Options:
@@ -414,6 +433,8 @@ Total: ~12-19 dev days, spread across several sessions. Each milestone ships ind
 
 - Claude Code — Skills: https://code.claude.com/docs/en/skills
 - Claude Code — Subagents: https://code.claude.com/docs/en/sub-agents
+- GitHub Copilot CLI — Agent Skills:
+  https://docs.github.com/copilot/how-tos/copilot-cli/customize-copilot/add-skills
 - OWASP ASVS 5.0: https://github.com/OWASP/ASVS
 - OWASP API Top 10 2023: https://owasp.org/API-Security/editions/2023/en/
 - OWASP LLM Top 10 2025: https://owasp.org/www-project-top-10-for-large-language-model-applications/

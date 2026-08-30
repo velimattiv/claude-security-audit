@@ -1,30 +1,55 @@
 # Installation
 
-This guide installs the `/security-audit` skill at user-level so
-Claude Code can resolve it from any project. It also covers the
-optional Phase 4 scanner bundle for full coverage.
+This guide installs the `/security-audit` Agent Skill for Claude Code or GitHub
+Copilot CLI. It also covers the optional Phase 4 scanner bundle for full
+coverage.
 
 ## Requirements
 
-- Claude Code CLI 2.1.0+ (`claude --version`)
+- One supported harness: Claude Code CLI 2.1.0+ (`claude --version`) or
+  GitHub Copilot CLI (`copilot --version`)
 - `git`, `bash`, `python3` (3.10+) — should already be present
 - Linux or macOS (Linux container is the canonical target;
   WSL works; native Windows is not supported)
 - Optional: `pip install jsonschema pyyaml` for full assertion-suite
   coverage if you'll run the E2E
 
+## Install the Agent Skill
+
+Clone the repository, then use the installer so every referenced resource is
+copied and an existing installation is backed up:
+
+```bash
+git clone --depth 1 --branch v2.6.1 \
+  https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
+bash ~/Code/csa/scripts/install-skill.sh --harness copilot
+# or: --harness claude
+```
+
+For one repository only:
+
+```bash
+bash ~/Code/csa/scripts/install-skill.sh --harness copilot \
+  --scope project --project-root /path/to/project
+```
+
+Copilot personal installs honor `COPILOT_HOME`; the default is
+`~/.copilot/skills/security-audit`. Do not use `copilot skill add` with only
+the `SKILL.md` URL or path for this skill, because the workflow, schemas,
+validators, and templates are also required.
+
 ## Recommended install: isolated full container
 
 The canonical deployment shape — and the only one that doesn't put
 six security tools with auto-updating databases on your daily-driver
-host — runs the entire audit inside a disposable container. Claude
-Code, the skill, the scanner bundle, and the audit target all live
+host — runs the entire audit inside a disposable container. The agent
+harness, skill, scanner bundle, and audit target all live
 in the container; nothing leaks to your host.
 
 Common container shapes:
 
-- **VS Code Dev Container / GitHub Codespaces** — declare `git`,
-  `claude`, `python3` in `.devcontainer/devcontainer.json`.
+- **VS Code Dev Container / GitHub Codespaces** — declare `git`, `python3`,
+  and `claude` or `copilot` in `.devcontainer/devcontainer.json`.
 - **`cw` / similar tmux-based launchers** — boot a fresh container
   per audit, throw it away after.
 - **Plain Docker / Podman** — `docker run --rm -it` a base image,
@@ -36,19 +61,18 @@ Inside the container:
 # 1. Clone the audit target inside the container
 git clone <your-target-repo> /workspace/target
 
-# 2. Install Claude Code per docs.anthropic.com/claude-code/install
-#    and authenticate in this container instance only
-claude login
+# 2. Install one supported harness and authenticate in this container only
+copilot login
 
 # 3. Install the skill at user-level inside the container
 git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
-cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
+bash ~/Code/csa/scripts/install-skill.sh --harness copilot
 
 # 4. Verify
-cat ~/.claude/skills/security-audit/VERSION                  # 2.6.1
-ls  ~/.claude/skills/security-audit/manifest.yaml            # must exist
-ls  ~/.claude/skills/security-audit/lib/validate-findings.py # must exist
+cat ~/.copilot/skills/security-audit/VERSION                  # 2.6.1
+ls  ~/.copilot/skills/security-audit/manifest.yaml            # must exist
+ls  ~/.copilot/skills/security-audit/lib/validate-findings.py # must exist
 
 # 5. Install the scanner bundle directly. Inside an isolated
 #    container, host pollution is a non-concern — scanners belong
@@ -58,16 +82,19 @@ bash ~/Code/csa/scripts/install-scanners.sh --check    # all six [OK]?
 
 # 6. Run the audit
 cd /workspace/target
-claude --dangerously-skip-permissions
-> /security-audit
+copilot
+> Use /security-audit to audit this repository.
 ```
+
+For Claude Code, replace `copilot login` with `claude login`, pass
+`--harness claude` to the installer, and invoke `/security-audit` directly.
 
 When the audit completes, the container is disposable. Auth tokens,
 scanner binaries, rule databases — all gone with the container.
 
-## Acceptable: Path B (scanners-only-in-container, Claude on host)
+## Acceptable: Path B (scanners-only-in-container, harness on host)
 
-If Claude Code is already installed and authenticated on your daily-
+If a supported harness is already installed and authenticated on your daily-
 driver host and you don't want to set up a full container per audit,
 Path B isolates the scanner bundle alone:
 
@@ -82,7 +109,7 @@ hardening: `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
 `--read-only` rootfs, non-root `audit` user. Target repo bind-mounted
 read-only.
 
-Path B leaves Claude Code itself on your host. The skill orchestrator
+Path B leaves the agent harness itself on your host. The skill orchestrator
 runs there; that's the larger trust boundary, but for one-off audits
 it's a reasonable simplification of the recommended pattern.
 
@@ -113,14 +140,18 @@ After installing, in any small repo:
 
 ```bash
 cd <some-project>
-claude --dangerously-skip-permissions
+copilot
 ```
 
-Then in the Claude session:
+Then in Copilot:
 
 ```
-/security-audit
+Use /security-audit to audit this repository.
 ```
+
+In Claude Code, start `claude` and enter `/security-audit`. In an existing
+Copilot session, run `/skills reload` after installation and verify with
+`/skills info security-audit`.
 
 Watch for the orchestrator's first Bash tool call — it should be the
 preflight `mkdir -p .claude-audit/...` etc., resolving `$SKILL_DIR` and
@@ -137,15 +168,15 @@ different skill (polyglot SARIF audit with 9-phase orchestration,
 not a review-orchestrator).
 
 ```bash
-# Back up your existing skill OUTSIDE ~/.claude/skills/. Files
-# under ~/.claude/skills/ are scanned by Claude Code's resolver
-# and would appear as a separate slash-command, causing confusion.
-mkdir -p ~/.claude/.archive-skills
-mv ~/.claude/skills/security-audit \
-   ~/.claude/.archive-skills/security-audit-pre-v2.0.2
-
-# Then proceed with the Quick install steps above.
+# The installer stages and validates the new bundle, then moves any existing
+# installation to a timestamped .security-audit.backup-* sibling.
+bash ~/Code/csa/scripts/install-skill.sh --harness copilot
 ```
+
+If both Claude and Copilot copies exist at different versions, runtime
+preflight fails rather than silently mixing the activated `SKILL.md` with stale
+resources. Remove the stale copy or set `AUDIT_SKILL_DIR` to the exact bundle
+for that run.
 
 ## Validating the install (full E2E)
 
@@ -154,7 +185,7 @@ on real projects, run the local E2E against a known-vulnerable
 fixture (OWASP Juice Shop):
 
 ```bash
-bash ~/Code/claude-security-audit/scripts/run-e2e-test.sh
+bash ~/Code/claude-security-audit/scripts/run-e2e-test.sh --harness copilot
 ```
 
 Expected outcome:
@@ -167,18 +198,31 @@ Expected outcome:
 The full reference run is documented at
 [`docs/test-runs/e2e-full-run-v2.0.2-2026-04-25T0250Z.md`](test-runs/e2e-full-run-v2.0.2-2026-04-25T0250Z.md).
 
+The Copilot E2E path uses `--allow-all` because it is non-interactive and must
+run many shell tools and subagents. Run it only against the disposable target
+clone in the recommended isolated environment. A complete Copilot E2E, not the
+static compatibility suite, is the release gate for claiming runtime
+equivalence.
+
 ## What gets installed
 
 | Path | Purpose |
 |---|---|
-| `~/.claude/skills/security-audit/SKILL.md` | Activation + description |
-| `~/.claude/skills/security-audit/workflow.md` | Orchestrator entry point |
-| `~/.claude/skills/security-audit/manifest.yaml` | Per-phase contract (machine-readable) |
-| `~/.claude/skills/security-audit/steps/phase-00..08-*.md` | Per-phase procedures |
-| `~/.claude/skills/security-audit/steps/deepdive/cat-01..09-*.md` | Per-category deep-dive prompts |
-| `~/.claude/skills/security-audit/lib/*.json` | Schemas (profile, partitions, surface, finding, baseline, cwe-map) |
-| `~/.claude/skills/security-audit/lib/validate-findings.py` | Sub-agent self-validation script |
-| `~/.claude/skills/security-audit/templates/subagent-prompt.md` | Sub-agent prompt template |
+| `<skill-root>/SKILL.md` | Activation + description |
+| `<skill-root>/workflow.md` | Orchestrator entry point |
+| `<skill-root>/manifest.yaml` | Per-phase contract (machine-readable) |
+| `<skill-root>/steps/phase-00..08-*.md` | Per-phase procedures |
+| `<skill-root>/steps/deepdive/cat-01..12-*.md` | Per-category deep-dive prompts |
+| `<skill-root>/lib/*.json` | Schemas (profile, partitions, surface, finding, baseline, cwe-map) |
+| `<skill-root>/lib/validate-findings.py` | Sub-agent self-validation script |
+| `<skill-root>/templates/subagent-prompt.md` | Sub-agent prompt template |
+
+`<skill-root>` is `~/.claude/skills/security-audit` for Claude Code or
+`${COPILOT_HOME:-$HOME/.copilot}/skills/security-audit` for Copilot CLI.
+Project installs use `.claude/skills/security-audit` and
+`.github/skills/security-audit`, respectively. Copilot also discovers
+`.agents/skills`, but the installer uses `.github/skills` as its deterministic
+project destination.
 
 **Path A — host install** places binaries at:
 
@@ -221,9 +265,7 @@ To pull a newer version:
 cd ~/Code/claude-security-audit
 git fetch --tags
 git checkout v2.0.X    # or `main` for unreleased
-rm -rf ~/.claude/skills/security-audit
-cp -R skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION
+bash scripts/install-skill.sh --harness copilot
 ```
 
 The skill writes `skill_version` into every artifact it produces, so
@@ -234,7 +276,8 @@ versions (delta mode invalidates per the rules in
 ## Uninstalling
 
 ```bash
-rm -rf ~/.claude/skills/security-audit
+rm -rf ~/.copilot/skills/security-audit  # Copilot default
+rm -rf ~/.claude/skills/security-audit   # Claude Code
 ```
 
 The scanner bundle uninstalls per their respective install methods —
@@ -243,9 +286,11 @@ others.
 
 ## Troubleshooting
 
-**`/security-audit` doesn't appear in slash-command autocomplete.**
-Verify the install path: `ls ~/.claude/skills/security-audit/SKILL.md`.
-Restart Claude Code if needed.
+**`security-audit` is not discovered.**
+For Copilot, run `/skills reload` then `/skills info security-audit`, and verify
+`ls "${COPILOT_HOME:-$HOME/.copilot}/skills/security-audit/SKILL.md"`. For
+Claude Code, verify `ls ~/.claude/skills/security-audit/SKILL.md` and restart
+the session if needed.
 
 **Audit produces only the report (under `docs/security-audit-output/`), no
 `.claude-audit/`.**
@@ -255,9 +300,9 @@ Re-run the verify step (cat VERSION, ls manifest.yaml).
 
 **`SKILL_DIR not resolved` errors.**
 The preflight Bash chain failed to find the skill at any of:
-`$HOME/.claude/skills/security-audit`, `./.claude/skills/security-audit`,
-`./skills/security-audit`. Check that the user-level install actually
-landed at the expected path.
+the Claude, Copilot, `.agents/skills`, project, or in-repo locations. Check the
+installer's reported path. If multiple copies have different versions, remove
+the stale copy or set `AUDIT_SKILL_DIR`.
 
 **Phase 4 scanners missing → audit runs in degraded mode.**
 This is by design — missing scanners are warnings, not failures.

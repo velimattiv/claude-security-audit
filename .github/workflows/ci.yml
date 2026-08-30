@@ -119,6 +119,13 @@ jobs:
           # them, which is the control-with-no-enforcer check.
           bash tests/test-secret-redaction.sh
 
+      - name: Claude and Copilot harness compatibility
+        run: |
+          # Deterministic and credential-free: installs the complete bundle
+          # into isolated homes, checks backup/discovery behavior, and pins the
+          # headless + subagent adapter contracts for both supported harnesses.
+          bash tests/test-harness-compat.sh
+
       - name: Compile-check cat-*.md regex patterns (polyglot regression guard)
         run: |
           python3 scripts/validate-patterns.py

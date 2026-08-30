@@ -1,10 +1,12 @@
-# /security-audit — Claude Code Skill
+# /security-audit — Agent Skill
 
 [![ci](https://github.com/velimattiv/claude-security-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/velimattiv/claude-security-audit/actions/workflows/ci.yml)
 [![codeql](https://github.com/velimattiv/claude-security-audit/actions/workflows/codeql.yml/badge.svg)](https://github.com/velimattiv/claude-security-audit/actions/workflows/codeql.yml)
 [![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A thorough, multi-phase security audit skill for [Claude Code](https://code.claude.com).
+A thorough, multi-phase security audit skill for
+[Claude Code](https://code.claude.com) and
+[GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/use-copilot-agents/use-copilot-cli).
 Goes beyond generic vulnerability scanning by enumerating every attack
 surface (HTTP, gRPC, GraphQL, WebSocket, queue consumers, serverless
 handlers, mobile/desktop IPC — polyglot across 60+ frameworks), running an
@@ -14,10 +16,14 @@ Crypto, Secrets, Deployment, Injection/SSRF, LLM-specific, Supply Chain & CI/CD,
 MCP/Agentic). Severity is **computed** over composed attack paths rather than
 asserted per finding.
 
-**Supported runtime:** Claude Code only. Other harnesses are not supported.
+**Supported runtimes:** Claude Code and GitHub Copilot CLI. The same
+open-standard Agent Skill bundle runs on both; audit logic is not forked.
 
 ## Version
 
+- **Unreleased** — **GitHub Copilot CLI harness support.** Adds dual-harness
+  installation, resource discovery, subagent fan-out adapters, and selectable
+  E2E execution while preserving Claude Code behavior.
 - **v2.6.1** (current) — **Credential containment.** Through v2.6.0 the audit
   copied gitleaks' verbatim `region.snippet.text` into `findings.sarif` and then
   into a tracked `<output_dir>`, committing live secrets that the audited repo
@@ -146,7 +152,7 @@ asserted per finding.
    gitleaks, trufflehog, trivy, hadolint; optional brakeman, checkov,
    kube-linter, govulncheck, psalm, zizmor by detected context. All
    SARIF (Phase 4).
-6. **Deep-dive 11 categories** — each as a Claude Opus sub-agent,
+6. **Deep-dive 12 categories** — each as a high-capability sub-agent,
    fanned out per partition × category, 8 in flight (Phase 5).
 7. **Config audit + methodology spine** — CORS/CSP/cookies/headers plus
    ASVS L2 / API Top 10 / LLM Top 10 / LINDDUN / STRIDE (Phase 6).
@@ -161,22 +167,26 @@ baseline exists).
 
 ## Install
 
-User-level (available in every project), pinned to a tagged release:
+Clone a tagged release, then install the complete bundle for your harness:
 
 ```bash
 git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/claude-security-audit
-cp -R ~/Code/claude-security-audit/skills/security-audit ~/.claude/skills/security-audit
-cat ~/.claude/skills/security-audit/VERSION   # → 2.6.1
+bash ~/Code/claude-security-audit/scripts/install-skill.sh --harness claude
+# or:
+bash ~/Code/claude-security-audit/scripts/install-skill.sh --harness copilot
 ```
 
-Project-level (just this repo):
+For a project-local install, add `--scope project --project-root <repo>`.
+Claude installs to `.claude/skills/security-audit`; Copilot installs to
+`.github/skills/security-audit`. Personal Copilot installs honor
+`COPILOT_HOME` and otherwise use `~/.copilot/skills/security-audit`.
 
 ```bash
 git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git /tmp/csa
-mkdir -p .claude/skills
-cp -R /tmp/csa/skills/security-audit .claude/skills/security-audit
+bash /tmp/csa/scripts/install-skill.sh --harness copilot --scope project \
+  --project-root "$PWD"
 ```
 
 For a step-by-step install (with backup of any existing
@@ -195,11 +205,11 @@ matches CI/production isolation.
 ### Recommended — isolated container (everything inside)
 
 Use any container shape that gives you a clean working environment
-with `git`, Node 20+, Python 3.10+, plus a way to run `claude`. Common
+with `git`, Node 20+, Python 3.10+, plus a supported agent harness. Common
 patterns:
 
 - **VS Code Dev Container / GitHub Codespaces** — declare
-  `git`/`claude`/`python3` in `.devcontainer/devcontainer.json`,
+  `git`, `python3`, and `claude` or `copilot` in `.devcontainer/devcontainer.json`,
   open the project, run the scanner installer + audit inside.
 - **`cw` launcher / similar tmux-based container launchers** — boot
   a fresh container per audit, install everything inside, throw
@@ -213,14 +223,13 @@ Inside the isolated container:
 # Clone the audit target inside the container
 git clone <your-target-repo> /workspace/target
 
-# Install Claude Code (https://docs.anthropic.com/claude-code/install)
-# and authenticate in this container instance only
-claude login
+# Install Claude Code or Copilot CLI and authenticate in this container only
+copilot login
 
 # Install the skill at user-level inside the container
 git clone --depth 1 --branch v2.6.1 \
   https://github.com/velimattiv/claude-security-audit.git ~/Code/csa
-cp -R ~/Code/csa/skills/security-audit ~/.claude/skills/security-audit
+bash ~/Code/csa/scripts/install-skill.sh --harness copilot
 
 # Install the scanner bundle (Path A — direct install). This is the
 # right install model for an isolated container: scanners are part
@@ -229,8 +238,8 @@ bash ~/Code/csa/scripts/install-scanners.sh
 
 # Run the audit
 cd /workspace/target
-claude --dangerously-skip-permissions
-> /security-audit
+copilot
+> Use /security-audit to audit this repository.
 ```
 
 When the audit's done, the entire container is disposable —
@@ -239,8 +248,8 @@ databases. Nothing leaks to your host.
 
 ### Acceptable — Path B (scanners-only-in-container, Claude on host)
 
-If you really want Claude running on your daily-driver host (e.g. you
-already have Claude Code installed and authenticated there, and the
+If you really want the agent harness on your daily-driver host (e.g. you
+already have Claude Code or Copilot CLI installed and authenticated, and the
 audit is one-off), Path B isolates only the scanner bundle:
 
 ```bash
@@ -254,7 +263,7 @@ hardening: `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
 `--read-only` rootfs, non-root `audit` user. Target repo bind-mounted
 read-only; only `.claude-audit/` is writable.
 
-This still leaves Claude Code on your host. The skill orchestrator
+This still leaves the agent harness on your host. The skill orchestrator
 runs there and is the larger trust boundary.
 
 ### Strongly discouraged — Path A on your daily-driver host
@@ -304,7 +313,8 @@ scanner.
 
 ## Use
 
-In Claude Code, invoke with:
+In Claude Code, invoke directly. In Copilot CLI, prefix the same form with
+`Use`, for example `Use /security-audit mode: delta`.
 
 ```
 /security-audit                                   # full audit
@@ -315,6 +325,11 @@ In Claude Code, invoke with:
 /security-audit top_n: 12                         # override partition cap
 ```
 
+After a Copilot install, run `/skills reload` in an existing session and
+`/skills info security-audit` to verify discovery. The first audit will request
+permission for shell tools unless you deliberately configure broader
+permissions; use the isolated-container deployment for unattended runs.
+
 Deliverables land in the output directory (default
 `docs/security-audit-output/`): the human `security-audit-report.md`,
 `findings.sarif`, `findings.cyclonedx.json`, and the pruned
@@ -324,10 +339,11 @@ them (or pass `output: <dir>`); the choice is remembered for `mode: delta` /
 
 ## CI integration
 
-See `docs/ci-examples/github-actions/security-audit.yml` for a working
-example: runs on push / PR / nightly, uploads SARIF to the Security tab,
-and fails the PR on CRITICAL findings. Adaptations to GitLab / Buildkite /
-CircleCI are mechanically similar; PRs welcome.
+See `docs/ci-examples/github-actions/security-audit.yml` for the existing
+Claude Code example: it runs on push / PR / nightly, uploads SARIF to the
+Security tab, and fails the PR on CRITICAL findings. A Copilot-hosted GitHub
+Actions path is not yet integration-validated; local Copilot E2E uses
+`scripts/run-e2e-test.sh --harness copilot`.
 
 ## Runtime state
 
