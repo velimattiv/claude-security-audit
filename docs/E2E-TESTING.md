@@ -11,7 +11,7 @@ Per-phase dogfooding validates that individual sub-agents produce valid
 artifacts, but does not prove the orchestrator can compose them. Real
 failure modes the E2E catches that per-phase runs don't:
 
-- **Fan-out composition.** Phase 5 spawns N partitions × 9 categories
+- **Fan-out composition.** Phase 5 spawns N partitions × 12 categories
   in parallel at 8-concurrent. Individual sub-agents have been tested;
   the orchestrator's concurrency cap + aggregation has not.
 - **Phase transition artifacts.** The sub-agent RETURN SHAPE is the
@@ -29,38 +29,39 @@ failure modes the E2E catches that per-phase runs don't:
   rotation, report path resolution — all have code paths that only
   fire on a complete run.
 
-## Scope: local-only in v2.0.1
+## Scope: local host harness
 
-`scripts/run-e2e-test.sh` runs on the developer's host, invoking their
-existing Claude Code install. It does NOT containerize the orchestrator
-because:
+`scripts/run-e2e-test.sh --harness claude|copilot` invokes the selected
+developer-host harness and its existing authentication. Claude remains the
+default for backward compatibility. The script does NOT containerize the
+orchestrator because:
 
-1. **Claude Max subscription auth is OAuth-based.** Credentials live
-   in `~/.claude/credentials.json` on the host. A fresh container has
-   no such session; mounting the host's creds into a container is a
-   security-sensitive pattern we deliberately avoid.
-2. **Pay-per-token for CI requires a dedicated API key.** Not a
-   technical blocker — an operational one. Until someone provisions
-   a key specifically for CI, the GHA path is stalled.
-3. **Headless OAuth delegation is undocumented.** Claude Code may or
-   may not support it. Verification is a v2.1 workstream, not a
-   v2.0.1 feature.
+1. **Interactive subscriptions keep host-local auth.** Claude Max and Copilot
+   CLI login state live outside a fresh container. Mounting host credentials
+   into a disposable image is a security-sensitive pattern we deliberately
+   avoid.
+2. **CI requires separately governed credentials and budget.** Claude API keys
+   and Copilot GitHub tokens have different scopes, billing, and policy
+   implications; neither should be inferred from a developer's login.
+3. **Headless execution differs by harness.** The E2E runner adapts flags and
+   validates their presence, but hosted-runner authentication remains an
+   explicit deployment decision.
 
 Scanners MAY run in the container-isolated path
 (`scripts/run-audit-in-container.sh`) regardless — the E2E script is
 orthogonal to that choice.
 
-## GHA path (deferred to v2.1)
+## GHA path (deferred)
 
 Prerequisites before GHA can land:
 
 | # | Blocker | Resolution |
 |---|---|---|
-| 1 | Auth strategy | Dedicated API key **or** confirmed OAuth-for-CI pattern |
+| 1 | Auth strategy | Dedicated Claude API key or scoped Copilot GitHub token |
 | 2 | Budget envelope | $5-20 per run × cadence decision (nightly = ≈$150/month) |
 | 3 | Pre-artifact-upload secret scan | gitleaks + trufflehog on `.claude-audit/` before upload, in case the skill ever wrote a secret into its own trace |
 | 4 | Artifact retention | 7-day retention at most; secrets cost here is asymmetric |
-| 5 | Token cap | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (if honored) + timeout fallback |
+| 5 | Usage cap | Harness-specific credit/token cap + timeout fallback |
 
 Tracked in `docs/ROADMAP.md` under "v2.1 candidates."
 
@@ -87,7 +88,14 @@ When making changes that could affect skill behavior:
    catches fixture drift early).
 3. Before merging any PR that touches `steps/deepdive/cat-*.md`,
    `steps/phase-05-deepdives.md`, or `steps/phase-07-synthesis.md`:
-   run the full E2E on your host. This is expensive but unavoidable
-   for changes that affect orchestration.
+   run the full E2E on your host with the client whose behavior is affected,
+   for example `scripts/run-e2e-test.sh --harness copilot`. This is expensive
+   but unavoidable for claims about end-to-end orchestration.
+
+4. For harness-only changes, always run the credential-free compatibility
+   suite first:
+   ```bash
+   bash tests/test-harness-compat.sh
+   ```
 
 `CONTRIBUTING.md §Testing` documents this expectation.

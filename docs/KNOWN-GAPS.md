@@ -42,10 +42,15 @@ The assertion suite validates against Juice Shop v19.2.1 + the 12-entry fixture.
 
 **Mitigation available:** `trivy` itself refreshes DB on each run by default; we explicitly pin `--skip-db-update` nowhere. OSV-scanner fetches online at run-time. So this gap is smaller than it sounds — but gitleaks rule updates land via binary updates.
 
-### 7. No enforcement of the `--dangerously-skip-permissions` flag at runtime
-`run-e2e-test.sh` preflight checks whether `claude --help` advertises the flag, but if the flag is silently gated behind an env var in a particular Claude Code version, the audit may stall mid-run waiting for interactive permission. The script warns but does not prevent.
+### 7. Headless E2E uses broad harness permissions
+`run-e2e-test.sh` needs unattended shell and subagent execution. Claude uses
+`--dangerously-skip-permissions`; Copilot uses `--allow-all`. The script
+preflights those flags, but neither protects the rest of a daily-driver host if
+the audited repository successfully prompt-injects the harness.
 
-**Mitigation available:** set `CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS=1` in the script's env export. Not done because forcing that env var for a user who doesn't want skipped-permissions is invasive.
+**Mitigation available:** run the E2E only against its disposable target clone
+inside the recommended isolated environment. The scanner-only Path B does not
+sandbox the host harness.
 
 ## Deferred to v2.1
 
@@ -64,10 +69,12 @@ New v2.1 deferrals (see `docs/EPIC-v2.1-refresh.md` §4 + `docs/ROADMAP.md`):
   Semgrep** (fresher community rules), **declined Opengrep** (archived/frozen
   `opengrep-rules`). Added an `AUDIT_SAST_RULES` offline/BYO-rules override.
   See CHANGELOG [2.3.0].
-- **Live-container E2E** — not run in-session (pre-existing Max-auth blocker).
+- **Live-container E2E** — not run in-session (host-harness auth blocker).
   The static assertion suite + scorecard logic are updated and internally
-  consistent; a host run with Claude auth is still required to exercise the
-  categories end-to-end. **Cost anchor for a future live/GHA run** (from
+  consistent; a host run with Claude or Copilot auth is still required to
+  exercise the categories end-to-end. Copilot skill discovery is smoke-tested,
+  but full Copilot audit equivalence is not yet demonstrated. **Cost anchor for
+  a future live/GHA run** (from
   CyberGym-E2E, `research/08-cybergym-e2e.md`): budget ≈ **$10 / 90 min per
   target**, with diminishing returns after ~60 min (30→60 min yields most of
   the gain). [A4]

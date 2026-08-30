@@ -5,7 +5,22 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing queued.
+### Added
+
+- GitHub Copilot CLI support for the same open-standard Agent Skill bundle,
+  including a dual-harness installer, Copilot-aware resource discovery,
+  harness-neutral subagent fan-out, and `run-e2e-test.sh --harness copilot`.
+- A deterministic harness compatibility suite covering complete bundle
+  installation, backup behavior, headless routing, path discovery, and
+  subagent adapter drift.
+
+### Changed
+
+- Skill preflight warns loudly when multiple discovered installations have
+  different versions (first discovered copy wins) and rejects incomplete
+  bundles. `AUDIT_SKILL_DIR` selects an intentional copy.
+- Headless runners set `AUDIT_NONINTERACTIVE=1`, avoiding an output-directory
+  prompt when the harness has disabled user questions.
 
 ## [2.6.1] — 2026-08-28
 

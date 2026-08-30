@@ -47,7 +47,7 @@ REPO NAVIGATION & CONTEXT DISCIPLINE (basis: docs/research/08-cybergym-e2e.md):
     than spiraling on it.
 
 METHOD:
-  1. Load the inputs via the Read tool.
+  1. Load the inputs via the harness's targeted file-read tool.
   2. {{phase-specific-method-body}}
      (See steps/phase-<NN>-<name>.md for the detailed procedure.)
   3. Write findings as newline-delimited JSON (JSONL) to:
@@ -92,9 +92,11 @@ CONSTRAINTS (read carefully, all apply):
   - NEVER echo file contents back to the orchestrator. Write to disk only.
   - NEVER spawn a nested sub-agent. Escalation mechanism is in RETURN SHAPE
     below (see `status: needs_recursion`).
-  - Model: Claude Opus 4.7 (1M context). No downgrade to Sonnet/Haiku.
-  - Token budget: 500K soft / 800K hard raw code in context. If the
-    partition scope exceeds the soft target, RETURN:
+  - Model: the harness's high-capability general-purpose model. Do not select
+    a lightweight model.
+  - Token budget: 500K soft / 800K hard raw code in context are upper bounds.
+    If the active model has a lower context limit, split earlier. If the
+    partition scope exceeds the applicable soft target, RETURN:
       {
         "status": "needs_recursion",
         "reason": "<why>",
@@ -322,20 +324,27 @@ EXIT:
 
 ## Invocation from the orchestrator
 
-Call pattern (pseudocode for the Agent tool):
+Call pattern (pseudocode; choose the active harness):
 
 ```text
+# Claude Code
 Agent({
   description: "<phase-or-category> audit for <partition_id>",
   subagent_type: "general-purpose",
-  model: "opus",
+  prompt: <the filled template above>
+})
+
+# GitHub Copilot CLI
+task({
+  description: "<phase-or-category> audit for <partition_id>",
+  agent_type: "general-purpose",
   prompt: <the filled template above>
 })
 ```
 
 Concurrency: the orchestrator caps in-flight sub-agents at **8**. Rationale:
 avoids rate-limit pressure while keeping Phase 5's partition×category fan-out
-tractable (10 partitions × 11 categories = 110 — batched 8 at a time).
+tractable (10 partitions × 12 categories = 120 — batched 8 at a time).
 
 ## Error handling
 

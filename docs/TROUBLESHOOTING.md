@@ -4,6 +4,33 @@ Common issues running `/security-audit` and how to fix them.
 
 ## Install
 
+### `security-audit` is not discovered by the harness
+
+For Copilot CLI:
+
+```text
+/skills reload
+/skills info security-audit
+```
+
+Its personal path is
+`${COPILOT_HOME:-$HOME/.copilot}/skills/security-audit`; project installs use
+`.github/skills/security-audit`. Claude Code uses
+`~/.claude/skills/security-audit` or `.claude/skills/security-audit`.
+Install the complete bundle with `scripts/install-skill.sh`, not only
+`SKILL.md`.
+
+### Preflight warns about different installed versions
+
+The workflow found multiple Claude/Copilot/Agent Skills copies with different
+`VERSION` values. The first-discovered copy wins and the run continues, but
+the shadowed stale copy is a footgun for the next run on another harness.
+Remove the stale copy, update both clients, or explicitly select one:
+
+```bash
+export AUDIT_SKILL_DIR=/absolute/path/to/security-audit
+```
+
 ### "command not found: semgrep" (after running install-scanners.sh)
 
 The script installs `semgrep` via `pip3 --user`, which lands in
@@ -106,8 +133,9 @@ your Phase 4 sub-agent invocation (documented in
 
 ### Sub-agent returns `needs_recursion`
 
-Your partition exceeds the 500K-token soft limit. The orchestrator
-should auto-split it; if it doesn't, manually narrow the scope:
+Your partition exceeds the active model's context-safe limit (500K tokens is
+the upper soft bound). The orchestrator should auto-split it; if it doesn't,
+manually narrow the scope:
 
 ```
 /security-audit scope: "services/api/users"     # a sub-path of a huge partition

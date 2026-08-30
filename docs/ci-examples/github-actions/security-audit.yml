@@ -1,6 +1,10 @@
-# Example GitHub Actions workflow: run /security-audit on every push +
+# Claude Code reference workflow: run /security-audit on every push +
 # PR + nightly, upload SARIF to the Security tab, fail the PR on CRITICAL
 # findings.
+#
+# This is not a Copilot-hosted workflow. Local Copilot support is exercised via
+# scripts/run-e2e-test.sh --harness copilot; hosted-runner authentication and
+# token scope are still unvalidated.
 #
 # Place this at .github/workflows/security-audit.yml in your repo.
 #

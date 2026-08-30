@@ -18,10 +18,10 @@ if anything is unclear, open a discussion issue first.
   what).
 - **Commits must be signed.** Use `git commit -S` (GPG) or SSH signing
   (`git config commit.gpgsign true` + `gpg.format ssh`).
-- Every AI-assisted commit SHOULD include a
-  `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
-  trailer. This is an honesty / provenance convention, not a legal
-  requirement.
+- Every AI-assisted commit SHOULD include a trailer identifying the actual
+  assistant, for example
+  `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
+  This is an honesty / provenance convention, not a legal requirement.
 
 ## Testing
 
@@ -51,6 +51,14 @@ Before opening a PR:
 4. GitHub Actions will re-run the validation suite on your PR. CI must
    be green before merge.
 
+5. Changes to installation, discovery, subagent dispatch, or E2E harness
+   behavior must pass:
+   ```bash
+   bash tests/test-harness-compat.sh
+   ```
+   Run the billed full E2E with `--harness claude` or `--harness copilot` when
+   claiming end-to-end behavior for that client.
+
 ## What counts as a good PR
 
 - **Correctness-only:** prefer surgical changes. A 3-line fix + 1-line
@@ -66,8 +74,9 @@ Before opening a PR:
 
 - New categories without polyglot dogfood evidence.
 - Changes that weaken the installer's checksum verification.
-- Changes that expose `ANTHROPIC_API_KEY` or user secrets in logs /
-  reports.
+- Changes that expose harness credentials (`ANTHROPIC_API_KEY`,
+  `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`) or user secrets in
+  logs / reports.
 - Changes that enable telemetry without opt-in.
 
 ## Questions

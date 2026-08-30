@@ -1,7 +1,13 @@
 ---
 name: security-audit
-description: "Comprehensive polyglot security audit across 60+ frameworks. Runs a SARIF scanner bundle, fans out 12 parallel deep-dive categories (incl. supply-chain, MCP/agentic and collection-scoping/BOLA-at-list-level), computes severity over composed attack paths rather than asserting it per finding, and emits an OWASP-methodology-tagged report. Invoke when the user says 'run security audit', 'security audit', 'audit security', or passes args like 'mode: delta' / 'scope: services/api' / 'categories: crypto,mitm,secrets' / 'output: docs/security-audit-output'. Typical run 15-60 min (full) or 2-5 min (delta). MANDATORY ARTIFACT CONTRACT: every run MUST write (1) .claude-audit/current/ as your FIRST tool action via mkdir -p; (2) per-phase phase-NN-*.json AND a phase-NN.done marker for each completed phase 0-7 (8 if mode=full) BEFORE moving to the next phase; (3) findings.sarif (SARIF 2.1.0) where EVERY results[] row carries properties.security-severity (CVSS-style numeric) AND properties.cwe (e.g. 'CWE-798' — required for downstream tooling, lookup in lib/cwe-map.json) AND optionally properties.category (one of: auth, idor, token_scope, collection_scope, mitm, crypto, secret_sprawl, deployment, injection, llm, supply_chain, agentic, config); (4) human report LAST, not first. Producing only the human report without the .claude-audit/current/ blackboard is INVALID — delta mode breaks, GitHub Security tab integration breaks, CI gating breaks. If you find yourself reasoning 'the user just wants a summary' — STOP and write the artifacts first. The artifacts ARE the deliverable; the report is the cover page."
+description: "Comprehensive polyglot security audit across 60+ frameworks. Runs SARIF scanners and 12 parallel deep-dive categories (auth, injection, crypto, secrets, supply-chain, MCP/agentic, collection-scoping/BOLA, and more), computes severity over composed attack paths, and emits OWASP-tagged results. Use for 'run security audit', 'security audit', 'audit security', or arguments such as 'mode: delta', 'scope: services/api', 'categories: crypto,mitm,secrets', and 'output: docs/security-audit-output'. Every run must first create .claude-audit/current, write each phase artifact and phase-NN.done marker, emit SARIF 2.1.0 with security-severity and CWE on every result, emit a CycloneDX SBOM, then write the human report last. A report without the machine-readable blackboard is invalid."
 ---
+
+# Supported harnesses
+
+This is one open-standard Agent Skill for Claude Code and GitHub Copilot CLI.
+Use the active harness's tool names through the adapter in `workflow.md §5`;
+the artifact and security contracts are identical on both.
 
 # Mandatory contract before you do anything else
 

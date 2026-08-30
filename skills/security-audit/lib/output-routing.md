@@ -35,9 +35,10 @@ the workflow preflight (`workflow.md §0.5`) and persisted so `mode: delta` and
 2. **Persisted config** — `.claude-audit/config.json` → `.output_dir` (set by a
    prior run in this working tree).
 3. **Interactive prompt** — shown ONLY when ALL of: stdin is a TTY (`[ -t 0 ]`),
-   `$CI` is unset, and neither `--dangerously-skip-permissions` nor
-   `$CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS` is set. One question, default
-   offered:
+   `$CI` is unset, `$AUDIT_NONINTERACTIVE` is not `1`, and neither
+   `--dangerously-skip-permissions` nor
+   `$CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS` is set. Headless runners for any
+   harness set `AUDIT_NONINTERACTIVE=1`. One question, default offered:
    > Where should I write the audit deliverables (report, SARIF, SBOM,
    > baseline)? [default: `docs/security-audit-output/`]
 4. **Non-interactive fallback** — `docs/security-audit-output/`. Never blocks;

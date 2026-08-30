@@ -1,4 +1,4 @@
-# Phase 5 — Parallel Deep Dives (11 categories)
+# Phase 5 — Parallel Deep Dives (12 categories)
 
 ## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
 
@@ -8,14 +8,15 @@
 - `.claude-audit/current/phase-05.done` (marker written only after ALL expected JSONLs exist)
 
 🔁 **Sub-agent fan-out is MANDATORY, not optional:**
-- For each `(category, partition)` pair where the category's gate condition holds, invoke ONE sub-agent via the Agent tool with `subagent_type: "general-purpose"` and the prompt template from `templates/subagent-prompt.md`. Concurrency cap: 8 in flight.
-- **If you find yourself reasoning "I'll just cover all 11 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
+- For each `(category, partition)` pair where the category's gate condition holds, invoke ONE sub-agent through the harness adapter in `workflow.md §5`, using the prompt template from `templates/subagent-prompt.md`. Concurrency cap: 8 in flight.
+- **If you find yourself reasoning "I'll just cover all 12 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
 - Categories whose gating condition is false (e.g., `llm` when `profile.llm_usage.detected == false`) are legitimately skipped — record the skip in `phase-05-skipped.json`. The skipped list always exists; if no categories were skipped, write `{"skipped": []}`.
 
 ⛔ **DO NOT:**
 - Advance to Phase 6 until every applicable `(category × partition)` JSONL exists on disk AND the Verify block prints `phase-05 verified`.
 - Collapse categories into a single `phase-05-tokens.json` / `phase-05-findings.json` / similar consolidated shape — those are v1-era and break Phase 7 per-category aggregation + fixture matching.
-- Downgrade the sub-agent `model` to Haiku/Sonnet — Phase 5 is Opus-only (see §5.4).
+- Select a lightweight sub-agent model. Phase 5 requires the active harness's
+  high-capability general-purpose model (see §5.2).
 
 ---
 
@@ -91,10 +92,11 @@ first half the existing categories already look for. See §5.14.
 
 ## 5.2 — Fan-out procedure
 
-The orchestrator must invoke the **Agent tool** once per applicable
-`(category, partition)` pair. This section is procedural, not a
-template — you call the Agent tool through your normal tool-calling
-protocol, with the parameters described below.
+The orchestrator must invoke the **active harness's general-purpose sub-agent
+primitive** once per applicable `(category, partition)` pair. This section is
+procedural, not a template. Use the adapter in `workflow.md §5`: Claude Code's
+Agent tool takes `subagent_type: "general-purpose"`; GitHub Copilot CLI's
+task/subagent tool takes `agent_type: "general-purpose"`.
 
 ### Step A: compute the pair list
 
@@ -113,10 +115,10 @@ was triggered.
 
 ### Step B: fan out, concurrency cap 8
 
-For each `(c, p)` in the pair list, invoke the Agent tool with:
+For each `(c, p)` in the pair list, invoke the harness sub-agent primitive with:
 - `description`: a short label like `"Deep dive auth on services-api"`
   (one line, ≤80 chars).
-- `subagent_type`: `"general-purpose"`.
+- the host-specific general-purpose selector from `workflow.md §5`.
 - `prompt`: the full prompt body assembled from
   `templates/subagent-prompt.md`, with `{{phase-specific-method-body}}`
   replaced by the contents of the matching `steps/deepdive/cat-NN-<slug>.md`,
@@ -126,22 +128,22 @@ For each `(c, p)` in the pair list, invoke the Agent tool with:
   `$SKILL_DIR/lib/validate-findings.py` etc.).
 
 **Concurrency procedure (cap 8):** maintain a window of up to 8
-in-flight Agent invocations. Emit up to 8 Agent tool-calls in one
+in-flight sub-agent invocations. Emit up to 8 sub-agent tool calls in one
 assistant turn; on the next turn, after the in-flight set has shrunk,
 dispatch the next pair(s) to refill the window. Do not exceed 8 in
-flight. Do not fire all `len(pairs)` Agent calls at once.
+flight. Do not fire all `len(pairs)` sub-agent calls at once.
 
-**Model selection.** Do not pass a `model` parameter — Claude Code
-routes `general-purpose` sub-agents automatically to the
-harness-appropriate Opus variant. Do not downgrade to Sonnet/Haiku.
+**Model selection.** Use the harness's high-capability general-purpose default.
+Do not hardcode a provider-specific model ID and do not select a lightweight
+model. Treat the template's context budgets as upper bounds; split earlier when
+the active model has a lower context limit.
 
 ### Step C: validate each returned JSONL before marking the pair done
 
 `$SKILL_DIR` was resolved during the workflow's first action and saved
 as a bare path to `.claude-audit/.skill-dir`. **Every** Bash invocation
-in this step must re-load it — Claude Code's Bash tool starts a fresh
-shell per call, so the variable does not persist across `(c, p)`
-iterations:
+in this step must re-load it because harness shell calls may start fresh
+shells, so the variable does not persist across `(c, p)` iterations:
 
 ```bash
 SKILL_DIR=$(cat .claude-audit/.skill-dir)
@@ -206,7 +208,7 @@ receive no finding sub-agents.
 ### Anti-pattern seen in earlier runs
 
 A single-shot orchestrator can be tempted to reason "I'll just walk
-through all 11 categories serially in one head-space and write a single
+through all 12 categories serially in one head-space and write a single
 consolidated JSON." **That pattern missed alg:none JWT acceptance,
 2FA trust gaps, zip-slip, and LFI** in v2.0.1's E2E iteration runs —
 all four are bugs that require category-specific deep attention which
@@ -259,7 +261,7 @@ For the sub-agent, the orchestrator substitutes the literal absolute
 path into the prompt (per §5.2 Step B) before the prompt reaches the
 sub-agent. The placeholder shown here as `<absolute-path-to-skill>`
 will arrive at the sub-agent as a real path like
-`/home/user/.claude/skills/security-audit`. **Do not emit this block
+`/home/user/.copilot/skills/security-audit`. **Do not emit this block
 directly to your Bash tool** — it is illustrative of the sub-agent's
 view, not a command for you to run:
 
