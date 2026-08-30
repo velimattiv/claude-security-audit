@@ -1,4 +1,4 @@
-# Phase 5 — Parallel Deep Dives (11 categories)
+# Phase 5 — Parallel Deep Dives (12 categories)
 
 ## 🛑 MANDATORY EXECUTION RULES (READ FIRST)
 
@@ -9,7 +9,7 @@
 
 🔁 **Sub-agent fan-out is MANDATORY, not optional:**
 - For each `(category, partition)` pair where the category's gate condition holds, invoke ONE sub-agent through the harness adapter in `workflow.md §5`, using the prompt template from `templates/subagent-prompt.md`. Concurrency cap: 8 in flight.
-- **If you find yourself reasoning "I'll just cover all 11 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
+- **If you find yourself reasoning "I'll just cover all 12 categories in one synthesis pass to save tokens" — STOP.** Serial single-pass coverage misses deep per-class bugs (alg:none JWT acceptance, 2FA trust gaps, zip-slip, LFI). The E2E regression test in `tests/e2e/` specifically targets these; skipping fan-out regresses the test.
 - Categories whose gating condition is false (e.g., `llm` when `profile.llm_usage.detected == false`) are legitimately skipped — record the skip in `phase-05-skipped.json`. The skipped list always exists; if no categories were skipped, write `{"skipped": []}`.
 
 ⛔ **DO NOT:**
@@ -208,7 +208,7 @@ receive no finding sub-agents.
 ### Anti-pattern seen in earlier runs
 
 A single-shot orchestrator can be tempted to reason "I'll just walk
-through all 11 categories serially in one head-space and write a single
+through all 12 categories serially in one head-space and write a single
 consolidated JSON." **That pattern missed alg:none JWT acceptance,
 2FA trust gaps, zip-slip, and LFI** in v2.0.1's E2E iteration runs —
 all four are bugs that require category-specific deep attention which

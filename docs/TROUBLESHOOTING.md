@@ -20,10 +20,11 @@ Its personal path is
 Install the complete bundle with `scripts/install-skill.sh`, not only
 `SKILL.md`.
 
-### Preflight reports different installed versions
+### Preflight warns about different installed versions
 
 The workflow found multiple Claude/Copilot/Agent Skills copies with different
-`VERSION` values and refused to mix an activated skill with stale resources.
+`VERSION` values. The first-discovered copy wins and the run continues, but
+the shadowed stale copy is a footgun for the next run on another harness.
 Remove the stale copy, update both clients, or explicitly select one:
 
 ```bash

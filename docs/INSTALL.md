@@ -174,8 +174,8 @@ bash ~/Code/csa/scripts/install-skill.sh --harness copilot
 ```
 
 If both Claude and Copilot copies exist at different versions, runtime
-preflight fails rather than silently mixing the activated `SKILL.md` with stale
-resources. Remove the stale copy or set `AUDIT_SKILL_DIR` to the exact bundle
+preflight uses the first-discovered copy and warns about the shadowed stale
+one. Remove the stale copy or set `AUDIT_SKILL_DIR` to the exact bundle
 for that run.
 
 ## Validating the install (full E2E)

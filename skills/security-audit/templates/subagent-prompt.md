@@ -344,7 +344,7 @@ task({
 
 Concurrency: the orchestrator caps in-flight sub-agents at **8**. Rationale:
 avoids rate-limit pressure while keeping Phase 5's partition×category fan-out
-tractable (10 partitions × 11 categories = 110 — batched 8 at a time).
+tractable (10 partitions × 12 categories = 120 — batched 8 at a time).
 
 ## Error handling
 

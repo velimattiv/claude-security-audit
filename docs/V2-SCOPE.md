@@ -20,7 +20,7 @@ Source material: 5 parallel research reports (language coverage, scanner tooling
 3. **Saga checkpointing.** Each phase writes `phase-N.done` + artifact.
    Crash/interrupt recovery scans markers independently of the harness's
    session-resume command.
-4. **Map-reduce per partition, per category.** Fan out along two axes: partition (service/package) × deep-dive category (9). Reduce into a single synthesis.
+4. **Map-reduce per partition, per category.** Fan out along two axes: partition (service/package) × deep-dive category (12 as of v2.5; originally 9). Reduce into a single synthesis.
 5. **Delta mode is first-class.** Baseline artifact lives with the repo. A fresh run against unchanged code is a sub-minute no-op. Incremental review on a PR is the v2 value-add.
 6. **Stay within shared Agent Skills constraints.** No experimental team
    features. Subagents don't spawn subagents; all fan-out is in the main skill

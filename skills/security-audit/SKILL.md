@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: "Comprehensive polyglot security audit across 60+ frameworks. Runs SARIF scanners and 12 parallel deep-dive categories, computes severity over composed attack paths, and emits OWASP-tagged results. Use for 'run security audit', 'security audit', 'audit security', or arguments such as 'mode: delta', 'scope: services/api', 'categories: crypto,mitm,secrets', and 'output: docs/security-audit-output'. Every run must first create .claude-audit/current, write each phase artifact and phase-NN.done marker, emit SARIF 2.1.0 with security-severity and CWE on every result, emit a CycloneDX SBOM, then write the human report last. A report without the machine-readable blackboard is invalid."
+description: "Comprehensive polyglot security audit across 60+ frameworks. Runs SARIF scanners and 12 parallel deep-dive categories (auth, injection, crypto, secrets, supply-chain, MCP/agentic, collection-scoping/BOLA, and more), computes severity over composed attack paths, and emits OWASP-tagged results. Use for 'run security audit', 'security audit', 'audit security', or arguments such as 'mode: delta', 'scope: services/api', 'categories: crypto,mitm,secrets', and 'output: docs/security-audit-output'. Every run must first create .claude-audit/current, write each phase artifact and phase-NN.done marker, emit SARIF 2.1.0 with security-severity and CWE on every result, emit a CycloneDX SBOM, then write the human report last. A report without the machine-readable blackboard is invalid."
 ---
 
 # Supported harnesses

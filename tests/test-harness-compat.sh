@@ -107,9 +107,14 @@ ok "Headless output routing is harness-neutral"
 E2E="$REPO_ROOT/scripts/run-e2e-test.sh"
 grep -Fq -- '--harness claude|copilot' "$E2E" \
   || bad "E2E help does not expose dual harness selection"
+# Anchor flag assertions to the constructed Copilot command array, not the
+# whole file, so a flag surviving only in a comment cannot pass.
+copilot_cmd_block="$(awk '/copilot -p /,/^    \)/' "$E2E")"
+[ -n "$copilot_cmd_block" ] || bad "E2E runner has no Copilot HARNESS_CMD block"
 for flag in --autopilot --max-autopilot-continues --allow-all --no-ask-user \
   '--output-format json' '--stream on'; do
-  grep -Fq -- "$flag" "$E2E" || bad "Copilot E2E path omits $flag"
+  printf '%s\n' "$copilot_cmd_block" | grep -Fq -- "$flag" \
+    || bad "Copilot HARNESS_CMD omits $flag"
 done
 grep -Fq '[ -e "$USER_SKILL_DIR" ] || [ -L "$USER_SKILL_DIR" ]' "$E2E" \
   || bad "E2E backup ignores non-directory prior skill paths"

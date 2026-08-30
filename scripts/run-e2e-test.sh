@@ -74,7 +74,7 @@ while [ $# -gt 0 ]; do
     --min-precision=*)  MIN_PRECISION="${1#*=}"; shift ;;
     --semantic-floor)    SEMANTIC_FLOOR="${2:?--semantic-floor needs a value}"; shift 2 ;;
     --semantic-floor=*)  SEMANTIC_FLOOR="${1#*=}"; shift ;;
-    --help|-h) sed -n '2,43p' "$0"; exit 0 ;;
+    --help|-h) sed -n '2,/^set -eu/p' "$0" | sed '$d'; exit 0 ;;
     "")        break ;;
     *) echo "ERROR: unknown arg '$1'. Use --help." >&2; exit 1 ;;
   esac
@@ -342,10 +342,10 @@ else
   TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
   if [ -z "$TIMEOUT_BIN" ]; then
     echo "WARN: no timeout/gtimeout on PATH — wall-time cap not enforced. Install coreutils." >&2
-    ( cd "$TARGET_DIR" && "${HARNESS_CMD[@]}" | tee "$STREAM_LOG" >/dev/null ) \
+    ( set -o pipefail; cd "$TARGET_DIR" && "${HARNESS_CMD[@]}" | tee "$STREAM_LOG" >/dev/null ) \
       || echo "WARN: $HARNESS exited non-zero. Continuing to assertions." >&2
   else
-    ( cd "$TARGET_DIR" && "$TIMEOUT_BIN" -k 30s "${E2E_TIMEOUT_MIN}m" \
+    ( set -o pipefail; cd "$TARGET_DIR" && "$TIMEOUT_BIN" -k 30s "${E2E_TIMEOUT_MIN}m" \
         "${HARNESS_CMD[@]}" \
         | tee "$STREAM_LOG" >/dev/null ) \
       || {

@@ -67,18 +67,19 @@ else
 fi
 for p in "$@"; do
   if [ -d "$p" ]; then
-    if [ ! -f "$p/VERSION" ]; then
-      echo "ERROR: incomplete security-audit installation at $p (VERSION missing)" >&2
-      exit 1
-    fi
+    for required in VERSION SKILL.md workflow.md manifest.yaml; do
+      if [ ! -f "$p/$required" ]; then
+        echo "ERROR: incomplete security-audit installation at $p ($required missing)" >&2
+        exit 1
+      fi
+    done
     candidate_version=$(tr -d '[:space:]' < "$p/VERSION")
     if [ -z "$SKILL_DIR" ]; then
       SKILL_DIR=$(cd "$p" && pwd -P)
       SKILL_VERSION="$candidate_version"
     elif [ "$candidate_version" != "$SKILL_VERSION" ]; then
-      echo "ERROR: security-audit is installed at different versions: $SKILL_DIR=$SKILL_VERSION, $p=$candidate_version" >&2
-      echo "Remove the stale copy or set AUDIT_SKILL_DIR to the installation this run should use." >&2
-      exit 1
+      echo "WARN: security-audit is installed at different versions: active $SKILL_DIR=$SKILL_VERSION, shadowed $p=$candidate_version" >&2
+      echo "WARN: the active (first-match) copy wins. Remove the stale copy or set AUDIT_SKILL_DIR to select explicitly." >&2
     fi
   fi
 done

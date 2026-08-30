@@ -16,8 +16,9 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Skill preflight now fails loudly when multiple discovered installations have
-  different versions. `AUDIT_SKILL_DIR` selects an intentional copy.
+- Skill preflight warns loudly when multiple discovered installations have
+  different versions (first discovered copy wins) and rejects incomplete
+  bundles. `AUDIT_SKILL_DIR` selects an intentional copy.
 - Headless runners set `AUDIT_NONINTERACTIVE=1`, avoiding an output-directory
   prompt when the harness has disabled user questions.
 
